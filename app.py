@@ -8,25 +8,42 @@ Usage:
     streamlit run app.py
 """
 
-import streamlit as st
-import json
+import os
 import sys
+import json
+import logging
+import warnings
 from pathlib import Path
 from datetime import datetime
 import tempfile
 import hashlib
-import os
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+os.environ['OMP_NUM_THREADS'] = '1'
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+import streamlit as st
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.audio.transcription import transcribe_audio
-from src.audio.image_ocr import ImageOCR, process_images
-from src.preprocessing.text_processing import preprocess_classroom_content
-from src.reasoning.pipeline import ReasoningPipeline
-from src.evaluation.metrics import evaluate_session_output
-from src.study_book.session_manager import SessionManager
-import config
+try:
+    from src.audio.transcription import transcribe_audio
+    from src.audio.image_ocr import ImageOCR, process_images
+    from src.preprocessing.text_processing import preprocess_classroom_content
+    from src.reasoning.pipeline import ReasoningPipeline
+    from src.evaluation.metrics import evaluate_session_output
+    from src.study_book.session_manager import SessionManager
+    import config
+    logger.info("✅ All imports successful")
+except ImportError as e:
+    logger.error(f"❌ Import error: {e}")
+    st.error(f"Failed to import required modules: {e}")
+    st.stop()
 
 
 # ============================================================================
@@ -53,6 +70,48 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+
+# ============================================================================
+# CACHED INITIALIZATION
+# ============================================================================
+
+@st.cache_resource
+def initialize_ocr():
+    """Initialize OCR once and cache it."""
+    try:
+        logger.info("Initializing OCR system...")
+        ocr = ImageOCR()
+        logger.info("✓ OCR initialized successfully")
+        return ocr
+    except Exception as e:
+        logger.error(f"❌ OCR initialization failed: {e}")
+        st.error(f"⚠️ OCR system unavailable: {e}\n\nImage processing will be disabled.")
+        return None
+
+@st.cache_resource
+def initialize_pipeline():
+    """Initialize reasoning pipeline once."""
+    try:
+        logger.info("Initializing reasoning pipeline...")
+        pipeline = ReasoningPipeline()
+        logger.info("✓ Pipeline initialized")
+        return pipeline
+    except Exception as e:
+        logger.error(f"❌ Pipeline initialization failed: {e}")
+        raise
+
+@st.cache_resource
+def initialize_session_manager():
+    """Initialize session manager once."""
+    try:
+        logger.info("Initializing session manager...")
+        manager = SessionManager()
+        logger.info("✓ Session manager initialized")
+        return manager
+    except Exception as e:
+        logger.error(f"❌ Session manager initialization failed: {e}")
+        raise
 
 
 # ============================================================================

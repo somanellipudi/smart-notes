@@ -45,31 +45,35 @@ class ImageOCR:
     
     def __init__(self):
         """
-        Initialize OCR processor.
+        Initialize OCR processor with error handling for Streamlit Cloud.
         """
         self.reader = None
         self.ocr_backend = None
         
-        # Re-check backend in case it was just installed
-        easyocr_ok = _check_easyocr()
-        
-        logger.info(f"OCR Init: easyocr={easyocr_ok}")
-        
-        # Try to initialize EasyOCR
-        if easyocr_ok:
-            try:
-                logger.info("Initializing EasyOCR...")
-                import easyocr
-                self.reader = easyocr.Reader(['en'], gpu=False)
-                self.ocr_backend = "easyocr"
-                logger.info("✓ EasyOCR initialized successfully")
-            except Exception as e:
-                logger.warning(f"❌ Failed to initialize EasyOCR: {e}")
-        
-        if self.ocr_backend is None:
-            raise ImportError("EasyOCR is not available. Install with: pip install easyocr")
-        
-        logger.info(f"✓ ImageOCR initialized with {self.ocr_backend}")
+        try:
+            # Re-check backend in case it was just installed
+            easyocr_ok = _check_easyocr()
+            
+            logger.info(f"OCR Init: easyocr={easyocr_ok}")
+            
+            # Try to initialize EasyOCR
+            if easyocr_ok:
+                try:
+                    logger.info("Initializing EasyOCR...")
+                    import easyocr
+                    # Use with cache to avoid re-downloading on Streamlit reruns
+                    self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory='/tmp/easyocr')
+                    self.ocr_backend = "easyocr"
+                    logger.info("✓ EasyOCR initialized successfully")
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize EasyOCR: {e}")
+                    raise
+            else:
+                raise ImportError("EasyOCR module not found")
+                
+        except Exception as e:
+            logger.error(f"❌ OCR initialization failed: {e}")
+            raise RuntimeError(f"OCR system unavailable: {e}")
     
     def extract_text_from_image(
         self,
