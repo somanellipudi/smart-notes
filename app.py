@@ -38,6 +38,8 @@ try:
     from src.reasoning.pipeline import ReasoningPipeline
     from src.evaluation.metrics import evaluate_session_output
     from src.study_book.session_manager import SessionManager
+    from src.llm_provider import LLMProviderFactory
+    from src.output_formatter import StreamingOutputDisplay
     import config
     logger.info("✅ All imports successful")
 except ImportError as e:
@@ -491,6 +493,69 @@ def display_output(result: dict):
 
 def main():
     """Main Streamlit application."""
+    
+    # ====================================================================
+    # SIDEBAR - LLM SELECTION
+    # ====================================================================
+    
+    with st.sidebar:
+        st.title("⚙️ Settings")
+        st.divider()
+        
+        # LLM Selection
+        st.subheader("🤖 AI Model")
+        
+        # Check available LLM providers
+        available_providers = LLMProviderFactory.get_available_providers(
+            openai_api_key=config.OPENAI_API_KEY,
+            ollama_url="http://localhost:11434"
+        )
+        
+        provider_options = []
+        provider_map = {}
+        
+        if available_providers.get("OpenAI (GPT-4)", False):
+            provider_options.append("🌐 OpenAI (GPT-4)")
+            provider_map["🌐 OpenAI (GPT-4)"] = "openai"
+        
+        if available_providers.get("Local LLM - Ollama", False):
+            provider_options.append("💻 Local LLM (Ollama)")
+            provider_map["💻 Local LLM (Ollama)"] = "ollama"
+        
+        if not provider_options:
+            st.error("❌ No LLM providers available!\n\nPlease:\n1. Set OPENAI_API_KEY in .env\n2. Or run Ollama locally at http://localhost:11434")
+            st.stop()
+        
+        selected_llm = st.radio(
+            "Choose AI model:",
+            provider_options,
+            index=0,
+            help="OpenAI uses cloud API. Local LLM runs on your machine (faster, free, private)."
+        )
+        
+        llm_type = provider_map[selected_llm]
+        
+        if llm_type == "ollama":
+            st.success("💻 Using Local LLM - Faster & Private!")
+            st.caption("Running on your machine · No API calls")
+        else:
+            st.info("🌐 Using OpenAI - Higher quality")
+            st.caption(f"Model: GPT-4")
+        
+        # Processing options
+        st.divider()
+        st.subheader("⚡ Processing")
+        
+        enable_streaming = st.checkbox("Stream results", value=True, help="Show results as they're generated")
+        
+        processing_depth = st.select_slider(
+            "Processing depth",
+            options=["Fast", "Balanced", "Thorough"],
+            value="Balanced",
+            help="Affects both quality and speed"
+        )
+        
+        st.divider()
     
     # Title and description
     st.title("Smart Notes")
