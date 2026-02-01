@@ -40,6 +40,8 @@ try:
     from src.study_book.session_manager import SessionManager
     from src.llm_provider import LLMProviderFactory
     from src.output_formatter import StreamingOutputDisplay
+    from src.reasoning.fallback_handler import FallbackGenerator, PipelineEnhancer
+    from src.streamlit_display import StreamlitProgressDisplay, QuickExportButtons
     import config
     logger.info("✅ All imports successful")
 except ImportError as e:
@@ -268,7 +270,7 @@ def _image_hash(image_bytes: bytes) -> str:
 
 def display_output(result: dict):
     """
-    Display structured output in organized sections.
+    Display structured output using new streaming display system.
     
     Args:
         result: Result dictionary from process_session
@@ -276,46 +278,96 @@ def display_output(result: dict):
     output = result["output"]
     evaluation = result["evaluation"]
     
+    # Initialize display system
+    display = StreamlitProgressDisplay()
+    display.setup_display()
+    
+    # ========================================================================
+    # SMART OUTPUT DISPLAY (Student-Friendly)
+    # ========================================================================
+    
+    output_dict = {
+        "summary": output.summary if hasattr(output, 'summary') else "",
+        "topics": [
+            {
+                "title": t.title,
+                "description": t.description,
+                "importance": t.importance
+            } for t in (output.topics or [])
+        ],
+        "concepts": [
+            {
+                "name": c.name,
+                "definition": c.definition,
+                "importance": c.importance
+            } for c in (output.key_concepts or [])
+        ],
+        "equations": [
+            {
+                "equation": e.equation,
+                "explanation": e.explanation
+            } for e in (output.equations or [])
+        ],
+        "misconceptions": [
+            {
+                "misconception": m.misconception,
+                "correct_understanding": m.correct_understanding
+            } for m in (output.common_mistakes or [])
+        ],
+        "faqs": [
+            {
+                "question": f.question,
+                "answer": f.answer,
+                "difficulty": f.difficulty
+            } for f in (output.faqs or [])
+        ],
+        "worked_examples": [
+            {
+                "problem": e.problem,
+                "solution": e.solution,
+                "explanation": e.explanation
+            } for e in (output.worked_examples or [])
+        ],
+    }
+    
+    # Display results
+    display.display_streaming_output(output_dict)
+    
     # ========================================================================
     # EVALUATION METRICS
     # ========================================================================
     
-    st.header("Evaluation")
+    st.divider()
+    st.header("📊 Quality Metrics")
     
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.metric(
-            "Reasoning Correctness",
-            f"{evaluation.reasoning_correctness:.2%}",
-            help="Accuracy of extracted educational reasoning"
+            "Correctness",
+            f"{evaluation.reasoning_correctness:.0%}",
+            help="Reasoning accuracy"
         )
     
     with col2:
         st.metric(
-            "Structural Accuracy",
-            f"{evaluation.structural_accuracy:.2%}",
-            help="Completeness and well-formedness of output"
+            "Completeness",
+            f"{evaluation.structural_accuracy:.0%}",
+            help="Output completeness"
         )
     
     with col3:
         st.metric(
-            "Hallucination Rate",
-            f"{evaluation.hallucination_rate:.2%}",
-            delta=f"{-evaluation.hallucination_rate:.2%}",
-            delta_color="inverse",
-            help="Estimated rate of unsupported content (lower is better)"
+            "Accuracy",
+            f"{(1-evaluation.hallucination_rate):.0%}",
+            help="Fact accuracy"
         )
     
     with col4:
         st.metric(
-            "Educational Usefulness",
-            f"{evaluation.educational_usefulness:.1f}/5.0",
-            help="Pedagogical value score"
-        )
-    
-    # Pass/Fail indicator
-    if evaluation.passes_thresholds():
+            "Usefulness",
+            f"{evaluation.educational_usefulness:.1f}/5",
+            help="Educational value"
         st.success("✅ **PASSES** quality thresholds")
     else:
         st.warning("⚠️ **FAILS** quality thresholds")
@@ -701,23 +753,13 @@ def main():
             )
             
             # Display results
-            st.success("Processing complete.")
+            st.success("✅ Processing complete!")
             st.divider()
             display_output(result)
             
-            # Download option
+            # Export buttons
             st.divider()
-            st.header("Export")
-            
-            json_output = result["output"].to_json()
-            
-            st.download_button(
-                label="Download JSON",
-                data=json_output,
-                file_name=f"{session_id}.json",
-                mime="application/json"
-            )
-
+            QuickExportButtons.show_export_buttons(output_dict if 'output_dict' in locals() else {}, session_id)
 
 
 if __name__ == "__main__":
