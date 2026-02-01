@@ -290,23 +290,23 @@ def display_output(result: dict):
         "summary": output.summary if hasattr(output, 'summary') else "",
         "topics": [
             {
-                "title": t.title,
-                "description": t.description,
-                "importance": t.importance
+                "name": t.name,
+                "summary": t.summary,
+                "subtopics": t.subtopics if hasattr(t, 'subtopics') else []
             } for t in (output.topics or [])
         ],
         "concepts": [
             {
                 "name": c.name,
                 "definition": c.definition,
-                "importance": c.importance
+                "difficulty": c.difficulty_level if hasattr(c, 'difficulty_level') else 3
             } for c in (output.key_concepts or [])
         ],
         "equations": [
             {
                 "equation": e.equation,
                 "explanation": e.explanation
-            } for e in (output.equations or [])
+            } for e in (output.equation_explanations or [])
         ],
         "misconceptions": [
             {
@@ -325,7 +325,7 @@ def display_output(result: dict):
             {
                 "problem": e.problem,
                 "solution": e.solution,
-                "explanation": e.explanation
+                "key_concepts": e.key_concepts if hasattr(e, 'key_concepts') else []
             } for e in (output.worked_examples or [])
         ],
     }
