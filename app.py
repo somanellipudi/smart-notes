@@ -368,6 +368,9 @@ def display_output(result: dict):
             "Usefulness",
             f"{evaluation.educational_usefulness:.1f}/5",
             help="Educational value"
+        )
+    
+    if evaluation.passes_thresholds():
         st.success("✅ **PASSES** quality thresholds")
     else:
         st.warning("⚠️ **FAILS** quality thresholds")
