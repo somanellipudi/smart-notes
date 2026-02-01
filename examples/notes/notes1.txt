@@ -1,0 +1,36 @@
+Today: Introduction to Derivatives
+
+Key Ideas:
+- Derivative = rate of change
+- Instantaneous vs average rate
+- Geometric interpretation: slope of tangent line
+- Notation: dy/dx, f'(x), df/dx
+
+Definition:
+The derivative of f at x is:
+lim (h→0) [f(x+h) - f(x)] / h
+
+This is called the difference quotient.
+
+Example 1: f(x) = x²
+Find f'(x) using the definition.
+
+Solution:
+f'(x) = lim (h→0) [(x+h)² - x²] / h
+     = lim (h→0) [x² + 2xh + h² - x²] / h
+     = lim (h→0) [2xh + h²] / h
+     = lim (h→0) [2x + h]
+     = 2x
+
+Therefore: d/dx(x²) = 2x
+
+Common Mistakes:
+- Forgetting the limit process
+- Dividing by zero before taking the limit
+- Confusing average rate with instantaneous rate
+
+Real-world applications:
+- Velocity (rate of change of position)
+- Acceleration (rate of change of velocity)
+- Marginal cost in economics
+- Population growth rates

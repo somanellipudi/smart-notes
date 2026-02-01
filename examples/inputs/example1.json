@@ -1,0 +1,13 @@
+{
+  "session_id": "calculus101_derivatives_intro",
+  "handwritten_notes": "Today: Introduction to Derivatives\n\nKey Ideas:\n- Derivative = rate of change\n- Instantaneous vs average rate\n- Geometric interpretation: slope of tangent line\n- Notation: dy/dx, f'(x), df/dx\n\nDefinition:\nThe derivative of f at x is:\nlim (h→0) [f(x+h) - f(x)] / h\n\nThis is called the difference quotient.\n\nExample 1: f(x) = x²\nFind f'(x) using the definition.\n\nSolution:\nf'(x) = lim (h→0) [(x+h)² - x²] / h\n     = lim (h→0) [x² + 2xh + h² - x²] / h\n     = lim (h→0) [2xh + h²] / h\n     = lim (h→0) [2x + h]\n     = 2x\n\nTherefore: d/dx(x²) = 2x\n\nCommon Mistakes:\n- Forgetting the limit process\n- Dividing by zero before taking the limit\n- Confusing average rate with instantaneous rate\n\nReal-world applications:\n- Velocity (rate of change of position)\n- Acceleration (rate of change of velocity)\n- Marginal cost in economics\n- Population growth rates",
+  "lecture_audio_path": "examples/audio/lecture1_placeholder.txt",
+  "equations": [
+    "dy/dx = lim(h→0) [f(x+h)-f(x)]/h",
+    "d/dx(x²) = 2x",
+    "d/dx(x^n) = nx^(n-1)",
+    "v(t) = dx/dt",
+    "a(t) = dv/dt"
+  ],
+  "external_context": "From Calculus Textbook Chapter 3 - Derivatives:\n\nThe derivative is one of the fundamental concepts in calculus. It measures how a function changes as its input changes. More precisely, the derivative of a function at a point is the instantaneous rate of change of the function at that point.\n\nGeometric Interpretation: The derivative at a point represents the slope of the tangent line to the function's graph at that point. This connects the algebraic definition with visual understanding. If you zoom in sufficiently on a smooth curve at any point, it looks like a straight line - that line is the tangent, and its slope is the derivative.\n\nPhysical Interpretation: In physics, if s(t) represents position as a function of time, then s'(t) represents velocity - the instantaneous rate of change of position. Similarly, if v(t) is velocity, then v'(t) is acceleration - the rate of change of velocity.\n\nThe limit definition, while fundamental, can be tedious to apply. In subsequent sections, we'll develop rules and shortcuts for computing derivatives efficiently, such as the power rule, product rule, quotient rule, and chain rule.\n\nHistorical Note: The derivative was developed independently by Isaac Newton and Gottfried Wilhelm Leibniz in the 17th century, though they used different notations. Newton used f'(x) or ẋ, while Leibniz used dy/dx. Leibniz's notation is particularly useful because it reminds us that the derivative is a ratio of infinitesimal changes."
+}

@@ -1,0 +1,4 @@
+# System-level dependencies for Streamlit Cloud
+# Required for EasyOCR and image processing
+libgl1-mesa-glx
+libglib2.0-0

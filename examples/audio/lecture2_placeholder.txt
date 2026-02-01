@@ -1,0 +1,14 @@
+# Placeholder for lecture2.wav
+# 
+# This file represents where an actual audio file would be stored.
+# For the research demo, replace this placeholder with a real audio file
+# to enable transcription.
+#
+# To use real audio:
+# 1. Record or obtain a lecture audio file (.wav, .mp3)
+# 2. Replace this file with the actual audio
+# 3. Update example2.json to reference the correct path
+# 4. Run the app
+#
+# Expected format: WAV, MP3, M4A
+# Recommended: 16kHz sample rate for optimal transcription

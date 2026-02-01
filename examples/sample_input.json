@@ -1,0 +1,11 @@
+{
+  "session_id": "calculus101_2026-01-31_derivatives_intro",
+  "handwritten_notes": "Today: Introduction to Derivatives\n\nKey Ideas:\n- Derivative = rate of change\n- Instantaneous vs average rate\n- Geometric interpretation: slope of tangent line\n- Notation: dy/dx, f'(x), df/dx\n\nDefinition:\nThe derivative of f at x is:\nlim (h→0) [f(x+h) - f(x)] / h\n\nThis is called the difference quotient.\n\nExample 1: f(x) = x²\nFind f'(x) using the definition.\nSolution:\nf'(x) = lim (h→0) [(x+h)² - x²] / h\n     = lim (h→0) [x² + 2xh + h² - x²] / h\n     = lim (h→0) [2xh + h²] / h\n     = lim (h→0) [2x + h]\n     = 2x\n\nTherefore: d/dx(x²) = 2x\n\nCommon Mistakes:\n- Forgetting the limit process\n- Dividing by zero before taking the limit\n- Confusing average rate with instantaneous rate\n\nReal-world applications:\n- Velocity (rate of change of position)\n- Acceleration (rate of change of velocity)\n- Marginal cost in economics\n- Population growth rates",
+  "lecture_audio_path": "data/lecture_2026-01-31.wav",
+  "equations": [
+    "dy/dx = lim(h→0) [f(x+h)-f(x)]/h",
+    "d/dx(x²) = 2x",
+    "v(t) = dx/dt"
+  ],
+  "external_context": "From Calculus Textbook Chapter 3:\n\nThe derivative is one of the fundamental concepts in calculus. It measures how a function changes as its input changes. More precisely, the derivative of a function at a point is the instantaneous rate of change of the function at that point.\n\nGeometric Interpretation: The derivative at a point represents the slope of the tangent line to the function's graph at that point. This connects the algebraic definition with visual understanding.\n\nPhysical Interpretation: In physics, if s(t) represents position as a function of time, then s'(t) represents velocity. Similarly, if v(t) is velocity, then v'(t) is acceleration.\n\nThe limit definition, while fundamental, can be tedious to apply. In subsequent sections, we'll develop rules and shortcuts for computing derivatives efficiently."
+}

@@ -1,0 +1,48 @@
+Lecture: Integration and Antiderivatives
+
+Main Topics:
+- Integration as reverse of differentiation
+- Indefinite integrals
+- Fundamental Theorem of Calculus (Part 1)
+- Integration techniques: substitution
+
+Key Concepts:
+
+1. Antiderivative
+   F(x) is an antiderivative of f(x) if F'(x) = f(x)
+   
+2. Indefinite Integral
+   ∫f(x)dx = F(x) + C
+   where C is the constant of integration
+
+3. Power Rule for Integration
+   ∫x^n dx = (x^(n+1))/(n+1) + C  (for n ≠ -1)
+
+Example 1: Find ∫3x² dx
+Solution:
+∫3x² dx = 3∫x² dx
+        = 3 · (x³/3) + C
+        = x³ + C
+
+Check: d/dx(x³ + C) = 3x² ✓
+
+Example 2: Substitution Method
+Find ∫2x(x²+1)⁵ dx
+
+Let u = x² + 1
+Then du = 2x dx
+
+∫2x(x²+1)⁵ dx = ∫u⁵ du
+                = u⁶/6 + C
+                = (x²+1)⁶/6 + C
+
+Common Mistakes:
+- Forgetting the constant of integration C
+- Incorrect application of substitution
+- Not checking the result by differentiating
+
+Applications:
+- Finding displacement from velocity
+- Calculating area under curves
+- Probability distributions
+- Accumulated quantities
