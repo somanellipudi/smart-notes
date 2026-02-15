@@ -19,6 +19,7 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 import config
+from src.llm_provider import LLMProviderFactory
 from src.schema.output_schema import (
     ClassSessionOutput,
     Topic,
@@ -52,7 +53,14 @@ class ReasoningPipeline:
         7. Worked Example Analysis
     """
     
-    def __init__(self, model: str = None, temperature: float = None):
+    def __init__(
+        self,
+        model: str = None,
+        temperature: float = None,
+        provider_type: str = "openai",
+        api_key: str = None,
+        ollama_url: str = None
+    ):
         """
         Initialize the reasoning pipeline.
         
@@ -62,20 +70,26 @@ class ReasoningPipeline:
         """
         self.model = model or config.LLM_MODEL
         self.temperature = temperature or config.LLM_TEMPERATURE
-        self.client = None
+        self.provider_type = provider_type or "openai"
+        self.provider = None
         
-        if not OPENAI_AVAILABLE:
-            raise ImportError("OpenAI SDK not installed. Install with: pip install openai")
-
-        api_key = config.OPENAI_API_KEY
-        if not api_key:
-            raise ValueError("OpenAI API key not set. Please set OPENAI_API_KEY in .env")
-
-        self.client = OpenAI(api_key=api_key)
+        if self.provider_type == "openai":
+            if not OPENAI_AVAILABLE:
+                raise ImportError("OpenAI SDK not installed. Install with: pip install openai")
+            api_key = api_key or config.OPENAI_API_KEY
+            if not api_key:
+                raise ValueError("OpenAI API key not set. Please set OPENAI_API_KEY in .env")
+        
+        self.provider = LLMProviderFactory.create_provider(
+            provider_type=self.provider_type,
+            api_key=api_key or config.OPENAI_API_KEY,
+            ollama_url=ollama_url or config.OLLAMA_URL,
+            model=self.model
+        )
         
         logger.info(
-            f"ReasoningPipeline initialized: model={self.model}, "
-            f"temperature={self.temperature}"
+            f"ReasoningPipeline initialized: provider={self.provider_type}, "
+            f"model={self.model}, temperature={self.temperature}"
         )
     
     def _call_llm(self, prompt: str, system_prompt: str = None, response_format: Dict[str, Any] = None) -> str:
@@ -95,15 +109,14 @@ class ReasoningPipeline:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
             
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self.provider.chat_completion(
                 messages=messages,
                 temperature=self.temperature,
                 max_tokens=2000,
                 response_format=response_format
             )
             
-            return response.choices[0].message.content.strip()
+            return response.strip()
         
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
@@ -608,7 +621,25 @@ Extract up to {config.MAX_WORKED_EXAMPLES} most illustrative examples.
             "Create a comprehensive yet concise summary."
         )
         
-        user_prompt = f"""
+        # Fast path: if no topics/concepts provided (filtered out), generate summary directly from content
+        if not topics and not concepts:
+            logger.info("Fast summary mode (no topics/concepts)")
+            user_prompt = f"""
+Create a comprehensive 2-3 paragraph summary of this educational content:
+
+CONTENT:
+{content[:3000]}
+
+The summary should:
+1. Provide a high-level overview of what was covered
+2. Highlight the most important points and key takeaways
+3. Be clear, concise, and suitable for study purposes
+
+Return only the summary text, no extra formatting.
+"""
+        else:
+            # Standard mode with topics/concepts
+            user_prompt = f"""
 Create a comprehensive 2-3 paragraph summary of this class session:
 
 TOPICS COVERED:
@@ -635,7 +666,8 @@ The summary should:
         combined_content: str,
         equations: List[str],
         external_context: str = "",
-        session_id: str = None
+        session_id: str = None,
+        output_filters: Dict[str, bool] = None
     ) -> ClassSessionOutput:
         """
         Execute full multi-stage reasoning pipeline.
@@ -648,43 +680,100 @@ The summary should:
             equations: List of equations to interpret
             external_context: Optional reference material
             session_id: Unique session identifier
+            output_filters: Dict of section names to booleans to skip unnecessary processing
         
         Returns:
             ClassSessionOutput with all extracted knowledge
         """
         logger.info("=" * 60)
         logger.info("Starting multi-stage reasoning pipeline")
+        if output_filters:
+            logger.info(f"Output filters: {output_filters}")
         logger.info("=" * 60)
         
+        if output_filters is None:
+            output_filters = {
+                'summary': True,
+                'topics': True,
+                'concepts': True,
+                'equations': True,
+                'misconceptions': True,
+                'faqs': True,
+                'worked_examples': True,
+                'real_world': True
+            }
+        
+        logger.info(f"Stage execution plan: summary={output_filters.get('summary', True)}, topics={output_filters.get('topics', True)}, concepts={output_filters.get('concepts', True)}, equations={output_filters.get('equations', True)}, misconceptions={output_filters.get('misconceptions', True)}, faqs={output_filters.get('faqs', True)}, worked_examples={output_filters.get('worked_examples', True)}, real_world={output_filters.get('real_world', True)}")
+        
         # Stage 1: Topic Identification
-        topics = self.stage1_identify_topics(combined_content, external_context)
+        if output_filters.get('topics', True):
+            logger.info(">>> Executing Stage 1: Topic Identification")
+            topics = self.stage1_identify_topics(combined_content, external_context)
+        else:
+            logger.info(">>> Skipping Stage 1: Topic Identification (filtered)")
+            topics = []
         
         # Stage 2: Concept Extraction
-        concepts = self.stage2_extract_concepts(combined_content, topics, external_context)
+        if output_filters.get('concepts', True):
+            logger.info(">>> Executing Stage 2: Concept Extraction")
+            concepts = self.stage2_extract_concepts(combined_content, topics, external_context)
+        else:
+            logger.info(">>> Skipping Stage 2: Concept Extraction (filtered)")
+            concepts = []
         
         # Stage 3: Equation Interpretation
-        equation_explanations = self.stage3_interpret_equations(
-            equations, combined_content, concepts
-        )
+        if output_filters.get('equations', True):
+            logger.info(">>> Executing Stage 3: Equation Interpretation")
+            equation_explanations = self.stage3_interpret_equations(
+                equations, combined_content, concepts
+            )
+        else:
+            logger.info(">>> Skipping Stage 3: Equation Interpretation (filtered)")
+            equation_explanations = []
         
         # Stage 4: Misconception Detection
-        misconceptions = self.stage4_detect_misconceptions(
-            combined_content, concepts, external_context
-        )
+        if output_filters.get('misconceptions', True):
+            logger.info(">>> Executing Stage 4: Misconception Detection")
+            misconceptions = self.stage4_detect_misconceptions(
+                combined_content, concepts, external_context
+            )
+        else:
+            logger.info(">>> Skipping Stage 4: Misconception Detection (filtered)")
+            misconceptions = []
         
         # Stage 5: FAQ Generation
-        faqs = self.stage5_generate_faqs(combined_content, concepts, topics)
+        if output_filters.get('faqs', True):
+            logger.info(">>> Executing Stage 5: FAQ Generation")
+            faqs = self.stage5_generate_faqs(combined_content, concepts, topics)
+        else:
+            logger.info(">>> Skipping Stage 5: FAQ Generation (filtered)")
+            faqs = []
         
         # Stage 6: Real-World Connections
-        real_world_connections = self.stage6_real_world_connections(
-            concepts, combined_content
-        )
+        if output_filters.get('real_world', True):
+            logger.info(">>> Executing Stage 6: Real-World Connections")
+            real_world_connections = self.stage6_real_world_connections(
+                concepts, combined_content
+            )
+        else:
+            logger.info(">>> Skipping Stage 6: Real-World Connections (filtered)")
+            real_world_connections = []
         
         # Stage 7: Worked Examples
-        worked_examples = self.stage7_analyze_examples(combined_content, concepts)
+        if output_filters.get('worked_examples', True):
+            logger.info(">>> Executing Stage 7: Worked Examples")
+            worked_examples = self.stage7_analyze_examples(combined_content, concepts)
+        else:
+            logger.info(">>> Skipping Stage 7: Worked Examples (filtered)")
+            worked_examples = []
         
         # Generate summary
-        class_summary = self.generate_class_summary(combined_content, topics, concepts)
+        if output_filters.get('summary', True):
+            logger.info(">>> Executing Summary Generation")
+            class_summary = self.generate_class_summary(combined_content, topics, concepts)
+        else:
+            logger.info(">>> Skipping Summary Generation (filtered)")
+            class_summary = ""
 
         # If structured outputs are empty, retry stages using the summary as context
         if (
@@ -698,19 +787,26 @@ The summary should:
             and not real_world_connections
         ):
             enriched_content = f"SUMMARY:\n{class_summary}\n\nSOURCE CONTENT:\n{combined_content}"
-            topics = self.stage1_identify_topics(enriched_content, external_context)
-            concepts = self.stage2_extract_concepts(enriched_content, topics, external_context)
-            equation_explanations = self.stage3_interpret_equations(
-                equations, enriched_content, concepts
-            )
-            misconceptions = self.stage4_detect_misconceptions(
-                enriched_content, concepts, external_context
-            )
-            faqs = self.stage5_generate_faqs(enriched_content, concepts, topics)
-            real_world_connections = self.stage6_real_world_connections(
-                concepts, enriched_content
-            )
-            worked_examples = self.stage7_analyze_examples(enriched_content, concepts)
+            if output_filters.get('topics', True):
+                topics = self.stage1_identify_topics(enriched_content, external_context)
+            if output_filters.get('concepts', True):
+                concepts = self.stage2_extract_concepts(enriched_content, topics, external_context)
+            if output_filters.get('equations', True):
+                equation_explanations = self.stage3_interpret_equations(
+                    equations, enriched_content, concepts
+                )
+            if output_filters.get('misconceptions', True):
+                misconceptions = self.stage4_detect_misconceptions(
+                    enriched_content, concepts, external_context
+                )
+            if output_filters.get('faqs', True):
+                faqs = self.stage5_generate_faqs(enriched_content, concepts, topics)
+            if output_filters.get('real_world', True):
+                real_world_connections = self.stage6_real_world_connections(
+                    concepts, enriched_content
+                )
+            if output_filters.get('worked_examples', True):
+                worked_examples = self.stage7_analyze_examples(enriched_content, concepts)
         
         # Assemble output
         output = ClassSessionOutput(
@@ -730,7 +826,8 @@ The summary should:
                 "num_topics": len(topics),
                 "num_concepts": len(concepts),
                 "num_equations": len(equation_explanations),
-                "num_examples": len(worked_examples)
+                "num_examples": len(worked_examples),
+                "filters_applied": output_filters
             }
         )
         

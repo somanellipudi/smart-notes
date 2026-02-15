@@ -72,6 +72,10 @@ LLM_TOP_P = float(os.getenv("LLM_TOP_P", "1.0"))
 LLM_FREQUENCY_PENALTY = float(os.getenv("LLM_FREQUENCY_PENALTY", "0.0"))
 LLM_PRESENCE_PENALTY = float(os.getenv("LLM_PRESENCE_PENALTY", "0.0"))
 
+# Ollama configuration
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral")
+
 # Timeout configuration for API calls
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "3"))
@@ -162,6 +166,136 @@ ENABLE_MULTI_LANGUAGE = os.getenv("ENABLE_MULTI_LANGUAGE", "false").lower() == "
 ENABLE_REAL_TIME_STREAMING = os.getenv("ENABLE_REAL_TIME_STREAMING", "false").lower() == "true"
 
 
+# ==================== VERIFIABLE MODE ====================
+
+# Enable verifiable mode for research-oriented, evidence-grounded generation
+ENABLE_VERIFIABLE_MODE = os.getenv("ENABLE_VERIFIABLE_MODE", "true").lower() == "true"
+
+# Claim validation thresholds
+VERIFIABLE_VERIFIED_THRESHOLD = float(os.getenv("VERIFIABLE_VERIFIED_THRESHOLD", "0.5"))
+VERIFIABLE_REJECTED_THRESHOLD = float(os.getenv("VERIFIABLE_REJECTED_THRESHOLD", "0.2"))
+VERIFIABLE_MIN_EVIDENCE = int(os.getenv("VERIFIABLE_MIN_EVIDENCE", "1"))
+VERIFIABLE_MAX_EVIDENCE_PER_CLAIM = int(os.getenv("VERIFIABLE_MAX_EVIDENCE_PER_CLAIM", "5"))
+VERIFIABLE_MIN_INDEPENDENT_SOURCES = int(os.getenv("VERIFIABLE_MIN_INDEPENDENT_SOURCES", "1"))
+
+# Evidence retrieval settings
+VERIFIABLE_MIN_EVIDENCE_LENGTH = int(os.getenv("VERIFIABLE_MIN_EVIDENCE_LENGTH", "15"))
+VERIFIABLE_RELEVANCE_THRESHOLD = float(os.getenv("VERIFIABLE_RELEVANCE_THRESHOLD", "0.2"))
+
+# Evidence consistency scoring (hybrid: rule-based + model-based)
+VERIFIABLE_CONSISTENCY_ENABLED = os.getenv("VERIFIABLE_CONSISTENCY_ENABLED", "true").lower() == "true"
+VERIFIABLE_CONSISTENCY_PROVIDER = os.getenv("VERIFIABLE_CONSISTENCY_PROVIDER", "ollama")
+VERIFIABLE_CONSISTENCY_THRESHOLD = float(os.getenv("VERIFIABLE_CONSISTENCY_THRESHOLD", "0.5"))
+
+# Agent configuration
+VERIFIABLE_AGENT_MIN_CONFIDENCE = float(os.getenv("VERIFIABLE_AGENT_MIN_CONFIDENCE", "0.4"))
+VERIFIABLE_STRICT_MODE = os.getenv("VERIFIABLE_STRICT_MODE", "true").lower() == "true"
+
+
+# ==================== INTERACTIVE VERIFIABILITY ASSESSMENT (RESEARCH) ====================
+
+# Input sufficiency thresholds (for pre-generation warnings)
+VERIFIABLE_MIN_INPUT_TOKENS = int(os.getenv("VERIFIABLE_MIN_INPUT_TOKENS", "100"))
+VERIFIABLE_MIN_INPUT_CHUNKS = int(os.getenv("VERIFIABLE_MIN_INPUT_CHUNKS", "2"))
+
+# Negative control detection (all evidence = 0 scenario)
+VERIFIABLE_NEGATIVE_CONTROL_THRESHOLD = float(os.getenv("VERIFIABLE_NEGATIVE_CONTROL_THRESHOLD", "0.0"))
+"""Evidence nodes count below which we mark as negative control"""
+
+# Graph export settings
+VERIFIABLE_GRAPH_EXPORT_FORMATS = ["graphml", "json", "png"]
+VERIFIABLE_GRAPH_DPI = int(os.getenv("VERIFIABLE_GRAPH_DPI", "150"))
+VERIFIABLE_GRAPH_FIGSIZE_WIDTH = int(os.getenv("VERIFIABLE_GRAPH_FIGSIZE_WIDTH", "14"))
+VERIFIABLE_GRAPH_FIGSIZE_HEIGHT = int(os.getenv("VERIFIABLE_GRAPH_FIGSIZE_HEIGHT", "10"))
+
+# High rejection rate warning
+VERIFIABLE_HIGH_REJECTION_THRESHOLD = float(os.getenv("VERIFIABLE_HIGH_REJECTION_THRESHOLD", "0.7"))
+"""Rejection rate above which we show info about correct abstention"""
+
+# Traceability metrics
+VERIFIABLE_MIN_TRACEABILITY_FOR_GOOD_QUALITY = float(
+    os.getenv("VERIFIABLE_MIN_TRACEABILITY_FOR_GOOD_QUALITY", "0.7")
+)
+"""Expected minimum traceability rate for research-grade output"""
+
+
+# ==================== ABLATION FLAGS (For Research Experiments) ====================
+
+# Evidence-first generation (System 2)
+ENABLE_EVIDENCE_FIRST = os.getenv("ENABLE_EVIDENCE_FIRST", "true").lower() == "true"
+"""If False, generate claim_text immediately without waiting for evidence"""
+
+# Conflict detection in evidence
+ENABLE_CONFLICT_DETECTION = os.getenv("ENABLE_CONFLICT_DETECTION", "true").lower() == "true"
+"""If False, skip contradiction detection between evidence sources"""
+
+# Graph-based confidence propagation
+ENABLE_GRAPH_CONFIDENCE = os.getenv("ENABLE_GRAPH_CONFIDENCE", "true").lower() == "true"
+"""If False, don't propagate confidence through claim-evidence graph"""
+
+# Dependency blocking (reject claims with undefined dependencies)
+ENABLE_DEPENDENCY_BLOCKING = os.getenv("ENABLE_DEPENDENCY_BLOCKING", "false").lower() == "true"
+"""If True, reject claims that reference undefined concepts"""
+
+# Multi-source requirement
+ENABLE_MULTI_SOURCE_REQUIREMENT = os.getenv("ENABLE_MULTI_SOURCE_REQUIREMENT", "false").lower() == "true"
+"""If True, require k>=2 independent sources for verification"""
+
+# Consistency scoring
+ENABLE_CONSISTENCY_SCORING = os.getenv("ENABLE_CONSISTENCY_SCORING", "true").lower() == "true"
+"""If False, skip semantic consistency checks between evidence"""
+
+
+# ==================== DOMAIN PROFILES (RESEARCH RIGOR) ====================
+
+# Domain profile selection (for research-grade verifiability)
+DEFAULT_DOMAIN_PROFILE = os.getenv("DEFAULT_DOMAIN_PROFILE", "physics")
+
+# Claim granularity policy
+MAX_PROPOSITIONS_PER_CLAIM = int(os.getenv("MAX_PROPOSITIONS_PER_CLAIM", "1"))
+"""Maximum propositions per claim (1 = atomic claims)"""
+
+# Evidence sufficiency policy
+MIN_ENTAILMENT_PROB = float(os.getenv("MIN_ENTAILMENT_PROB", "0.60"))
+"""Minimum entailment probability for verification"""
+
+MIN_SUPPORTING_SOURCES = int(os.getenv("MIN_SUPPORTING_SOURCES", "2"))
+"""Minimum independent supporting sources required"""
+
+MAX_CONTRADICTION_PROB = float(os.getenv("MAX_CONTRADICTION_PROB", "0.30"))
+"""Maximum contradiction probability allowed"""
+
+# Cross-claim dependency checking
+ENABLE_DEPENDENCY_WARNINGS = os.getenv("ENABLE_DEPENDENCY_WARNINGS", "true").lower() == "true"
+"""Enable warnings for undefined term references in claims"""
+
+STRICT_DEPENDENCY_ENFORCEMENT = os.getenv("STRICT_DEPENDENCY_ENFORCEMENT", "false").lower() == "true"
+"""If True, downgrade claims with undefined dependencies to LOW_CONFIDENCE"""
+
+
+# ==================== DEBUG & DIAGNOSTICS ====================
+
+DEBUG_VERIFICATION = os.getenv("DEBUG_VERIFICATION", "false").lower() == "true"
+"""Enable detailed claim-level debug logging during verification"""
+
+RELAXED_VERIFICATION_MODE = os.getenv("RELAXED_VERIFICATION_MODE", "false").lower() == "true"
+"""If True, use relaxed thresholds for testing (MIN_ENTAILMENT=0.50, MIN_SOURCES=1)"""
+
+DEBUG_RETRIEVAL_HEALTH = os.getenv("DEBUG_RETRIEVAL_HEALTH", "false").lower() == "true"
+"""Enable retrieval health check diagnostics"""
+
+DEBUG_NLI_DISTRIBUTION = os.getenv("DEBUG_NLI_DISTRIBUTION", "false").lower() == "true"
+"""Enable NLI output distribution analysis"""
+
+DEBUG_CHUNKING = os.getenv("DEBUG_CHUNKING", "false").lower() == "true"
+"""Enable source chunking validation diagnostics"""
+
+# Relaxed mode thresholds (only active if RELAXED_VERIFICATION_MODE=True)
+RELAXED_MIN_ENTAILMENT_PROB = float(os.getenv("RELAXED_MIN_ENTAILMENT_PROB", "0.50"))
+RELAXED_MIN_SUPPORTING_SOURCES = int(os.getenv("RELAXED_MIN_SUPPORTING_SOURCES", "1"))
+RELAXED_MAX_CONTRADICTION_PROB = float(os.getenv("RELAXED_MAX_CONTRADICTION_PROB", "0.50"))
+
+
 # ==================== MONITORING & TELEMETRY ====================
 
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
@@ -199,3 +333,122 @@ def is_development() -> bool:
 def is_staging() -> bool:
     """Check if running in staging environment."""
     return ENVIRONMENT == "staging"
+
+
+# ==================== DOMAIN PROFILES ====================
+
+from dataclasses import dataclass
+from typing import List, Dict
+
+
+@dataclass
+class DomainProfile:
+    """
+    Domain-specific validation profile for research-grade verifiability.
+    
+    Each domain has specific claim types, evidence expectations, and validation rules.
+    Enables domain-specific rigor while maintaining general framework.
+    
+    Attributes:
+        name: Domain identifier (physics, discrete_math, algorithms)
+        display_name: Human-readable name
+        description: Domain description
+        allowed_claim_types: Claim types relevant to this domain
+        evidence_type_expectations: Expected evidence types per claim type
+        require_units: Whether unit checking is required (physics)
+        require_proof_steps: Whether proof-step strictness is enforced (discrete_math)
+        require_pseudocode: Whether pseudocode checks are required (algorithms)
+        require_equations: Whether equations must be present (physics, algorithms)
+        strict_dependencies: Whether to enforce strict dependency checking
+    """
+    name: str
+    display_name: str
+    description: str
+    allowed_claim_types: List[str]
+    evidence_type_expectations: Dict[str, List[str]]
+    require_units: bool = False
+    require_proof_steps: bool = False
+    require_pseudocode: bool = False
+    require_equations: bool = False
+    strict_dependencies: bool = False
+
+
+# Define domain profiles
+DOMAIN_PROFILES: Dict[str, DomainProfile] = {
+    "physics": DomainProfile(
+        name="physics",
+        display_name="Physics",
+        description="Physics domain with equations, units, and physical laws",
+        allowed_claim_types=["definition", "equation", "example", "misconception"],
+        evidence_type_expectations={
+            "definition": ["transcript", "notes", "external"],
+            "equation": ["transcript", "notes", "external", "equation"],
+            "example": ["transcript", "notes", "external"],
+            "misconception": ["transcript", "notes"]
+        },
+        require_units=True,
+        require_proof_steps=False,
+        require_pseudocode=False,
+        require_equations=True,
+        strict_dependencies=False
+    ),
+    "discrete_math": DomainProfile(
+        name="discrete_math",
+        display_name="Discrete Mathematics",
+        description="Discrete math domain with definitions, proofs, and formal logic",
+        allowed_claim_types=["definition", "example", "misconception"],
+        evidence_type_expectations={
+            "definition": ["transcript", "notes", "external"],
+            "example": ["transcript", "notes", "external"],
+            "misconception": ["transcript", "notes"]
+        },
+        require_units=False,
+        require_proof_steps=True,
+        require_pseudocode=False,
+        require_equations=False,
+        strict_dependencies=True
+    ),
+    "algorithms": DomainProfile(
+        name="algorithms",
+        display_name="Algorithms & Data Structures",
+        description="Algorithms domain with pseudocode, complexity analysis, and implementations",
+        allowed_claim_types=["definition", "equation", "example", "misconception"],
+        evidence_type_expectations={
+            "definition": ["transcript", "notes", "external"],
+            "equation": ["transcript", "notes", "external", "equation"],
+            "example": ["transcript", "notes", "external"],
+            "misconception": ["transcript", "notes"]
+        },
+        require_units=False,
+        require_proof_steps=False,
+        require_pseudocode=True,
+        require_equations=False,
+        strict_dependencies=False
+    )
+}
+
+
+def get_domain_profile(domain_name: str = None) -> DomainProfile:
+    """
+    Get domain profile by name.
+    
+    Args:
+        domain_name: Domain name (physics, discrete_math, algorithms). 
+                     If None, returns default domain.
+    
+    Returns:
+        DomainProfile instance
+    
+    Raises:
+        ValueError: If domain name is invalid
+    """
+    if domain_name is None:
+        domain_name = DEFAULT_DOMAIN_PROFILE
+    
+    if domain_name not in DOMAIN_PROFILES:
+        raise ValueError(
+            f"Invalid domain: {domain_name}. "
+            f"Valid domains: {', '.join(DOMAIN_PROFILES.keys())}"
+        )
+    
+    return DOMAIN_PROFILES[domain_name]

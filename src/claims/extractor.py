@@ -1,0 +1,271 @@
+"""
+Claim Extractor: Convert Smart Notes outputs to evidence-grounded learning claims.
+
+This module implements the evidence-first paradigm: extract claims from baseline
+outputs with EMPTY claim_text initially, then populate via RAG retrieval and
+role-constrained agents.
+
+Key Design: Claims start without text, forcing evidence-first generation.
+See docs/VERIFIABILITY_CONTRACT.md for details.
+"""
+
+import logging
+from typing import List, Dict, Any
+import uuid
+
+from .schema import LearningClaim, ClaimType, VerificationStatus
+
+logger = logging.getLogger(__name__)
+
+
+class ClaimExtractor:
+    """Extract learning claims from Smart Notes structured outputs (evidence-first)."""
+
+    @staticmethod
+    def extract_from_session(session_output: Any) -> "ClaimCollection":
+        """
+        Extract claims from a ClassSessionOutput or dict.
+
+        Args:
+            session_output: ClassSessionOutput instance or dict
+
+        Returns:
+            ClaimCollection with extracted claims
+        """
+        from .schema import ClaimCollection
+
+        if hasattr(session_output, "to_dict"):
+            output_dict = session_output.to_dict()
+        elif isinstance(session_output, dict):
+            output_dict = session_output
+        else:
+            raise TypeError("session_output must be ClassSessionOutput or dict")
+
+        logger.info(f"Extracting claims from output with keys: {list(output_dict.keys())}")
+        claims = ClaimExtractor.extract_all_from_structured_output(output_dict)
+
+        session_id = output_dict.get("session_id", "unknown_session")
+        collection = ClaimCollection(session_id=session_id, claims=claims)
+        collection.metadata.update({"source": "session_output"})
+        logger.info(f"Created ClaimCollection with {len(claims)} claims for session {session_id}")
+        return collection
+    
+    @staticmethod
+    def extract_from_concepts(concepts: List[Dict[str, Any]]) -> List[LearningClaim]:
+        """
+        Extract definition claims from concepts.
+        
+        Args:
+            concepts: List of concept dicts with 'name', 'definition', 'explanation'
+        
+        Returns:
+            List of LearningClaim objects with empty claim_text (evidence-first)
+        """
+        claims = []
+        for i, concept in enumerate(concepts):
+            if not concept.get("name"):
+                continue
+            
+            claim = LearningClaim(
+                claim_id=f"claim_{uuid.uuid4().hex[:8]}",
+                claim_type=ClaimType.DEFINITION,
+                claim_text="",  # Evidence-first: empty until retrieval + agent generation
+                status=VerificationStatus.REJECTED,  # Start rejected until verified
+                metadata={
+                    "source": "concepts",
+                    "concept_name": concept.get("name"),
+                    "definition": concept.get("definition", ""),
+                    "explanation": concept.get("explanation", ""),
+                    "prerequisites": concept.get("prerequisites", []),
+                    "difficulty_level": concept.get("difficulty_level", "intermediate"),
+                    "draft_text": concept.get("name", ""),  # For RAG retrieval
+                    "ui_display": f"Definition: {concept.get('name', 'Unknown')}"
+                }
+            )
+            claims.append(claim)
+        
+        return claims
+    
+    @staticmethod
+    def extract_from_equations(equations: List[Dict[str, Any]]) -> List[LearningClaim]:
+        """
+        Extract equation claims.
+        
+        Args:
+            equations: List of equation dicts with 'equation', 'explanation'
+        
+        Returns:
+            List of LearningClaim objects (equations)
+        """
+        claims = []
+        for i, eq in enumerate(equations):
+            if not eq.get("equation"):
+                continue
+            
+            claim = LearningClaim(
+                claim_id=f"claim_{uuid.uuid4().hex[:8]}",
+                claim_type=ClaimType.EQUATION,
+                claim_text="",  # Evidence-first
+                status=VerificationStatus.REJECTED,
+                metadata={
+                    "source": "equations",
+                    "equation": eq.get("equation"),
+                    "explanation": eq.get("explanation", ""),
+                    "variables": eq.get("variables", []),
+                    "applications": eq.get("applications", []),
+                    "draft_text": eq.get("equation", ""),  # For RAG retrieval
+                    "ui_display": f"Equation: {eq.get('equation', 'Unknown')}"
+                }
+            )
+            claims.append(claim)
+        
+        return claims
+    
+    @staticmethod
+    def extract_from_examples(examples: List[Dict[str, Any]]) -> List[LearningClaim]:
+        """
+        Extract example claims.
+        
+        Args:
+            examples: List of example dicts with 'problem', 'solution'
+        
+        Returns:
+            List of LearningClaim objects (examples)
+        """
+        claims = []
+        for i, ex in enumerate(examples):
+            if not ex.get("problem"):
+                continue
+            
+            claim = LearningClaim(
+                claim_id=f"claim_{uuid.uuid4().hex[:8]}",
+                claim_type=ClaimType.EXAMPLE,
+                claim_text="",  # Evidence-first
+                status=VerificationStatus.REJECTED,
+                metadata={
+                    "source": "examples",
+                    "problem": ex.get("problem"),
+                    "solution": ex.get("solution", ""),
+                    "explanation": ex.get("explanation", ""),
+                    "key_concepts": ex.get("key_concepts", []),
+                    "common_mistakes": ex.get("common_mistakes", []),
+                    "draft_text": ex.get("problem", "")[:100],  # For RAG retrieval
+                    "ui_display": f"Example: {ex.get('problem', 'Unknown')[:50]}..."
+                }
+            )
+            claims.append(claim)
+        
+        return claims
+    
+    @staticmethod
+    def extract_from_misconceptions(misconceptions: List[Dict[str, Any]]) -> List[LearningClaim]:
+        """
+        Extract misconception claims.
+        
+        Args:
+            misconceptions: List of misconception dicts with 'misconception', 'clarification'
+        
+        Returns:
+            List of LearningClaim objects (misconceptions)
+        """
+        claims = []
+        for i, misc in enumerate(misconceptions):
+            if not misc.get("misconception"):
+                continue
+            
+            claim = LearningClaim(
+                claim_id=f"claim_{uuid.uuid4().hex[:8]}",
+                claim_type=ClaimType.MISCONCEPTION,
+                claim_text="",  # Evidence-first
+                status=VerificationStatus.REJECTED,
+                metadata={
+                    "source": "misconceptions",
+                    "misconception": misc.get("misconception"),
+                    "correct_understanding": misc.get("correct_understanding", ""),
+                    "explanation": misc.get("explanation", ""),
+                    "related_concepts": misc.get("related_concepts", []),
+                    "draft_text": misc.get("misconception", ""),  # For RAG retrieval
+                    "ui_display": f"Misconception: {misc.get('misconception', 'Unknown')[:50]}..."
+                }
+            )
+            claims.append(claim)
+        
+        return claims
+    
+    @staticmethod
+    def extract_from_summary(summary: str) -> List[LearningClaim]:
+        """
+        Extract high-level summary claims when only summary section is available.
+        
+        Args:
+            summary: Summary text
+        
+        Returns:
+            List of LearningClaim objects extracted from summary
+        """
+        if not summary or not summary.strip():
+            return []
+        
+        claims = []
+        
+        # Split summary into sentences and create a summary claim
+        sentences = [s.strip() for s in summary.split(".") if s.strip()]
+        
+        if sentences:
+            # Create one comprehensive summary claim
+            claim = LearningClaim(
+                claim_id=f"claim_{uuid.uuid4().hex[:8]}",
+                claim_type=ClaimType.DEFINITION,
+                claim_text="",  # Evidence-first
+                status=VerificationStatus.REJECTED,
+                metadata={
+                    "source": "summary",
+                    "full_summary": summary,
+                    "sentence_count": len(sentences),
+                    "draft_text": summary[:200],  # For RAG retrieval
+                    "ui_display": f"Summary: {summary[:100].rstrip()}..."
+                }
+            )
+            claims.append(claim)
+            logger.info(f"Extracted 1 summary claim from {len(sentences)} sentences")
+        
+        return claims
+    
+    @staticmethod
+    def extract_all_from_structured_output(output: Dict[str, Any]) -> List[LearningClaim]:
+        """
+        Extract claims from all structured output fields.
+        
+        Args:
+            output: Smart Notes structured output dict with keys like
+                   'key_concepts', 'equation_explanations', 'worked_examples', 'common_mistakes', 'class_summary'
+        
+        Returns:
+            List of all extracted LearningClaim objects (empty claim_text, evidence-first)
+        """
+        all_claims = []
+        
+        # Extract from each source (prioritized by reliability)
+        if output.get("key_concepts"):
+            all_claims.extend(ClaimExtractor.extract_from_concepts(output["key_concepts"]))
+        
+        if output.get("equation_explanations"):
+            all_claims.extend(ClaimExtractor.extract_from_equations(output["equation_explanations"]))
+        
+        if output.get("worked_examples"):
+            all_claims.extend(ClaimExtractor.extract_from_examples(output["worked_examples"]))
+        
+        if output.get("common_mistakes"):
+            all_claims.extend(ClaimExtractor.extract_from_misconceptions(output["common_mistakes"]))
+        
+        # If no claims were extracted but summary exists, extract from summary (summary-only mode)
+        if not all_claims:
+            # Try both 'summary' and 'class_summary' field names
+            summary_text = output.get("summary") or output.get("class_summary")
+            if summary_text:
+                logger.info("No claims from structured sections, extracting from summary (summary-only mode)")
+                all_claims.extend(ClaimExtractor.extract_from_summary(summary_text))
+        
+        logger.info(f"Extracted {len(all_claims)} claims from structured output")
+        
+        return all_claims

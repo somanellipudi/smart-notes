@@ -131,17 +131,23 @@ class QuickExportButtons:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("📋 Copy JSON"):
-                import json
-                json_str = json.dumps(output_data, indent=2, ensure_ascii=False)
-                st.code(json_str, language="json")
-                st.success("✓ Copied to clipboard")
+            import json
+            json_str = json.dumps(output_data, indent=2, ensure_ascii=False, default=str)
+            st.download_button(
+                label="📋 Download JSON",
+                data=json_str,
+                file_name=f"notes_{session_id}.json",
+                mime="application/json"
+            )
         
         with col2:
-            if st.button("📝 Copy Markdown"):
-                md_str = QuickExportButtons._to_markdown(output_data)
-                st.code(md_str, language="markdown")
-                st.success("✓ Copied to clipboard")
+            md_str = QuickExportButtons._to_markdown(output_data)
+            st.download_button(
+                label="📝 Download Markdown",
+                data=md_str,
+                file_name=f"notes_{session_id}.md",
+                mime="text/markdown"
+            )
         
         with col3:
             if st.button("💾 Save Session"):
@@ -152,25 +158,87 @@ class QuickExportButtons:
         """Convert output to markdown format."""
         md = "# Study Notes\n\n"
         
-        if data.get("summary"):
-            md += f"## Summary\n\n{data['summary']}\n\n"
+        summary = data.get("summary") or data.get("class_summary")
+        if summary:
+            md += f"## Summary\n\n{summary}\n\n"
         
-        if data.get("topics"):
+        topics = data.get("topics") or []
+        if topics:
             md += "## Topics\n\n"
-            for topic in data["topics"]:
-                md += f"- **{topic.get('title', '')}**: {topic.get('description', '')}\n"
+            for topic in topics:
+                title = topic.get("title") or topic.get("name") or ""
+                desc = topic.get("description") or topic.get("summary") or ""
+                md += f"- **{title}**: {desc}\n"
             md += "\n"
         
-        if data.get("concepts"):
+        key_concepts = data.get("key_concepts") or data.get("concepts") or []
+        if key_concepts:
             md += "## Key Concepts\n\n"
-            for concept in data["concepts"]:
-                md += f"- **{concept.get('name', '')}**: {concept.get('definition', '')}\n"
-            md += "\n"
+            for concept in key_concepts:
+                name = concept.get("concept_name") or concept.get("name") or ""
+                definition = concept.get("definition") or ""
+                md += f"### {name}\n\n"
+                md += f"{definition}\n\n"
+                example = concept.get("example") or concept.get("examples")
+                if example:
+                    md += f"**Example**: {example}\n\n"
+        
+        equations = data.get("equation_explanations") or data.get("equations") or []
+        if equations:
+            md += "## Equations\n\n"
+            for eq in equations:
+                md += f"### {eq.get('equation', '')}\n\n"
+                md += f"{eq.get('explanation', '')}\n\n"
+                if eq.get('application'):
+                    md += f"**Application**: {eq['application']}\n\n"
+        
+        worked_examples = data.get("worked_examples") or data.get("examples") or []
+        if worked_examples:
+            md += "## Worked Examples\n\n"
+            for i, example in enumerate(worked_examples, 1):
+                problem = example.get("problem_statement") or example.get("problem") or ""
+                md += f"### Example {i}: {problem}\n\n"
+                solution_steps = example.get("solution_steps")
+                if solution_steps:
+                    md += "**Solution Steps**:\n\n"
+                    for j, step in enumerate(solution_steps, 1):
+                        md += f"{j}. {step}\n"
+                    md += "\n"
+                solution = example.get("solution")
+                if solution and not solution_steps:
+                    md += f"**Solution**: {solution}\n\n"
+                key_insight = example.get("key_insight") or example.get("explanation")
+                if key_insight:
+                    md += f"**Key Insight**: {key_insight}\n\n"
+        
+        common_mistakes = data.get("common_mistakes") or data.get("misconceptions") or []
+        if common_mistakes:
+            md += "## Common Mistakes\n\n"
+            for mistake in common_mistakes:
+                label = mistake.get("mistake") or mistake.get("misconception") or ""
+                md += f"### ❌ {label}\n\n"
+                explanation = mistake.get("explanation") or ""
+                correct = mistake.get("correction") or mistake.get("correct_understanding")
+                if explanation:
+                    md += f"{explanation}\n\n"
+                if correct:
+                    md += f"**✓ Correction**: {correct}\n\n"
         
         if data.get("faqs"):
             md += "## FAQs\n\n"
             for faq in data["faqs"]:
                 md += f"**Q: {faq.get('question', '')}**\n\n"
                 md += f"A: {faq.get('answer', '')}\n\n"
+        
+        connections = data.get("real_world_connections") or data.get("connections") or []
+        if connections:
+            md += "## Real-World Connections\n\n"
+            for conn in connections:
+                field = conn.get("field") or conn.get("connection") or ""
+                application = conn.get("application") or conn.get("relevance") or ""
+                md += f"### {field}\n\n"
+                md += f"{application}\n\n"
+                if conn.get('example'):
+                    md += f"**Example**: {conn['example']}\n\n"
         
         return md

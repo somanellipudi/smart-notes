@@ -261,7 +261,11 @@ class ImageOCR:
 def process_images(
     image_files: List[Any],
     image_types: List[str] = None,
-    correct_with_llm: bool = True
+    correct_with_llm: bool = True,
+    provider_type: str = "ollama",
+    api_key: str = None,
+    ollama_url: str = None,
+    model: str = None
 ) -> str:
     """
     Process multiple images and combine extracted text.
@@ -270,6 +274,10 @@ def process_images(
         image_files: List of image file objects or paths
         image_types: List of image types (same length as image_files)
         correct_with_llm: If True, use LLM to correct OCR text
+        provider_type: LLM provider ("openai" or "ollama")
+        api_key: API key for OpenAI (if applicable)
+        ollama_url: URL for Ollama (if applicable)
+        model: Model name to use
     
     Returns:
         Combined extracted text
@@ -300,25 +308,47 @@ def process_images(
     # Post-process with LLM to correct OCR errors
     if correct_with_llm and combined_text:
         logger.info("📝 Correcting OCR text with LLM...")
-        combined_text = _correct_ocr_with_llm(combined_text)
+        combined_text = _correct_ocr_with_llm(
+            combined_text,
+            provider_type=provider_type,
+            api_key=api_key,
+            ollama_url=ollama_url,
+            model=model
+        )
     
     return combined_text
 
 
-def _correct_ocr_with_llm(raw_ocr_text: str) -> str:
+def _correct_ocr_with_llm(
+    raw_ocr_text: str,
+    provider_type: str = "ollama",
+    api_key: str = None,
+    ollama_url: str = None,
+    model: str = None
+) -> str:
     """
     Use LLM to correct garbled OCR text by reconstructing likely meaning.
     
     Args:
         raw_ocr_text: Raw OCR output (may be garbled)
+        provider_type: LLM provider ("openai" or "ollama")
+        api_key: API key for OpenAI (if applicable)
+        ollama_url: URL for Ollama (if applicable)
+        model: Model name to use
     
     Returns:
         Corrected text
     """
     try:
         from src.reasoning.pipeline import ReasoningPipeline
+        import config
         
-        pipeline = ReasoningPipeline()
+        pipeline = ReasoningPipeline(
+            provider_type=provider_type,
+            api_key=api_key or config.OPENAI_API_KEY,
+            ollama_url=ollama_url or config.OLLAMA_URL,
+            model=model or (config.OLLAMA_MODEL if provider_type == "ollama" else config.LLM_MODEL)
+        )
         
         correction_prompt = f"""You are an expert at reading and correcting optical character recognition (OCR) errors.
 

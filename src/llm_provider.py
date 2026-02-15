@@ -8,9 +8,20 @@ Supports:
 
 import logging
 import json
+import os
 import requests
 from typing import Dict, Any, Optional, List
 from abc import ABC, abstractmethod
+
+try:
+    import config
+    _ENABLE_LANGCHAIN_TRACING = config.ENABLE_LANGCHAIN_TRACING
+    _LANGCHAIN_API_KEY = config.LANGCHAIN_API_KEY
+    _LANGCHAIN_PROJECT_ID = config.LANGCHAIN_PROJECT_ID
+except Exception:
+    _ENABLE_LANGCHAIN_TRACING = False
+    _LANGCHAIN_API_KEY = ""
+    _LANGCHAIN_PROJECT_ID = ""
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +45,22 @@ class LLMProvider(ABC):
         """Check if provider is available."""
         pass
 
+    def complete(
+        self,
+        prompt: str,
+        temperature: float = 0.3,
+        max_tokens: Optional[int] = None,
+        response_format: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Convenience wrapper for text-only prompts."""
+        messages = [{"role": "user", "content": prompt}]
+        return self.chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format
+        )
+
 
 class OpenAIProvider(LLMProvider):
     """OpenAI LLM provider."""
@@ -46,10 +73,28 @@ class OpenAIProvider(LLMProvider):
             api_key: OpenAI API key
             model: Model name (gpt-4, gpt-3.5-turbo)
         """
+        self.model = model
+        self._langchain_client = None
+        self._use_langchain = False
         try:
+            # Optional LangChain integration for tracing/monitoring
+            if _ENABLE_LANGCHAIN_TRACING and _LANGCHAIN_API_KEY:
+                os.environ.setdefault("LANGCHAIN_API_KEY", _LANGCHAIN_API_KEY)
+                os.environ.setdefault("LANGCHAIN_PROJECT", _LANGCHAIN_PROJECT_ID or "smart-notes")
+                os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+                from langchain_openai import ChatOpenAI
+                self._langchain_client = ChatOpenAI(
+                    model=model,
+                    temperature=0.3,
+                    api_key=api_key
+                )
+                self._use_langchain = True
+                self.available = True
+                logger.info(f"✓ OpenAI provider initialized with LangChain (model: {model})")
+                return
+
             from openai import OpenAI
             self.client = OpenAI(api_key=api_key)
-            self.model = model
             self.available = True
             logger.info(f"✓ OpenAI provider initialized (model: {model})")
         except Exception as e:
@@ -68,6 +113,39 @@ class OpenAIProvider(LLMProvider):
     ) -> str:
         """Call OpenAI API."""
         try:
+            if self._use_langchain and self._langchain_client is not None:
+                from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+                lc_messages = []
+                for message in messages:
+                    role = message.get("role")
+                    content = message.get("content", "")
+                    if role == "system":
+                        lc_messages.append(SystemMessage(content=content))
+                    elif role == "assistant":
+                        lc_messages.append(AIMessage(content=content))
+                    else:
+                        lc_messages.append(HumanMessage(content=content))
+
+                bind_kwargs: Dict[str, Any] = {}
+                if temperature is not None:
+                    bind_kwargs["temperature"] = temperature
+                if max_tokens is not None:
+                    bind_kwargs["max_tokens"] = max_tokens
+                if response_format is not None:
+                    bind_kwargs["response_format"] = response_format
+
+                client = self._langchain_client.bind(**bind_kwargs) if bind_kwargs else self._langchain_client
+                try:
+                    response = client.invoke(lc_messages)
+                    return response.content
+                except Exception as lc_err:
+                    if response_format and "response_format" in str(lc_err):
+                        logger.warning("LangChain response_format not supported. Retrying without response_format.")
+                        client = self._langchain_client
+                        response = client.invoke(lc_messages)
+                        return response.content
+                    raise
+
             kwargs = {
                 "model": self.model,
                 "messages": messages,
@@ -82,8 +160,25 @@ class OpenAIProvider(LLMProvider):
             
             response = self.client.chat.completions.create(**kwargs)
             return response.choices[0].message.content
-            
+
         except Exception as e:
+            error_text = str(e)
+            if response_format and "response_format" in error_text:
+                logger.warning("OpenAI response_format not supported for this model. Retrying without response_format.")
+                try:
+                    kwargs = {
+                        "model": self.model,
+                        "messages": messages,
+                        "temperature": temperature,
+                    }
+                    if max_tokens:
+                        kwargs["max_tokens"] = max_tokens
+                    response = self.client.chat.completions.create(**kwargs)
+                    return response.choices[0].message.content
+                except Exception as retry_err:
+                    logger.error(f"OpenAI API error after retry: {retry_err}")
+                    raise
+
             logger.error(f"OpenAI API error: {e}")
             raise
 
@@ -126,37 +221,32 @@ class OllamaProvider(LLMProvider):
         max_tokens: Optional[int] = None,
         response_format: Optional[Dict[str, Any]] = None
     ) -> str:
-        """Call Ollama API."""
+        """Call Ollama API using chat endpoint."""
         try:
-            # Build prompt from messages
-            prompt = ""
-            for msg in messages:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                if role == "system":
-                    prompt += f"System: {content}\n\n"
-                else:
-                    prompt += f"{content}\n"
-            
             payload = {
                 "model": self.model,
-                "prompt": prompt,
-                "temperature": temperature,
+                "messages": messages,
                 "stream": False,
+                "options": {
+                    "temperature": temperature,
+                }
             }
             
             if max_tokens:
-                payload["num_predict"] = max_tokens
+                payload["options"]["num_predict"] = max_tokens
+            
+            # Note: response_format (JSON mode) is not supported by all Ollama models
+            # If needed, it should be added to the system prompt instead
             
             response = requests.post(
-                f"{self.base_url}/api/generate",
+                f"{self.base_url}/api/chat",
                 json=payload,
                 timeout=300  # Long timeout for local processing
             )
             response.raise_for_status()
             
             result = response.json()
-            return result.get("response", "").strip()
+            return result.get("message", {}).get("content", "").strip()
             
         except Exception as e:
             logger.error(f"Ollama API error: {e}")
