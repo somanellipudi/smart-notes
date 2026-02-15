@@ -27,6 +27,9 @@ from src.policies.evidence_policy import apply_sufficiency_policy
 from src.verification.dependency_checker import check_dependencies, apply_dependency_enforcement
 from src.policies.threat_model import get_threat_model_summary
 from src.verification.diagnostics import VerificationDiagnostics
+from src.retrieval.url_ingest import ingest_urls, chunk_url_sources, get_url_ingestion_summary
+from src.retrieval.evidence_store import EvidenceStore, validate_evidence_store
+from src.retrieval.evidence_builder import build_session_evidence_store
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +98,28 @@ class VerifiablePipelineWrapper:
         
         logger.info("VerifiablePipelineWrapper initialized")
     
+    def get_thresholds(self) -> Dict[str, float]:
+        """
+        Get verification thresholds based on RELAXED_VERIFICATION_MODE.
+        
+        Returns:
+            Dictionary with threshold values for evidence policy
+        """
+        if config.RELAXED_VERIFICATION_MODE:
+            return {
+                "min_entailment_prob": config.MIN_ENTAILMENT_PROB_RELAXED,
+                "min_supporting_sources": config.MIN_SUPPORTING_SOURCES_RELAXED,
+                "max_contradiction_prob": config.MAX_CONTRADICTION_PROB_RELAXED,
+                "mode": "RELAXED"
+            }
+        else:
+            return {
+                "min_entailment_prob": config.MIN_ENTAILMENT_PROB_DEFAULT,
+                "min_supporting_sources": config.MIN_SUPPORTING_SOURCES_DEFAULT,
+                "max_contradiction_prob": config.MAX_CONTRADICTION_PROB_DEFAULT,
+                "mode": "STRICT"
+            }
+    
     def process(
         self,
         combined_content: str,
@@ -102,7 +127,8 @@ class VerifiablePipelineWrapper:
         external_context: str = "",
         session_id: str = None,
         verifiable_mode: bool = False,
-        output_filters: Dict[str, bool] = None
+        output_filters: Dict[str, bool] = None,
+        urls: List[str] = None
     ) -> Tuple[ClassSessionOutput, Optional[Dict[str, Any]]]:
         """
         Process content through pipeline with optional verifiable mode.
@@ -114,6 +140,7 @@ class VerifiablePipelineWrapper:
             session_id: Unique session identifier
             verifiable_mode: If True, use verifiable mode; if False, standard mode
             output_filters: Dict of section names to booleans (e.g., {'summary': True, 'topics': False})
+            urls: Optional list of URLs (YouTube videos or articles) to ingest as evidence sources
         
         Returns:
             Tuple of (output, verifiable_metadata)
@@ -121,6 +148,9 @@ class VerifiablePipelineWrapper:
             - verifiable_metadata: Additional verifiable mode data (if enabled)
         """
         logger.info(f"Processing with verifiable_mode={verifiable_mode}, filters={output_filters}")
+        
+        if urls:
+            logger.info(f"URLs provided for ingestion: {len(urls)}")
         
         if output_filters is None:
             output_filters = {
@@ -154,7 +184,8 @@ class VerifiablePipelineWrapper:
                 equations=equations,
                 external_context=external_context,
                 session_id=session_id,
-                output_filters=output_filters
+                output_filters=output_filters,
+                urls=urls
             )
     
     def _process_verifiable(
@@ -163,7 +194,8 @@ class VerifiablePipelineWrapper:
         equations: List[str],
         external_context: str,
         session_id: str,
-        output_filters: Dict[str, bool] = None
+        output_filters: Dict[str, bool] = None,
+        urls: List[str] = None
     ) -> Tuple[ClassSessionOutput, Dict[str, Any]]:
         """
         Process content in verifiable mode.
@@ -198,6 +230,142 @@ class VerifiablePipelineWrapper:
             logger.warning(f"  MIN_SUPPORTING_SOURCES: {config.RELAXED_MIN_SUPPORTING_SOURCES}")
             logger.warning(f"  MAX_CONTRADICTION_PROB: {config.RELAXED_MAX_CONTRADICTION_PROB}")
             logger.warning("="*70)
+        
+        # Step 0: Ingest URL sources if provided
+        url_sources = []
+        url_chunks = []
+        url_ingestion_summary = None
+        
+        if urls and config.ENABLE_URL_SOURCES:
+            logger.info(f"Step 0: Ingesting {len(urls)} URL sources")
+            step_start = time.perf_counter()
+            
+            try:
+                url_sources = ingest_urls(urls)
+                url_chunks = chunk_url_sources(url_sources, chunk_size=500, overlap=50)
+                url_ingestion_summary = get_url_ingestion_summary(url_sources)
+                
+                logger.info(
+                    f"URL ingestion complete: {url_ingestion_summary['successful']}/{url_ingestion_summary['total_urls']} successful, "
+                    f"{len(url_chunks)} chunks, {url_ingestion_summary['total_chars']} total chars"
+                )
+                
+                if url_ingestion_summary['failed'] > 0:
+                    logger.warning(f"{url_ingestion_summary['failed']} URL(s) failed to ingest")
+                    for url_info in url_ingestion_summary['urls']:
+                        if not url_info['success']:
+                            logger.warning(f"  - {url_info['url']}: {url_info['error']}")
+            
+            except Exception as e:
+                logger.error(f"URL ingestion failed: {e}")
+                url_ingestion_summary = {
+                    "total_urls": len(urls),
+                    "successful": 0,
+                    "failed": len(urls),
+                    "error": str(e)
+                }
+            
+            step_timings["step_0_ingest_urls"] = time.perf_counter() - step_start
+            logger.info(f"Step 0 time: {step_timings['step_0_ingest_urls']:.2f}s")
+        elif urls and not config.ENABLE_URL_SOURCES:
+            logger.warning("URLs provided but ENABLE_URL_SOURCES is False, skipping URL ingestion")
+        
+        # Step 0.5: Build Evidence Store (MANDATORY)
+        logger.info("Step 0.5: Building session evidence store")
+        step_start = time.perf_counter()
+        
+        try:
+            # Build evidence store from all inputs
+            evidence_store, evidence_stats = build_session_evidence_store(
+                session_id=session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                input_text=combined_content,
+                external_context=external_context,
+                equations=equations,
+                urls=urls if config.ENABLE_URL_SOURCES else None,
+                min_input_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION
+            )
+            
+            # Add embeddings to evidence store
+            logger.info(f"Computing embeddings for {len(evidence_store.evidence)} evidence chunks")
+            
+            # Check if semantic retriever has encoder
+            if not hasattr(self.evidence_retriever, 'encoder') or self.evidence_retriever.encoder is None:
+                # Fallback: initialize semantic retriever
+                from src.retrieval.semantic_retriever import SemanticRetriever
+                semantic_ret = SemanticRetriever()
+                encoder = semantic_ret.encoder
+            else:
+                encoder = self.evidence_retriever.encoder if hasattr(self.evidence_retriever, 'encoder') else None
+            
+            # Encode all evidence texts
+            if encoder is not None:
+                evidence_texts = [ev.text for ev in evidence_store.evidence]
+                logger.info(f"Encoding {len(evidence_texts)} texts using encoder")
+                
+                # Handle both SentenceTransformer (has batch_size) and fallback embedders
+                try:
+                    embeddings = encoder.encode(
+                        evidence_texts,
+                        batch_size=32,
+                        show_progress_bar=False,
+                        convert_to_numpy=True
+                    )
+                except TypeError:
+                    # Fallback embedder (TF-IDF) doesn't have these parameters
+                    logger.info("Using fallback embedder (doesn't support batch processing)")
+                    embeddings = encoder.encode(evidence_texts)
+                
+                # Add embeddings to evidence objects
+                import numpy as np
+                embeddings = np.atleast_2d(embeddings)  # Ensure 2D
+                for i, ev in enumerate(evidence_store.evidence):
+                    ev.embedding = embeddings[i].astype('float32')
+                
+                # Build FAISS index
+                evidence_store.build_index(embeddings=embeddings.astype('float32'))
+                logger.info(f"✓ Built FAISS index with {len(evidence_store.evidence)} vectors of {embeddings.shape[1]}-dim")
+            else:
+                logger.warning("No encoder available, creating store without embeddings")
+                # Create dummy embeddings for structure
+                import numpy as np
+                dummy_embeddings = np.random.rand(len(evidence_store.evidence), 128).astype('float32')
+                for i, ev in enumerate(evidence_store.evidence):
+                    ev.embedding = dummy_embeddings[i]
+                evidence_store.build_index(embeddings=dummy_embeddings)
+            
+            # Validate evidence store (CRITICAL)
+            validate_evidence_store(evidence_store, min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION)
+            
+            # Log evidence statistics
+            ev_stats = evidence_store.get_statistics()
+            logger.info(
+                f"✓ Evidence store validated: "
+                f"{ev_stats['num_chunks']} chunks, "
+                f"{ev_stats['total_chars']} chars, "
+                f"{ev_stats['num_sources']} sources, "
+                f"FAISS index size: {ev_stats['faiss_index_size']}"
+            )
+            
+            # Store evidence stats for diagnostics
+            if diagnostics:
+                diagnostics.evidence_stats = ev_stats
+        
+        except ValueError as e:
+            # Evidence store validation failed - this is a HARD ERROR
+            error_msg = f"Evidence store validation failed: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            
+            # Return early with error status
+            raise RuntimeError(
+                f"{error_msg}\n\n"
+                "Verification cannot proceed without valid evidence. Please ensure:\n"
+                f"1. Input text is at least 500 characters (current: {len(combined_content)} chars)\n"
+                "2. Input contains substantive content (not just whitespace)\n"
+                "3. If using URLs, at least one URL successfully ingested"
+            )
+        
+        step_timings["step_0_5_build_evidence_store"] = time.perf_counter() - step_start
+        logger.info(f"Step 0.5 time: {step_timings['step_0_5_build_evidence_store']:.2f}s")
         
         # Step 1: Run standard pipeline to get baseline
         logger.info("Step 1: Running standard pipeline for baseline")
@@ -234,64 +402,51 @@ class VerifiablePipelineWrapper:
         logger.info("Step 3: Retrieving evidence for claims")
         step_start = time.perf_counter()
         
-        # Convert equations list to content string
-        equations_content = "\n".join(equations) if equations else ""
+        # Use evidence store built in Step 0.5
+        # Encode claim texts to get query embeddings
+        claim_texts = [claim.claim_text for claim in claim_collection.claims]
+        logger.info(f"Encoding {len(claim_texts)} claims for evidence retrieval")
         
-        # Parse combined content to separate transcript and notes
-        transcript, notes = self._parse_combined_content(combined_content)
-
-        # Preprocess content to reduce noise and avoid long-running retrieval
-        cleaned_transcript = self.preprocessor.filter_noise(transcript) if transcript else ""
-        cleaned_notes = self.preprocessor.filter_noise(notes) if notes else ""
-        cleaned_external = self.preprocessor.filter_noise(external_context) if external_context else ""
-
-        # Data mining: extract key entities for metadata
-        mined_entities = self.preprocessor.extract_key_entities(
-            " ".join([cleaned_transcript, cleaned_notes, cleaned_external]).strip()
-        )
-        claim_collection.metadata["mined_entities"] = mined_entities
-
-        # Segment content and rank segments by evidence quality
-        segments = []
-        for source_name, text in [
-            ("transcript", cleaned_transcript),
-            ("notes", cleaned_notes),
-            ("external", cleaned_external)
-        ]:
-            if not text:
-                continue
-            for seg in self.preprocessor.segment_content(text, max_segment_length=300):
-                score = self.preprocessor.rank_evidence_quality(seg["text"])
-                segments.append({
-                    "text": seg["text"],
-                    "score": score,
-                    "source": source_name
-                })
-
-        # Keep only top segments to prevent runaway processing
-        segments.sort(key=lambda s: (s["score"], len(s["text"])), reverse=True)
-        top_segments = segments[:12]
-
-        # Combine all sources together
-        sources = [s["text"] for s in top_segments]
-        if equations_content and equations_content.strip():
-            sources.append(equations_content)
-        sources = list(dict.fromkeys([s for s in sources if s]))  # Filter empty + dedupe
-        
-        # Log chunking diagnostics
-        if diagnostics and config.DEBUG_CHUNKING:
-            total_length = sum(len(s) for s in sources)
-            avg_chunk_size = total_length / len(sources) if sources else 0
-            diagnostics.log_chunking_validation(
-                total_source_length=total_length,
-                num_chunks=len(sources),
-                avg_chunk_size=avg_chunk_size
+        # Handle both SentenceTransformer and fallback embedders
+        try:
+            claim_embeddings = encoder.encode(
+                claim_texts,
+                batch_size=32,
+                show_progress_bar=False,
+                convert_to_numpy=True
             )
-
-        # Retrieve evidence for each claim
+        except TypeError:
+            # Fallback embedder (TF-IDF) doesn't have these parameters
+            logger.info("Using fallback embedder for claim encoding")
+            claim_embeddings = encoder.encode(claim_texts)
+        
+        import numpy as np
+        claim_embeddings = np.atleast_2d(claim_embeddings)  # Ensure 2D
+        
+        # Retrieve evidence for each claim using vector search
         all_nli_results = []
-        for claim in claim_collection.claims:
-            evidence = self.evidence_retriever.retrieve_evidence_for_claim(claim, sources)
+        for i, claim in enumerate(claim_collection.claims):
+            # Search evidence store with claim embedding
+            query_embedding = claim_embeddings[i].astype('float32')
+            retrieved = evidence_store.search(
+                query_embedding=query_embedding,
+                top_k=config.TOP_K_EVIDENCE if hasattr(config, 'TOP_K_EVIDENCE') else 10,
+                min_similarity=0.3  # Filter low-quality matches
+            )
+            
+            # Convert Evidence objects to evidence format expected by policy
+            # Create RetrievedEvidence objects with similarity scores
+            from src.retrieval.claim_rag import RetrievedEvidence
+            evidence = []
+            for ev, similarity in retrieved:
+                evidence_obj = RetrievedEvidence(
+                    text=ev.text,
+                    source_id=ev.source_id,
+                    similarity=similarity,
+                    metadata=ev.metadata or {}
+                )
+                evidence.append(evidence_obj)
+            
             claim.evidence_objects.extend(evidence)
             
             # Apply decision policy to this claim
@@ -448,8 +603,76 @@ class VerifiablePipelineWrapper:
             diagnostics.print_session_summary(summary)
             
             # Save JSON debug report
-            if config.DEBUG_VERIFICATION:
+            if config.SAVE_DEBUG_REPORT:
                 diagnostics.save_debug_report(config.OUTPUT_DIR)
+        
+        # SAFE FALLBACK: Auto-relaxed retry if mass rejection detected
+        auto_relaxed_retry = False
+        total_claims = len(claim_collection.claims)
+        rejected_count = sum(1 for c in claim_collection.claims if c.status == VerificationStatus.REJECTED)
+        
+        if total_claims > 0:
+            rejection_rate = rejected_count / total_claims
+            
+            # If ≥95% rejected and NOT already in relaxed mode, retry with relaxed thresholds
+            if rejection_rate >= 0.95 and not config.RELAXED_VERIFICATION_MODE:
+                logger.error(
+                    f"⚠️  MASS REJECTION DETECTED: {rejection_rate*100:.1f}% rejected ({rejected_count}/{total_claims})"
+                )
+                logger.error("Auto-retrying verification with RELAXED thresholds...")
+                
+                # Temporarily enable relaxed mode
+                original_mode = config.RELAXED_VERIFICATION_MODE
+                config.RELAXED_VERIFICATION_MODE = True
+                
+                try:
+                    # Re-apply evidence policy to existing claims (no re-generation needed)
+                    logger.info("Re-evaluating claims with relaxed thresholds...")
+                    for claim in claim_collection.claims:
+                        if claim.evidence_objects:
+                            # Re-apply decision policy with relaxed thresholds
+                            status, reason, confidence = self.evidence_retriever.apply_decision_policy(
+                                claim,
+                                claim.evidence_objects
+                            )
+                            claim.status = status
+                            claim.confidence = confidence
+                    
+                    # Re-filter to verified claims
+                    verified_collection = self.claim_validator.filter_collection(
+                        claim_collection,
+                        include_verified=True,
+                        include_low_confidence=False,
+                        include_rejected=False
+                    )
+                    
+                    # Check if retry helped
+                    new_rejected_count = sum(1 for c in claim_collection.claims if c.status == VerificationStatus.REJECTED)
+                    new_rejection_rate = new_rejected_count / total_claims if total_claims > 0 else 0
+                    
+                    logger.info(
+                        f"After relaxed retry: {new_rejection_rate*100:.1f}% rejected ({new_rejected_count}/{total_claims})"
+                    )
+                    auto_relaxed_retry = True
+                    
+                    # If still ≥95% rejected, log diagnostic hints
+                    if new_rejection_rate >= 0.95:
+                        logger.error(
+                            "⚠️  Still high rejection rate after relaxed retry. Possible issues:\n"
+                            "  1. Retrieval failure (no relevant evidence found)\n"
+                            "  2. NLI model outputs mostly NEUTRAL\n"
+                            "  3. Evidence chunks too small or too large\n"
+                            "  4. Source content doesn't support generated claims\n"
+                            f"  → Check debug report at: {config.DEBUG_REPORT_PATH}"
+                        )
+                
+                finally:
+                    # Restore original mode
+                    config.RELAXED_VERIFICATION_MODE = original_mode
+        
+        # Save JSON debug report if enabled
+        if diagnostics and config.DEBUG_VERIFICATION:
+            diagnostics.save_debug_report(config.OUTPUT_DIR)
         
         # Serialize graph_metrics to dict for JSON compatibility
         graph_metrics_dict = None
@@ -515,7 +738,9 @@ class VerifiablePipelineWrapper:
             "baseline_output": baseline_output,
             "baseline_output_dict": baseline_output_dict,  # Serialized version for exports
             "timings": step_timings,
-            "total_time_seconds": processing_time
+            "total_time_seconds": processing_time,
+            "auto_relaxed_retry": auto_relaxed_retry,  # Flag indicating if auto-retry occurred
+            "url_ingestion_summary": url_ingestion_summary  # URL ingestion statistics
         }
         
         # Log summary

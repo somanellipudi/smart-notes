@@ -82,15 +82,31 @@ class SemanticRetriever:
             from sentence_transformers import SentenceTransformer, CrossEncoder
             
             logger.info(f"Loading bi-encoder: {self.model_name}")
-            self.encoder = SentenceTransformer(self.model_name, device=self.device)
+            try:
+                self.encoder = SentenceTransformer(self.model_name, device=self.device)
+                logger.info("✓ Bi-encoder loaded successfully")
+            except Exception as e:
+                logger.warning(f"Failed to load bi-encoder {self.model_name}: {e}")
+                logger.warning("Using fallback TF-IDF embeddings")
+                self.encoder = _TfidfEmbedder()
             
             logger.info(f"Loading cross-encoder: {self.reranker_name}")
-            self.reranker = CrossEncoder(self.reranker_name, device=self.device)
+            try:
+                self.reranker = CrossEncoder(self.reranker_name, device=self.device)
+                logger.info("✓ Cross-encoder loaded successfully")
+            except Exception as e:
+                logger.warning(f"Failed to load cross-encoder: {e}")
+                logger.warning("Re-ranking will be disabled")
+                self.reranker = None
             
-            logger.info("Semantic retrieval models loaded successfully")
+            logger.info("Semantic retrieval models loaded (with fallbacks if needed)")
         except Exception as e:
-            logger.error(f"Failed to load models: {e}")
-            raise
+            logger.error(f"Failed to load embedding models: {e}")
+            logger.warning("Using fallback TF-IDF embeddings")
+            try:
+                self.encoder = _TfidfEmbedder()
+            except:
+                raise RuntimeError("Could not initialize any embedding method")
     
     def index_sources(
         self,
@@ -313,6 +329,54 @@ class SemanticRetriever:
             "empty": False,
             "status": status
         }
+
+
+class _TfidfEmbedder:
+    """
+    Fallback embedder using TF-IDF when sentence-transformers unavailable.
+    
+    This provides lightweight embeddings without downloading large models.
+    """
+    
+    def __init__(self, max_features: int = 128):
+        """Initialize TF-IDF vectorizer."""
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        self.vectorizer = TfidfVectorizer(
+            max_features=max_features,
+            lowercase=True,
+            stop_words='english'
+        )
+        self.fitted = False
+        logger.info(f"Initialized TF-IDF embedder with {max_features} features")
+    
+    def encode(self, sentences, **kwargs):
+        """
+        Encode sentences to embeddings.
+        
+        Args:
+            sentences: List of strings or single string
+            **kwargs: Ignored (for compatibility with SentenceTransformer API)
+        
+        Returns:
+            numpy array of shape (len(sentences), n_features)
+        """
+        import numpy as np
+        from scipy.sparse import csr_matrix
+        
+        # Handle single string
+        if isinstance(sentences, str):
+            sentences = [sentences]
+        
+        # Fit vectorizer on first call with documents
+        if not self.fitted:
+            # Combine all sentences for vocabulary
+            embeddings = self.vectorizer.fit_transform(sentences).toarray().astype('float32')
+            self.fitted = True
+            return embeddings
+        else:
+            # Transform using existing vocabulary
+            embeddings = self.vectorizer.transform(sentences).toarray().astype('float32')
+            return embeddings
     
     def get_stats(self) -> Dict[str, int]:
         """Get indexing statistics."""

@@ -65,14 +65,29 @@ class ImageOCR:
                     self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory='/tmp/easyocr')
                     self.ocr_backend = "easyocr"
                     logger.info("✓ EasyOCR initialized successfully")
+                except ImportError as e:
+                    if "torch" in str(e).lower():
+                        logger.error(f"❌ PyTorch initialization failed: {e}")
+                        raise RuntimeError(
+                            f"OCR system unavailable: PyTorch C extensions failed to load.\n\n"
+                            f"This can be fixed by reinstalling PyTorch:\n"
+                            f"  pip install --no-build-isolation -v -e .\n"
+                            f"Or run Python from a different directory."
+                        )
+                    else:
+                        logger.error(f"❌ Failed to initialize EasyOCR: {e}")
+                        raise RuntimeError(f"OCR system unavailable: {e}")
                 except Exception as e:
                     logger.error(f"❌ Failed to initialize EasyOCR: {e}")
-                    raise
+                    raise RuntimeError(f"OCR system unavailable: {e}")
             else:
                 raise ImportError("EasyOCR module not found")
                 
         except Exception as e:
             logger.error(f"❌ OCR initialization failed: {e}")
+            # Re-raise if it's already a RuntimeError with our message
+            if isinstance(e, RuntimeError):
+                raise
             raise RuntimeError(f"OCR system unavailable: {e}")
     
     def extract_text_from_image(

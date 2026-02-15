@@ -290,10 +290,37 @@ DEBUG_NLI_DISTRIBUTION = os.getenv("DEBUG_NLI_DISTRIBUTION", "false").lower() ==
 DEBUG_CHUNKING = os.getenv("DEBUG_CHUNKING", "false").lower() == "true"
 """Enable source chunking validation diagnostics"""
 
+MAX_CLAIMS_TO_DEBUG = int(os.getenv("MAX_CLAIMS_TO_DEBUG", "50"))
+"""Maximum number of claims to print in debug output (to avoid log overflow)"""
+
+SAVE_DEBUG_REPORT = os.getenv("SAVE_DEBUG_REPORT", "true").lower() == "true"
+"""Save JSON debug report to file after verification"""
+
+DEBUG_REPORT_PATH = os.getenv("DEBUG_REPORT_PATH", "outputs/debug_session_report.json")
+"""Path to save JSON debug report"""
+
+# Default verification thresholds (strict mode)
+MIN_ENTAILMENT_PROB_DEFAULT = float(os.getenv("MIN_ENTAILMENT_PROB_DEFAULT", "0.60"))
+MIN_SUPPORTING_SOURCES_DEFAULT = int(os.getenv("MIN_SUPPORTING_SOURCES_DEFAULT", "2"))
+MAX_CONTRADICTION_PROB_DEFAULT = float(os.getenv("MAX_CONTRADICTION_PROB_DEFAULT", "0.30"))
+
 # Relaxed mode thresholds (only active if RELAXED_VERIFICATION_MODE=True)
-RELAXED_MIN_ENTAILMENT_PROB = float(os.getenv("RELAXED_MIN_ENTAILMENT_PROB", "0.50"))
-RELAXED_MIN_SUPPORTING_SOURCES = int(os.getenv("RELAXED_MIN_SUPPORTING_SOURCES", "1"))
-RELAXED_MAX_CONTRADICTION_PROB = float(os.getenv("RELAXED_MAX_CONTRADICTION_PROB", "0.50"))
+MIN_ENTAILMENT_PROB_RELAXED = float(os.getenv("MIN_ENTAILMENT_PROB_RELAXED", "0.50"))
+MIN_SUPPORTING_SOURCES_RELAXED = int(os.getenv("MIN_SUPPORTING_SOURCES_RELAXED", "1"))
+MAX_CONTRADICTION_PROB_RELAXED = float(os.getenv("MAX_CONTRADICTION_PROB_RELAXED", "0.50"))
+
+# Legacy names for backward compatibility
+RELAXED_MIN_ENTAILMENT_PROB = MIN_ENTAILMENT_PROB_RELAXED
+RELAXED_MIN_SUPPORTING_SOURCES = MIN_SUPPORTING_SOURCES_RELAXED
+RELAXED_MAX_CONTRADICTION_PROB = MAX_CONTRADICTION_PROB_RELAXED
+
+# URL ingestion feature flag
+ENABLE_URL_SOURCES = os.getenv("ENABLE_URL_SOURCES", "true").lower() == "true"
+"""Enable ingestion of YouTube videos and web articles as evidence sources"""
+
+# Evidence store validation
+MIN_INPUT_CHARS_FOR_VERIFICATION = int(os.getenv("MIN_INPUT_CHARS_FOR_VERIFICATION", "500"))
+"""Minimum input text length required for verification (warns if below, errors if <100)"""
 
 
 # ==================== MONITORING & TELEMETRY ====================

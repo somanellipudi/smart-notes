@@ -491,6 +491,13 @@ def process_session(
         # Debug: Log what filters are being passed
         st.info(f"🔍 Filters being sent to pipeline: {st.session_state.output_filters}")
         
+        # Parse URLs from text area
+        urls = []
+        if 'urls_text' in locals() and urls_text and urls_text.strip():
+            urls = [url.strip() for url in urls_text.strip().split('\n') if url.strip()]
+            if urls:
+                st.info(f"🌐 Will ingest {len(urls)} URL(s) as evidence sources")
+        
         if llm_provider_type != "fallback":
             try:
                 output, verifiable_metadata = pipeline.process(
@@ -499,21 +506,43 @@ def process_session(
                     external_context=external_context,
                     session_id=session_id,
                     verifiable_mode=verifiable_mode,
-                    output_filters=st.session_state.output_filters
+                    output_filters=st.session_state.output_filters,
+                    urls=urls
                 )
             except Exception as e:
                 error_text = str(e)
-                if "insufficient_quota" in error_text or "RateLimitError" in error_text:
+                
+                # Handle evidence store validation failures
+                if isinstance(e, RuntimeError) and "Evidence store validation failed" in error_text:
+                    st.error(f"❌ Cannot verify content: {error_text[:150]}...")
+                    output = ClassSessionOutput(
+                        session_id=session_id,
+                        class_summary="Content provided was insufficient for analysis. Please provide at least 500 characters of substantive content or valid lecture notes.",
+                        topics=[],
+                        key_concepts=[],
+                        equation_explanations=[],
+                        worked_examples=[],
+                        common_mistakes=[],
+                        faqs=[],
+                        real_world_connections=[],
+                        metadata={"fallback": True, "error": "insufficient_input"}
+                    )
+                    verifiable_metadata = None
+                # Handle quota errors
+                elif "insufficient_quota" in error_text or "RateLimitError" in error_text:
                     st.error(
                         "❌ OpenAI quota exceeded. Please check your plan/billing, "
                         "or switch to Local LLM (Ollama) in the sidebar."
                     )
+                    output, verifiable_metadata = _build_fallback_output(error_text)
+                # Handle Ollama connection errors
                 elif "WinError 10061" in error_text or "localhost" in error_text:
                     st.warning("Ollama is not running. Start it or switch to OpenAI. Using fallback output.")
+                    output, verifiable_metadata = _build_fallback_output(error_text)
+                # Generic error handling
                 else:
                     st.error(f"❌ LLM call failed: {e}")
-
-                output, verifiable_metadata = _build_fallback_output(error_text)
+                    output, verifiable_metadata = _build_fallback_output(error_text)
         
         if verifiable_mode and verifiable_metadata:
             metrics = verifiable_metadata["metrics"]
@@ -589,6 +618,43 @@ def _save_ocr_cache(cache: dict) -> None:
 
 def _image_hash(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes).hexdigest()
+
+
+def _extract_text_from_pdf(pdf_file) -> str:
+    """
+    Extract text from a PDF file.
+    
+    Args:
+        pdf_file: Streamlit uploaded file object
+        
+    Returns:
+        Extracted text from PDF
+    """
+    try:
+        from PyPDF2 import PdfReader
+        
+        pdf_reader = PdfReader(pdf_file)
+        extracted_text = ""
+        
+        for page_num, page in enumerate(pdf_reader.pages):
+            try:
+                page_text = page.extract_text()
+                if page_text:
+                    extracted_text += f"--- Page {page_num + 1} ---\n{page_text}\n"
+            except Exception as e:
+                logger.warning(f"Failed to extract text from page {page_num + 1}: {str(e)}")
+        
+        if not extracted_text.strip():
+            logger.warning("PDF extracted but no text content found")
+            return ""
+        
+        return extracted_text
+    except ImportError:
+        logger.error("PyPDF2 not installed. Install with: pip install PyPDF2")
+        raise RuntimeError("PDF support requires PyPDF2. Install with: pip install PyPDF2")
+    except Exception as e:
+        logger.error(f"Error extracting PDF: {str(e)}")
+        raise RuntimeError(f"Failed to extract PDF: {str(e)}")
 
 
 def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] = None):
@@ -1431,7 +1497,9 @@ def main():
             st.warning("⚠️ No LLM providers available. Using Demo Mode (read-only).\n\nTo enable processing:\n1. Set OPENAI_API_KEY in .env\n2. Or run Ollama locally at http://localhost:11434")
         
         default_index = 0
-        if "💻 Local LLM (Ollama)" in provider_options:
+        if "🌐 OpenAI (GPT-4)" in provider_options:
+            default_index = provider_options.index("🌐 OpenAI (GPT-4)")
+        elif "💻 Local LLM (Ollama)" in provider_options:
             default_index = provider_options.index("💻 Local LLM (Ollama)")
 
         selected_llm = st.radio(
@@ -1460,7 +1528,7 @@ def main():
         # Verifiable Mode toggle
         enable_verifiable_mode = st.checkbox(
             "Enable Verifiable Mode (Research)",
-            value=False,
+            value=True,
             help=(
                 "Enforces evidence-grounded, claim-based generation. "
                 "Claims without sufficient evidence are rejected. "
@@ -1713,7 +1781,7 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
 
         notes_input_method = st.radio(
             "Choose input method:",
-            ["Type/Paste Text", "Upload Images"],
+            ["Type/Paste Text", "Upload Images & PDFs"],
             horizontal=True
         )
 
@@ -1726,20 +1794,23 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
             )
         else:
             notes_images = st.file_uploader(
-                "Upload note images",
-                type=["jpg", "jpeg", "png", "bmp"],
+                "Upload note images or PDF files",
+                type=["jpg", "jpeg", "png", "bmp", "pdf"],
                 accept_multiple_files=True,
                 label_visibility="collapsed"
             )
 
             if notes_images:
-                st.success(f"✓ {len(notes_images)} image(s) uploaded - OCR will extract text")
+                st.success(f"✓ {len(notes_images)} file(s) uploaded - OCR and PDF extraction will extract text")
 
                 if len(notes_images) <= 3:
                     cols = st.columns(len(notes_images))
                     for idx, (col, img) in enumerate(zip(cols, notes_images)):
                         with col:
-                            st.image(img, caption=f"Image {idx+1}")
+                            if img.type == "application/pdf":
+                                st.info(f"📄 PDF: {img.name}")
+                            else:
+                                st.image(img, caption=f"Image {idx+1}")
 
         with st.expander("🎤 Audio (Optional)", expanded=False):
             st.caption("Upload a lecture recording for transcription")
@@ -1768,6 +1839,19 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                 label_visibility="collapsed"
             )
 
+        with st.expander("🌐 URL Sources (Beta)", expanded=False):
+            st.caption("Add YouTube videos or web articles as evidence sources")
+            urls_text = st.text_area(
+                "URLs (one per line)",
+                height=100,
+                placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ\nhttps://example.com/article\n...",
+                label_visibility="collapsed",
+                help="Enter YouTube video URLs or web article URLs (one per line). Content will be fetched and used as evidence for claim verification."
+            )
+            
+            if urls_text and not config.ENABLE_URL_SOURCES:
+                st.warning("⚠️ URL ingestion is disabled. Set ENABLE_URL_SOURCES=true in .env to enable.")
+
         with st.expander("Session ID", expanded=False):
             session_id = st.text_input(
                 "Custom session ID",
@@ -1791,65 +1875,90 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
     
     # Process when button clicked
     if generate_button:
-        # Extract text from images if uploaded
+        # Extract text from images and PDFs if uploaded
         ocr_extracted_text = ""
-        if notes_images and len(notes_images) > 0:
-            with st.spinner("📸 Extracting text from images using OCR..."):
-                try:
-                    cache = _load_ocr_cache()
-                    image_hashes = []
-                    for img in notes_images:
-                        img_bytes = img.getvalue()
-                        image_hashes.append(_image_hash(img_bytes))
-
-                    cache_key = "|".join(image_hashes)
-                    if cache_key in cache["items"]:
-                        ocr_extracted_text = cache["items"][cache_key]
-                        st.success(f"✓ Using cached OCR: {len(ocr_extracted_text)} characters")
-                    else:
-                        selected_model = config.OLLAMA_MODEL if llm_type == "ollama" else config.LLM_MODEL
-                        ocr_extracted_text = process_images(
-                            notes_images, 
-                            correct_with_llm=True,
-                            provider_type=llm_type,
-                            api_key=config.OPENAI_API_KEY,
-                            ollama_url=config.OLLAMA_URL,
-                            model=selected_model
-                        )
-                        cache["items"][cache_key] = ocr_extracted_text
-                        cache["order"] = [k for k in cache["order"] if k != cache_key]
-                        cache["order"].append(cache_key)
-                        while len(cache["order"]) > 3:
-                            old_key = cache["order"].pop(0)
-                            cache["items"].pop(old_key, None)
-                        _save_ocr_cache(cache)
-                        st.success(f"✓ OCR extraction + LLM correction complete: {len(ocr_extracted_text)} characters")
-                    
-                    if ocr_extracted_text:
-                        with st.expander("✏️ Review & Edit OCR Text", expanded=True):
-                            st.info("💡 The text below has been corrected using AI to fix OCR errors. You can edit it before processing.")
-                            ocr_extracted_text = st.text_area(
-                                "Corrected OCR Output (editable)",
-                                value=ocr_extracted_text,
-                                height=250,
-                                key="ocr_text_area"
-                            )
-                    else:
-                        st.warning("⚠️ OCR extraction returned no text. The image may be empty or text unreadable.")
-                        
-                except Exception as e:
-                    st.error(f"❌ OCR extraction failed: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
-                    ocr_extracted_text = ""
+        pdf_extracted_text = ""
+        combined_extracted_text = ""
         
-        # Combine typed notes and OCR-extracted text
-        combined_notes = notes_text
-        if ocr_extracted_text:
-            if combined_notes:
-                combined_notes += "\n\n---\n\n" + ocr_extracted_text
+        if notes_images and len(notes_images) > 0:
+            # Separate images and PDFs
+            image_files = [f for f in notes_images if f.type != "application/pdf"]
+            pdf_files = [f for f in notes_images if f.type == "application/pdf"]
+            
+            # Process PDFs
+            if pdf_files:
+                with st.spinner("📄 Extracting text from PDF files..."):
+                    try:
+                        for pdf_file in pdf_files:
+                            pdf_text = _extract_text_from_pdf(pdf_file)
+                            if pdf_text:
+                                pdf_extracted_text += f"\n--- From: {pdf_file.name} ---\n{pdf_text}"
+                        
+                        if pdf_extracted_text:
+                            st.success(f"✓ PDF extraction complete: {len(pdf_extracted_text)} characters")
+                    except Exception as e:
+                        st.error(f"❌ PDF extraction failed: {str(e)}")
+                        logger.error(f"PDF extraction error: {str(e)}")
+            
+            # Process Images with OCR
+            if image_files:
+                with st.spinner("📸 Extracting text from images using OCR..."):
+                    try:
+                        cache = _load_ocr_cache()
+                        image_hashes = []
+                        for img in image_files:
+                            img_bytes = img.getvalue()
+                            image_hashes.append(_image_hash(img_bytes))
+
+                        cache_key = "|".join(image_hashes)
+                        if cache_key in cache["items"]:
+                            ocr_extracted_text = cache["items"][cache_key]
+                            st.success(f"✓ Using cached OCR: {len(ocr_extracted_text)} characters")
+                        else:
+                            selected_model = config.OLLAMA_MODEL if llm_type == "ollama" else config.LLM_MODEL
+                            ocr_extracted_text = process_images(
+                                image_files, 
+                                correct_with_llm=True,
+                                provider_type=llm_type,
+                                api_key=config.OPENAI_API_KEY,
+                                ollama_url=config.OLLAMA_URL,
+                                model=selected_model
+                            )
+                            cache["items"][cache_key] = ocr_extracted_text
+                            cache["order"] = [k for k in cache["order"] if k != cache_key]
+                            cache["order"].append(cache_key)
+                            while len(cache["order"]) > 3:
+                                old_key = cache["order"].pop(0)
+                                cache["items"].pop(old_key, None)
+                            _save_ocr_cache(cache)
+                            st.success(f"✓ OCR extraction + LLM correction complete: {len(ocr_extracted_text)} characters")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Image OCR extraction failed: {str(e)}")
+                        logger.error(f"Image OCR error: {str(e)}")
+            
+            # Combine all extracted text
+            combined_extracted_text = (pdf_extracted_text.strip() + "\n" + ocr_extracted_text.strip()).strip()
+            
+            if combined_extracted_text:
+                with st.expander("✏️ Review & Edit Extracted Text", expanded=True):
+                    st.info("💡 The text below has been extracted from your files. You can edit it before processing.")
+                    combined_extracted_text = st.text_area(
+                        "Extracted Text (editable)",
+                        value=combined_extracted_text,
+                        height=250,
+                        key="extracted_text_area"
+                    )
             else:
-                combined_notes = ocr_extracted_text
+                st.warning("⚠️ No text could be extracted from the uploaded files.")
+        
+        # Combine typed notes and extracted text (from PDFs and OCR)
+        combined_notes = notes_text
+        if combined_extracted_text:
+            if combined_notes:
+                combined_notes += "\n\n---\n\n" + combined_extracted_text
+            else:
+                combined_notes = combined_extracted_text
         
         # Validation - check if we have any input at all
         has_input = combined_notes or audio_file or (notes_images and len(notes_images) > 0)

@@ -123,6 +123,9 @@ class VerificationDiagnostics:
         self.contradictions: List[float] = []
         self.source_counts: List[int] = []
         
+        # Evidence store statistics (added in pipeline)
+        self.evidence_stats: Dict[str, Any] = {}
+        
     def log_claim_verification(
         self,
         claim: LearningClaim,
@@ -374,6 +377,9 @@ class VerificationDiagnostics:
             "timestamp": datetime.now().isoformat(),
             "session_id": self.session_id,
             "mode": "RELAXED" if config.RELAXED_VERIFICATION_MODE else "STANDARD",
+            "evidence": self.evidence_stats if self.evidence_stats else {
+                "warning": "Evidence statistics not available (pipeline may have failed before evidence store was built)"
+            },
             "summary": {
                 "total_claims": summary.total_claims,
                 "verified": summary.verified_count,

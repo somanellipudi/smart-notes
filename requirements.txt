@@ -11,10 +11,11 @@ torchaudio>=2.0.0
 librosa>=0.10.0
 soundfile>=0.12.0
 
-# Image OCR (handwritten notes, blackboard/whiteboard)
+# Image OCR & PDF (handwritten notes, blackboard/whiteboard, PDF files)
 easyocr>=1.7.0
 Pillow>=10.0.0
 opencv-python-headless>=4.8.0
+PyPDF2>=3.0.0
 
 # Text processing
 nltk>=3.8.0
