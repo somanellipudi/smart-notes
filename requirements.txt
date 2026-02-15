@@ -16,11 +16,21 @@ easyocr>=1.7.0
 Pillow>=10.0.0
 opencv-python-headless>=4.8.0
 PyPDF2>=3.0.0
+PyMuPDF>=1.23.0  # fitz - alternative PDF text extraction
+pdfplumber>=0.10.0  # Alternative PDF extraction with table support
+pdf2image>=1.16.0  # PDF to image conversion for OCR fallback
+python-bidi>=0.4.2  # Required by easyocr for RTL text support
+arabic-reshaper>=0.0.7  # Required by easyocr for Arabic text
 
 # Text processing
 nltk>=3.8.0
 spacy>=3.5.0
 regex>=2023.0.0
+trafilatura>=1.6.0  # Web article extraction
+readability-lxml>=0.8.1  # Article extraction fallback
+beautifulsoup4>=4.12.0  # HTML parsing for URLs and articles
+youtube-transcript-api>=0.6.0  # YouTube transcript fetching
+yt-dlp>=2023.12.0  # YouTube audio download (optional fallback)
 
 # Semantic retrieval & verification
 sentence-transformers>=2.2.0

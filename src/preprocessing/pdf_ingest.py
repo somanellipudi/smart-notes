@@ -95,7 +95,14 @@ def extract_pdf_text(uploaded_file, ocr: Optional[Any] = None) -> Tuple[str, Dic
     if hasattr(uploaded_file, 'name'):
         # Streamlit UploadedFile
         file_path = uploaded_file.name
-        file_bytes = uploaded_file.read()
+        # Use getvalue() to avoid file pointer issues, fallback to read() if needed
+        if hasattr(uploaded_file, 'getvalue'):
+            file_bytes = uploaded_file.getvalue()
+        else:
+            # Reset pointer and read for file-like objects
+            if hasattr(uploaded_file, 'seek'):
+                uploaded_file.seek(0)
+            file_bytes = uploaded_file.read()
     else:
         # Assume it's a file path string
         file_path = str(uploaded_file)

@@ -37,6 +37,7 @@ try:
     from src.preprocessing.text_processing import preprocess_classroom_content
     from src.preprocessing.pdf_ingest import extract_pdf_text
     from src.preprocessing.url_ingest import fetch_url_text
+    from src.ingestion.document_ingestor import ingest_document, IngestionDiagnostics
     from src.reasoning.verifiable_pipeline import VerifiablePipelineWrapper
     from src.evaluation.metrics import evaluate_session_output
     from src.study_book.session_manager import SessionManager
@@ -47,6 +48,7 @@ try:
     from src.display.interactive_claims import InteractiveClaimDisplay
     from src.graph.graph_sanitize import export_graphml_bytes
     from src.graph.claim_graph import export_adjacency_json
+    from src.retrieval.evidence_store import get_ingestion_diagnostics
     from src.schema.output_schema import (
         ClassSessionOutput,
         Topic,
@@ -454,9 +456,14 @@ def process_session(
                 fallback
             )
 
+            # Ensure summary meets minimum length requirement (50 chars)
+            summary = fallback_output["summary"]
+            if len(summary.strip()) < 50:
+                summary = "Study guide generated from available content. " + summary
+
             output = ClassSessionOutput(
                 session_id=session_id,
-                class_summary=fallback_output["summary"],
+                class_summary=summary,
                 topics=[Topic(name=t.get("title", "Topic"), summary=t.get("description", "")) for t in fallback_output["topics"]],
                 key_concepts=[Concept(name=c.get("name", "Concept"), definition=c.get("definition", "")) for c in fallback_output["concepts"]],
                 equation_explanations=[EquationExplanation(equation=e.get("equation", ""), explanation=e.get("explanation", "")) for e in fallback_output.get("equations", [])],
@@ -622,7 +629,7 @@ def _image_hash(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes).hexdigest()
 
 
-def _extract_text_from_pdf(pdf_file) -> Tuple[str, Dict[str, Any]]:
+def _extract_text_from_pdf(pdf_file, ocr=None) -> Tuple[str, Dict[str, Any]]:
     """
     Extract text from a PDF file with multi-strategy fallback.
     
@@ -633,13 +640,14 @@ def _extract_text_from_pdf(pdf_file) -> Tuple[str, Dict[str, Any]]:
     
     Args:
         pdf_file: Streamlit uploaded file object
+        ocr: Optional ImageOCR instance for OCR fallback
         
     Returns:
         Tuple of (extracted_text, metadata_dict)
     """
     try:
-        # Use new robust extraction module
-        text, metadata = extract_pdf_text(pdf_file, ocr=None)
+        # Use new robust extraction module with OCR fallback
+        text, metadata = extract_pdf_text(pdf_file, ocr=ocr)
         
         if not text.strip():
             logger.warning(f"PDF {pdf_file.name} extracted but no quality text found")
@@ -647,13 +655,94 @@ def _extract_text_from_pdf(pdf_file) -> Tuple[str, Dict[str, Any]]:
         
         # Format with page information if available
         pages = metadata.get("pages", 1)
-        extraction_method = metadata.get("extraction_method", "unknown")
+        # Handle both "extraction_method_used" and "extraction_method" keys for compatibility
+        extraction_method = metadata.get("extraction_method_used") or metadata.get("extraction_method", "unknown")
         formatted_text = f"--- PDF: {pdf_file.name} ({pages} pages, method: {extraction_method}) ---\n{text}\n"
         
         return formatted_text, metadata
     except Exception as e:
         logger.error(f"Error extracting PDF {pdf_file.name}: {str(e)}")
         return "", {"error": str(e), "extraction_method": "error"}
+
+
+def display_ingestion_diagnostics(diagnostics: Dict[str, Any], show_minimal: bool = False):
+    """
+    Display ingestion diagnostics in UI for debugging and clarity.
+    
+    Args:
+        diagnostics: Diagnostics dictionary from get_ingestion_diagnostics()
+        show_minimal: If True, show only critical issues; else show full details
+    """
+    if diagnostics.get("is_valid"):
+        st.success(
+            f"✅ **Extraction Successful**: {diagnostics['extracted_text_length']:,} characters from "
+            f"{diagnostics['sources_count']} source(s)"
+        )
+        return
+    
+    # Display detailed ingestion failure
+    error_msg = diagnostics.get("error_message", "Unknown ingestion error")
+    
+    st.error(f"❌ {error_msg}")
+    
+    # Show diagnostics details
+    with st.expander("📋 Ingestion Diagnostics", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(
+                "Text Extracted",
+                f"{diagnostics['extracted_text_length']:,} chars",
+                help="Total characters successfully extracted"
+            )
+        
+        with col2:
+            st.metric(
+                "Minimum Required",
+                f"{diagnostics['minimum_required']:,} chars",
+                help=f"Required for verification mode"
+            )
+        
+        with col3:
+            shortfall = diagnostics['minimum_required'] - diagnostics['extracted_text_length']
+            if shortfall > 0:
+                st.metric(
+                    "Shortfall",
+                    f"{shortfall:,} chars",
+                    delta=f"-{shortfall:,}",
+                    delta_color="inverse",
+                    help="Additional chars needed"
+                )
+            else:
+                st.metric(
+                    "Status",
+                    "✓ Ready",
+                    delta="sufficient",
+                    help="Meets requirements"
+                )
+        
+        st.write("**Source Breakdown:**")
+        if diagnostics['source_breakdown']:
+            sources_str = ", ".join(
+                f"{count} {source_type}" 
+                for source_type, count in diagnostics['source_breakdown'].items()
+            )
+            st.info(sources_str)
+        else:
+            st.warning("No sources detected")
+        
+        st.write("**Suggested Actions:**")
+        for i, suggestion in enumerate(diagnostics['suggestions'], 1):
+            st.write(f"{i}. {suggestion}")
+    
+    # Offering alternatives
+    st.markdown("""
+    #### 💡 Try These Next:
+    - **OCR Mode**: If you have a scanned PDF or image, ensure OCR is available
+    - **Text Input**: Paste the content directly using "Type/Paste Text" mode  
+    - **Multiple Files**: Upload additional materials to meet the character threshold
+    - **Fast Mode**: Use the "Generate Study Guide (Fast)" for quick analysis without verification
+    """)
 
 
 def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] = None):
@@ -1860,24 +1949,50 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
 
     st.divider()
 
-    generate_button = st.button(
-        "Generate",
-        type="primary",
-        use_container_width=True,
-        key="generate_btn",
-        disabled=(llm_type == "demo")
-    )
+    # Mode selection with two buttons
+    col_fast, col_verifiable = st.columns(2)
     
-    # Show message if button is disabled
+    fast_button = False
+    verifiable_button = False
+    
+    with col_fast:
+        fast_button = st.button(
+            "🚀 Generate Study Guide (Fast)",
+            type="secondary",
+            use_container_width=True,
+            key="fast_btn",
+            disabled=(llm_type == "demo"),
+            help="Quick analysis without evidence verification (suitable for any content)"
+        )
+    
+    with col_verifiable:
+        verifiable_button = st.button(
+            "🔬 Run Verifiable Mode",
+            type="primary",
+            use_container_width=True,
+            key="verifiable_btn",
+            disabled=(llm_type == "demo"),
+            help="Evidence-grounded analysis with claim verification (requires 500+ chars)"
+        )
+    
+    # Show message if buttons are disabled
     if llm_type == "demo":
         st.info("💡 To enable processing, set OPENAI_API_KEY or run Ollama locally")
     
-    # Process when button clicked
+    # Determine which mode to run
+    generate_button = fast_button or verifiable_button
+    should_run_verifiable = verifiable_button
+    
+    # Process when either button clicked
     if generate_button:
+        # Initialize OCR for PDF processing
+        ocr_instance = initialize_ocr()
+        
         # Extract text from images and PDFs if uploaded
         ocr_extracted_text = ""
         pdf_extracted_text = ""
         combined_extracted_text = ""
+        ingestion_diagnostics = None
         
         if notes_images and len(notes_images) > 0:
             # Separate images and PDFs
@@ -1889,10 +2004,11 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                 with st.spinner("📄 Extracting text from PDF files..."):
                     try:
                         for pdf_file in pdf_files:
-                            pdf_text, pdf_metadata = _extract_text_from_pdf(pdf_file)
+                            pdf_text, pdf_metadata = _extract_text_from_pdf(pdf_file, ocr=ocr_instance)
                             if pdf_text:
                                 pdf_extracted_text += pdf_text
-                                extraction_method = pdf_metadata.get("extraction_method", "unknown")
+                                # Handle both "extraction_method_used" and "extraction_method" keys
+                                extraction_method = pdf_metadata.get("extraction_method_used") or pdf_metadata.get("extraction_method", "unknown")
                                 logger.info(f"PDF extraction success: {pdf_file.name} ({extraction_method})")
                         
                         if pdf_extracted_text:
@@ -1968,6 +2084,32 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
         if not has_input:
             st.error("Please provide notes, images, or audio.")
         else:
+            # Override verifiable mode based on button clicked
+            actual_verifiable_mode = should_run_verifiable and enable_verifiable_mode
+            
+            if should_run_verifiable and not enable_verifiable_mode:
+                st.warning(
+                    "⚠️ Verifiable Mode not enabled in settings. "
+                    "Enable it in the sidebar Settings → Processing to use evidence verification."
+                )
+                actual_verifiable_mode = False
+            
+            # Show information about what will happen
+            if actual_verifiable_mode:
+                st.info(
+                    "🔬 **Running in Verifiable Mode**\n\n"
+                    "• Claims will be verified against evidence\n"
+                    "• Only well-supported claims will be included\n"
+                    "• Each claim shows confidence and evidence sources"
+                )
+            else:
+                st.info(
+                    "🚀 **Running in Fast Mode**\n\n"
+                    "• Quick analysis without evidence verification\n"
+                    "• All extracted content is processed\n"
+                    "• Suitable for any content type"
+                )
+            
             # Process the session and store in session state
             result, verifiable_metadata = process_session(
                 audio_file=audio_file,
@@ -1975,8 +2117,8 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                 equations=equations,
                 external_context=external_context,
                 session_id=session_id,
-                verifiable_mode=enable_verifiable_mode,
-                domain_profile=domain_profile if enable_verifiable_mode else "physics",
+                verifiable_mode=actual_verifiable_mode,
+                domain_profile=domain_profile if actual_verifiable_mode else "physics",
                 llm_provider_type=llm_type
             )
             

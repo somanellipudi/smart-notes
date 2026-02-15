@@ -245,6 +245,8 @@ class EvidenceStore:
         """
         Validate that evidence store is ready for verification.
         
+        With actionable error messages distinguishing ingestion failures from validation issues.
+        
         Args:
             min_chars: Minimum total characters required
         
@@ -252,17 +254,40 @@ class EvidenceStore:
             (is_valid, error_message)
         """
         if len(self.evidence) == 0:
-            return False, "Evidence store has 0 chunks. Cannot run verification."
+            return False, (
+                "**Ingestion Failed**: No text could be extracted from uploaded files. "
+                "Try uploading a different PDF or use OCR-compatible files."
+            )
         
+        # If very low text, suggest OCR or file quality issues
+        if self.total_chars < 50:
+            return False, (
+                f"**Ingestion Failed**: Extracted only {self.total_chars} characters. "
+                "This suggests the file may be corrupted, empty, or an unsupported format. "
+                "Try:\n  1. OCR mode if available\n  2. A different file\n  3. Plain text instead of PDF"
+            )
+        
+        # If under min for verification but reasonable amount, provide guidance
         if self.total_chars < min_chars:
-            return False, f"Evidence store has only {self.total_chars} chars (minimum: {min_chars})"
+            shortfall = min_chars - self.total_chars
+            return False, (
+                f"**Ingestion Insufficient**: Extracted {self.total_chars} chars (need {min_chars}). "
+                f"Need {shortfall} more characters. "
+                "Try:\n  1. Upload additional materials\n  2. Use simpler language detection\n  3. Skip verification mode"
+            )
         
         if not self.index_built:
-            return False, "FAISS index not built. Call build_index() first."
+            return False, (
+                "**System Error**: Evidence index not built. "
+                "This is an internal error - please report it."
+            )
         
         if FAISS_AVAILABLE and isinstance(self.faiss_index, faiss.Index):
             if self.faiss_index.ntotal == 0:
-                return False, "FAISS index is empty"
+                return False, (
+                    "**System Error**: FAISS index is empty despite evidence being present. "
+                    "Please report this error."
+                )
         
         return True, "Evidence store is valid"
 
@@ -283,3 +308,52 @@ def validate_evidence_store(store: EvidenceStore, min_chars: int = 500) -> None:
         raise ValueError(f"Evidence store validation failed: {error_msg}")
     
     logger.info(f"✓ Evidence store validated: {len(store.evidence)} chunks, {store.total_chars} chars")
+
+
+def get_ingestion_diagnostics(store: EvidenceStore, min_chars: int = 500) -> Dict[str, Any]:
+    """
+    Get detailed ingestion diagnostics for debugging and UI display.
+    
+    Provides actionable feedback about extraction quality and next steps.
+    
+    Args:
+        store: Evidence store to analyze
+        min_chars: Minimum total characters required for verification
+    
+    Returns:
+        Dictionary with diagnostic details
+    """
+    is_valid, error_msg = store.validate(min_chars=min_chars)
+    
+    stats = store.get_statistics()
+    
+    diagnostics = {
+        "is_valid": is_valid,
+        "error_message": error_msg if not is_valid else None,
+        "extracted_text_length": store.total_chars,
+        "minimum_required": min_chars,
+        "chunks_count": len(store.evidence),
+        "sources_count": len(store.source_counts),
+        "source_breakdown": store.source_counts,
+        "index_built": store.index_built,
+        "faiss_available": FAISS_AVAILABLE,
+    }
+    
+    # Add actionable suggestions
+    suggestions = []
+    
+    if store.total_chars == 0:
+        suggestions.append("Try uploading a different file format (text-based PDF preferred)")
+        suggestions.append("Use OCR mode if available for scanned documents")
+    elif store.total_chars < min_chars:
+        shortfall = min_chars - store.total_chars
+        suggestions.append(f"Add {shortfall} more characters to meet verification requirements")
+        suggestions.append("Upload additional source materials or reference documents")
+        suggestions.append("Consider using fast mode instead of verifiable mode")
+    else:
+        suggestions.append("✓ Content meets quality threshold for verification")
+    
+    diagnostics["suggestions"] = suggestions
+    
+    return diagnostics
+

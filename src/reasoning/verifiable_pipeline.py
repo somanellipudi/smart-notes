@@ -356,7 +356,23 @@ class VerifiablePipelineWrapper:
                     f"extraction corruption. Retry with OCR fallback enabled."
                 )
             
-            return baseline_output or output_filters, verifiable_metadata
+            # Ensure we return a ClassSessionOutput, not a dict
+            if baseline_output is None:
+                from src.schema.output_schema import ClassSessionOutput
+                baseline_output = ClassSessionOutput(
+                    session_id=session_id,
+                    class_summary="Unable to process input. The provided content does not meet minimum requirements for analysis. Please check input quality and provide at least 100 characters of substantive text, then try again.",
+                    topics=[],
+                    key_concepts=[],
+                    equation_explanations=[],
+                    worked_examples=[],
+                    common_mistakes=[],
+                    faqs=[],
+                    real_world_connections=[],
+                    metadata={"verifiable": False, "status": "UNVERIFIABLE_INPUT", "error": "baseline_generation_failed"}
+                )
+            
+            return baseline_output, verifiable_metadata
         
         step_timings["step_0_25_quality_assessment"] = time.perf_counter() - step_start
         logger.info(f"Step 0.25 time: {step_timings['step_0_25_quality_assessment']:.2f}s")
@@ -487,8 +503,24 @@ class VerifiablePipelineWrapper:
                 }
             }
             
-            # Return baseline output (or empty results if baseline failed)
-            return baseline_output or output_filters, verifiable_metadata
+            # Ensure we return a ClassSessionOutput, not a dict
+            if baseline_output is None:
+                from src.schema.output_schema import ClassSessionOutput
+                baseline_output = ClassSessionOutput(
+                    session_id=session_id,
+                    class_summary="Unable to process input. The provided content does not meet minimum requirements for verification mode. Please provide at least 500 characters of substantive lecture content or notes, then try again.",
+                    topics=[],
+                    key_concepts=[],
+                    equation_explanations=[],
+                    worked_examples=[],
+                    common_mistakes=[],
+                    faqs=[],
+                    real_world_connections=[],
+                    metadata={"verifiable": False, "status": "INSUFFICIENT_EVIDENCE", "error": "baseline_generation_failed"}
+                )
+            
+            # Return baseline output with a flag that verification was skipped
+            return baseline_output, verifiable_metadata
         
         step_timings["step_0_5_build_evidence_store"] = time.perf_counter() - step_start
         logger.info(f"Step 0.5 time: {step_timings['step_0_5_build_evidence_store']:.2f}s")
