@@ -55,7 +55,7 @@ class RejectionHistogram:
             self.rejected_claims += 1
             if rejection_reason:
                 self.rejection_counts[rejection_reason] += 1
-        elif status == VerificationStatus.UNCERTAIN:
+        elif status == VerificationStatus.LOW_CONFIDENCE:
             self.uncertain_claims += 1
     
     def get_summary(self) -> Dict[str, Any]:
@@ -69,9 +69,10 @@ class RejectionHistogram:
             'total_claims': self.total_claims,
             'verified': self.verified_claims,
             'rejected': self.rejected_claims,
-            'uncertain': self.uncertain_claims,
+            'low_confidence': self.uncertain_claims,
             'verified_rate': self.verified_claims / max(1, self.total_claims),
             'rejected_rate': self.rejected_claims / max(1, self.total_claims),
+            'low_confidence_rate': self.uncertain_claims / max(1, self.total_claims),
             'rejection_reasons': dict(sorted(
                 self.rejection_counts.items(),
                 key=lambda x: x[1],
@@ -93,7 +94,7 @@ class RejectionHistogram:
         logger.info(f"Total claims: {summary['total_claims']}")
         logger.info(f"  ✓ Verified: {summary['verified']} ({summary['verified_rate']:.1%})")
         logger.info(f"  ✗ Rejected: {summary['rejected']} ({summary['rejected_rate']:.1%})")
-        logger.info(f"  ? Uncertain: {summary['uncertain']}")
+        logger.info(f"  ? Low Confidence: {summary['low_confidence']} ({summary.get('low_confidence_rate', 0):.1%})")
         
         if summary['rejection_reasons']:
             logger.info("\nRejection Reasons (Top 5):")
