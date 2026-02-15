@@ -97,13 +97,14 @@ class EvidenceStore:
         for ev in evidence_list:
             self.add_evidence(ev)
     
-    def build_index(self, embeddings: Optional[np.ndarray] = None) -> None:
+    def build_index(self, embeddings: Optional[np.ndarray] = None, embedding_dim: Optional[int] = None) -> None:
         """
         Build FAISS index from evidence embeddings.
         
         Args:
             embeddings: Optional pre-computed embeddings (n_evidence x embedding_dim)
                        If None, uses evidence.embedding from each item
+            embedding_dim: Optional override for embedding dimension (will be validated against embeddings)
         """
         if len(self.evidence) == 0:
             raise ValueError("Cannot build index: evidence store is empty")
@@ -124,11 +125,19 @@ class EvidenceStore:
                 f"vs {len(self.evidence)} evidence items"
             )
         
-        if embeddings.shape[1] != self.embedding_dim:
-            raise ValueError(
-                f"Embedding dimension mismatch: {embeddings.shape[1]} "
-                f"vs expected {self.embedding_dim}"
-            )
+        # Update embedding_dim from actual embeddings if not specified
+        actual_dim = embeddings.shape[1]
+        if embedding_dim is not None:
+            if actual_dim != embedding_dim:
+                raise ValueError(
+                    f"Embedding dimension mismatch: {actual_dim} "
+                    f"vs expected {embedding_dim}"
+                )
+            self.embedding_dim = embedding_dim
+        else:
+            # Update from actual embeddings
+            self.embedding_dim = actual_dim
+            logger.info(f"Updated embedding_dim to {actual_dim} from actual embeddings")
         
         # Build FAISS index
         if FAISS_AVAILABLE:

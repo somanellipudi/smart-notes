@@ -246,6 +246,36 @@ ENABLE_CONSISTENCY_SCORING = os.getenv("ENABLE_CONSISTENCY_SCORING", "true").low
 """If False, skip semantic consistency checks between evidence"""
 
 
+# ==================== TEXT QUALITY & ROBUSTNESS ====================
+
+# Text quality assessment thresholds
+MIN_ALPHABETIC_RATIO = float(os.getenv("MIN_ALPHABETIC_RATIO", "0.2"))
+"""Minimum alphabetic character ratio (letters / total chars)"""
+
+MAX_CID_RATIO = float(os.getenv("MAX_CID_RATIO", "0.001"))
+"""Maximum CID glyph ratio (corrupted PDF indicators)"""
+
+MIN_PRINTABLE_RATIO = float(os.getenv("MIN_PRINTABLE_RATIO", "0.9"))
+"""Minimum printable character ratio"""
+
+MIN_INPUT_CHARS_ABSOLUTE = int(os.getenv("MIN_INPUT_CHARS_ABSOLUTE", "100"))
+"""Absolute minimum input characters before marking unverifiable"""
+
+MIN_INPUT_CHARS_FOR_VERIFICATION = int(os.getenv("MIN_INPUT_CHARS_FOR_VERIFICATION", "500"))
+"""Recommended minimum input characters for robust verification"""
+
+# PDF OCR fallback
+ENABLE_OCR_FALLBACK = os.getenv("ENABLE_OCR_FALLBACK", "true").lower() == "true"
+"""Enable OCR fallback for PDFs when text extraction fails quality checks"""
+
+OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "5"))
+"""Maximum number of PDF pages to OCR"""
+
+# Multi-source policy
+STRICT_MULTI_SOURCE = os.getenv("STRICT_MULTI_SOURCE", "false").lower() == "true"
+"""If False, allow MIN_SUPPORTING_SOURCES=1 when only one source available"""
+
+
 # ==================== DOMAIN PROFILES (RESEARCH RIGOR) ====================
 
 # Domain profile selection (for research-grade verifiability)

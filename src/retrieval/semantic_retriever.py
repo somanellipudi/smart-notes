@@ -73,40 +73,84 @@ class SemanticRetriever:
         self.reranker = None
         self.index = None
         self.spans = []  # List[EvidenceSpan]
+        self.embedding_dim = None  # Will be set after encoder initialization
         
         self._load_models()
         
+        # Set embedding dimension after models are loaded
+        if self.encoder is not None:
+            self.embedding_dim = self.get_embedding_dim()
+        
     def _load_models(self):
         """Load sentence transformer and cross-encoder models."""
+        # Try to import sentence-transformers
         try:
             from sentence_transformers import SentenceTransformer, CrossEncoder
-            
+            HAS_SENTENCE_TRANSFORMERS = True
+        except ImportError as import_error:
+            logger.warning(f"Could not import sentence-transformers: {import_error}")
+            logger.warning("Will use TF-IDF embeddings as fallback")
+            HAS_SENTENCE_TRANSFORMERS = False
+        
+        if HAS_SENTENCE_TRANSFORMERS:
             logger.info(f"Loading bi-encoder: {self.model_name}")
             try:
                 self.encoder = SentenceTransformer(self.model_name, device=self.device)
-                logger.info("✓ Bi-encoder loaded successfully")
+                logger.info("Bi-encoder loaded successfully")
             except Exception as e:
                 logger.warning(f"Failed to load bi-encoder {self.model_name}: {e}")
                 logger.warning("Using fallback TF-IDF embeddings")
-                self.encoder = _TfidfEmbedder()
+                try:
+                    self.encoder = _TfidfEmbedder()
+                except Exception as tfidf_error:
+                    logger.error(f"Failed to initialize TF-IDF embedder: {tfidf_error}")
+                    raise RuntimeError(f"Could not initialize any embedding method: {tfidf_error}")
             
             logger.info(f"Loading cross-encoder: {self.reranker_name}")
             try:
                 self.reranker = CrossEncoder(self.reranker_name, device=self.device)
-                logger.info("✓ Cross-encoder loaded successfully")
+                logger.info("Cross-encoder loaded successfully")
             except Exception as e:
                 logger.warning(f"Failed to load cross-encoder: {e}")
                 logger.warning("Re-ranking will be disabled")
                 self.reranker = None
             
             logger.info("Semantic retrieval models loaded (with fallbacks if needed)")
-        except Exception as e:
-            logger.error(f"Failed to load embedding models: {e}")
-            logger.warning("Using fallback TF-IDF embeddings")
+        else:
+            # sentence-transformers not available, use TF-IDF directly
+            logger.info("sentence-transformers not available, using TF-IDF embeddings")
             try:
                 self.encoder = _TfidfEmbedder()
-            except:
-                raise RuntimeError("Could not initialize any embedding method")
+                self.reranker = None
+                logger.info("TF-IDF embedder initialized successfully")
+            except Exception as tfidf_error:
+                logger.error(f"Failed to initialize TF-IDF embedder: {tfidf_error}")
+                raise RuntimeError(f"Could not initialize any embedding method: {tfidf_error}")
+    
+    def get_embedding_dim(self) -> int:
+        """
+        Get the embedding dimension of the encoder.
+        
+        Returns:
+            int: Embedding dimension
+        
+        Raises:
+            RuntimeError: If encoder is not initialized
+        """
+        if self.encoder is None:
+            raise RuntimeError("Encoder not initialized")
+        
+        # Check if encoder has get_sentence_embedding_dimension (SentenceTransformer)
+        if hasattr(self.encoder, 'get_sentence_embedding_dimension'):
+            return self.encoder.get_sentence_embedding_dimension()
+        
+        # Check for _TfidfEmbedder
+        if hasattr(self.encoder, 'get_embedding_dim'):
+            return self.encoder.get_embedding_dim()
+        
+        # Default fallback
+        logger.warning("Could not determine embedding dimension, assuming 384")
+        return 384
     
     def index_sources(
         self,
@@ -377,6 +421,20 @@ class _TfidfEmbedder:
             # Transform using existing vocabulary
             embeddings = self.vectorizer.transform(sentences).toarray().astype('float32')
             return embeddings
+    
+    def get_embedding_dim(self) -> int:
+        """
+        Get the embedding dimension (vocabulary size after fit).
+        
+        Returns:
+            int: Number of features in the TF-IDF vectorizer
+        """
+        if self.fitted:
+            # Return actual vocabulary size after fitting
+            return len(self.vectorizer.get_feature_names_out())
+        else:
+            # Return configured max_features before fitting
+            return self.vectorizer.max_features or 128
     
     def get_stats(self) -> Dict[str, int]:
         """Get indexing statistics."""

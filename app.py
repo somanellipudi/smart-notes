@@ -739,14 +739,14 @@ def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] =
         if metrics.get("quality_flags"):
             st.warning("**Quality Flags:**\n\n" + "\n".join(f"• {flag}" for flag in metrics["quality_flags"]))
         
-        # Baseline comparison
-        if "baseline_comparison" in metrics:
+        # Baseline comparison (only if available)
+        if "baseline_comparison" in metrics and metrics["baseline_comparison"] is not None:
             with st.expander("📊 Comparison to Baseline (Standard Mode)"):
                 comp = metrics["baseline_comparison"]
-                st.write(f"**Baseline Items:** {comp['baseline_total_items']}")
-                st.write(f"**Verified Claims:** {comp['verifiable_verified_claims']}")
-                st.write(f"**Reduction Rate:** {comp['reduction_rate']:.1%}")
-                st.write(f"**Est. Hallucination Reduction:** {comp['hallucination_reduction_estimate']:.1%}")
+                st.write(f"**Baseline Items:** {comp.get('baseline_total_items', 'N/A')}")
+                st.write(f"**Verified Claims:** {comp.get('verifiable_verified_claims', 'N/A')}")
+                st.write(f"**Reduction Rate:** {comp.get('reduction_rate', 0):.1%}")
+                st.write(f"**Est. Hallucination Reduction:** {comp.get('hallucination_reduction_estimate', 0):.1%}")
         
         # Claim review section for research
         st.subheader("📌 Claim Review")

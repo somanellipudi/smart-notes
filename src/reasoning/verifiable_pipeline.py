@@ -28,6 +28,10 @@ from src.verification.dependency_checker import check_dependencies, apply_depend
 from src.policies.threat_model import get_threat_model_summary
 from src.verification.diagnostics import VerificationDiagnostics
 from src.retrieval.url_ingest import ingest_urls, chunk_url_sources, get_url_ingestion_summary
+from src.preprocessing.text_quality import compute_text_quality, log_quality_report
+from src.verification.rejection_analysis import (
+    RejectionHistogram, VerificationDebugMetadata, create_verification_response_metadata
+)
 from src.retrieval.evidence_store import EvidenceStore, validate_evidence_store
 from src.retrieval.evidence_builder import build_session_evidence_store
 
@@ -231,6 +235,10 @@ class VerifiablePipelineWrapper:
             logger.warning(f"  MAX_CONTRADICTION_PROB: {config.RELAXED_MAX_CONTRADICTION_PROB}")
             logger.warning("="*70)
         
+        # Initialize rejection histogram for tracking verification results
+        rejection_histogram = RejectionHistogram()
+        debug_metadata = VerificationDebugMetadata()
+        
         # Step 0: Ingest URL sources if provided
         url_sources = []
         url_chunks = []
@@ -270,6 +278,89 @@ class VerifiablePipelineWrapper:
         elif urls and not config.ENABLE_URL_SOURCES:
             logger.warning("URLs provided but ENABLE_URL_SOURCES is False, skipping URL ingestion")
         
+        # Step 0.25: Check text quality and detect extraction failures
+        logger.info("Step 0.25: Assessing input text quality")
+        step_start = time.perf_counter()
+        
+        quality_report = compute_text_quality(combined_content)
+        log_quality_report(quality_report, context="Input text assessment")
+        
+        if quality_report.is_unverifiable:
+            # Input text below absolute minimum - return UNVERIFIABLE_INPUT
+            logger.error(
+                f"❌ Input text unverifiable: {quality_report.text_length} chars "
+                f"< {config.MIN_INPUT_CHARS_ABSOLUTE} absolute minimum"
+            )
+            logger.error("Failure reasons:")
+            for reason in quality_report.failure_reasons:
+                logger.error(f"  - {reason}")
+            
+            # Return early with UNVERIFIABLE_INPUT status
+            # Generate baseline output but mark it as unverifiable
+            try:
+                baseline_output = self.standard_pipeline.process(
+                    combined_content=combined_content,
+                    equations=equations,
+                    external_context=external_context,
+                    session_id=session_id,
+                    output_filters=output_filters
+                )
+            except Exception as e:
+                logger.warning(f"Could not generate baseline output: {str(e)}")
+                baseline_output = None
+            
+            verifiable_metadata = {
+                "verifiable_mode": False,
+                "status": "UNVERIFIABLE_INPUT",
+                "reason": "Input text too short for verification",
+                "failure_reasons": quality_report.failure_reasons,
+                "text_length": quality_report.text_length,
+                "minimum_required": config.MIN_INPUT_CHARS_ABSOLUTE,
+                "suggestion": f"Please provide at least {config.MIN_INPUT_CHARS_ABSOLUTE} characters of input text",
+                "quality_report": {
+                    'alphabetic_ratio': quality_report.alphabetic_ratio,
+                    'cid_ratio': quality_report.cid_ratio,
+                    'printable_ratio': quality_report.printable_ratio,
+                },
+                "metrics": {
+                    "total_claims": 0,
+                    "verified_claims": 0,
+                    "rejected_claims": 0,
+                    "low_confidence_claims": 0,
+                    "rejection_rate": 0.0,
+                    "verification_rate": 0.0,
+                    "low_confidence_rate": 0.0,
+                    "avg_confidence": 0.0,
+                    "rejection_reasons": {},
+                    "evidence_metrics": {
+                        "total_evidence": 0,
+                        "avg_evidence_per_claim": 0.0,
+                        "unsupported_rate": 1.0,
+                        "avg_evidence_quality": 0.0
+                    },
+                    "graph_metrics": None,
+                    "baseline_comparison": None,
+                    "negative_control": True,
+                    "quality_flags": [
+                        "Input text too short for verification",
+                        f"Text length: {quality_report.text_length} chars < {config.MIN_INPUT_CHARS_ABSOLUTE} minimum"
+                    ]
+                }
+            }
+            
+            # If OCR fallback might help (CID glyphs detected), mention it
+            if quality_report.cid_ratio > config.MAX_CID_RATIO and config.ENABLE_OCR_FALLBACK:
+                verifiable_metadata["suggestion"] += (
+                    f"\n\nAlternatively, if this is a PDF: "
+                    f"The high CID glyph ratio ({quality_report.cid_ratio:.4f}) indicates "
+                    f"extraction corruption. Retry with OCR fallback enabled."
+                )
+            
+            return baseline_output or output_filters, verifiable_metadata
+        
+        step_timings["step_0_25_quality_assessment"] = time.perf_counter() - step_start
+        logger.info(f"Step 0.25 time: {step_timings['step_0_25_quality_assessment']:.2f}s")
+        
         # Step 0.5: Build Evidence Store (MANDATORY)
         logger.info("Step 0.5: Building session evidence store")
         step_start = time.perf_counter()
@@ -294,8 +385,10 @@ class VerifiablePipelineWrapper:
                 from src.retrieval.semantic_retriever import SemanticRetriever
                 semantic_ret = SemanticRetriever()
                 encoder = semantic_ret.encoder
+                embedding_dim = semantic_ret.embedding_dim
             else:
                 encoder = self.evidence_retriever.encoder if hasattr(self.evidence_retriever, 'encoder') else None
+                embedding_dim = getattr(self.evidence_retriever, 'embedding_dim', None)
             
             # Encode all evidence texts
             if encoder is not None:
@@ -321,9 +414,13 @@ class VerifiablePipelineWrapper:
                 for i, ev in enumerate(evidence_store.evidence):
                     ev.embedding = embeddings[i].astype('float32')
                 
-                # Build FAISS index
-                evidence_store.build_index(embeddings=embeddings.astype('float32'))
-                logger.info(f"✓ Built FAISS index with {len(evidence_store.evidence)} vectors of {embeddings.shape[1]}-dim")
+                # Get actual embedding dimension from computed embeddings
+                actual_embedding_dim = embeddings.shape[1]
+                logger.info(f"Actual embedding dimension: {actual_embedding_dim}")
+                
+                # Build FAISS index with actual dimension
+                evidence_store.build_index(embeddings=embeddings.astype('float32'), embedding_dim=actual_embedding_dim)
+                logger.info(f"✓ Built FAISS index with {len(evidence_store.evidence)} vectors of {actual_embedding_dim}-dim")
             else:
                 logger.warning("No encoder available, creating store without embeddings")
                 # Create dummy embeddings for structure
@@ -331,7 +428,7 @@ class VerifiablePipelineWrapper:
                 dummy_embeddings = np.random.rand(len(evidence_store.evidence), 128).astype('float32')
                 for i, ev in enumerate(evidence_store.evidence):
                     ev.embedding = dummy_embeddings[i]
-                evidence_store.build_index(embeddings=dummy_embeddings)
+                evidence_store.build_index(embeddings=dummy_embeddings, embedding_dim=128)
             
             # Validate evidence store (CRITICAL)
             validate_evidence_store(evidence_store, min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION)
@@ -435,15 +532,17 @@ class VerifiablePipelineWrapper:
             )
             
             # Convert Evidence objects to evidence format expected by policy
-            # Create RetrievedEvidence objects with similarity scores
-            from src.retrieval.claim_rag import RetrievedEvidence
+            # Create EvidenceItem objects with similarity scores
+            from src.claims.schema import EvidenceItem
             evidence = []
             for ev, similarity in retrieved:
-                evidence_obj = RetrievedEvidence(
-                    text=ev.text,
+                evidence_obj = EvidenceItem(
                     source_id=ev.source_id,
+                    source_type=ev.source_type,
+                    snippet=ev.text,
+                    span_metadata={"similarity": similarity},
                     similarity=similarity,
-                    metadata=ev.metadata or {}
+                    reliability_prior=0.8
                 )
                 evidence.append(evidence_obj)
             
@@ -453,6 +552,14 @@ class VerifiablePipelineWrapper:
             status, reason, confidence = self.evidence_retriever.apply_decision_policy(claim, evidence)
             claim.status = status
             claim.confidence = confidence
+            
+            # Track in rejection histogram
+            rejection_histogram.add_claim_result(
+                claim_text=claim.claim_text,
+                status=status,
+                rejection_reason=reason if status == VerificationStatus.REJECTED else None,
+                retrieval_hit_count=len(evidence)
+            )
             
             # Log diagnostics if enabled
             if diagnostics:
@@ -669,6 +776,9 @@ class VerifiablePipelineWrapper:
                 finally:
                     # Restore original mode
                     config.RELAXED_VERIFICATION_MODE = original_mode
+        
+        # Log rejection histogram summary
+        rejection_histogram.log_summary()
         
         # Save JSON debug report if enabled
         if diagnostics and config.DEBUG_VERIFICATION:
