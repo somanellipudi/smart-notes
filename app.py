@@ -35,6 +35,8 @@ try:
     from src.audio.transcription import transcribe_audio
     from src.audio.image_ocr import ImageOCR, process_images
     from src.preprocessing.text_processing import preprocess_classroom_content
+    from src.preprocessing.pdf_ingest import extract_pdf_text
+    from src.preprocessing.url_ingest import fetch_url_text
     from src.reasoning.verifiable_pipeline import VerifiablePipelineWrapper
     from src.evaluation.metrics import evaluate_session_output
     from src.study_book.session_manager import SessionManager
@@ -620,41 +622,38 @@ def _image_hash(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes).hexdigest()
 
 
-def _extract_text_from_pdf(pdf_file) -> str:
+def _extract_text_from_pdf(pdf_file) -> Tuple[str, Dict[str, Any]]:
     """
-    Extract text from a PDF file.
+    Extract text from a PDF file with multi-strategy fallback.
+    
+    Uses new robust extraction module with 3-level fallback:
+    1. PyMuPDF (fitz) - faster, better PDF support
+    2. pdfplumber - alternative extraction
+    3. OCR (pdf2image + pytesseract) - for scanned/corrupted PDFs
     
     Args:
         pdf_file: Streamlit uploaded file object
         
     Returns:
-        Extracted text from PDF
+        Tuple of (extracted_text, metadata_dict)
     """
     try:
-        from PyPDF2 import PdfReader
+        # Use new robust extraction module
+        text, metadata = extract_pdf_text(pdf_file, ocr=None)
         
-        pdf_reader = PdfReader(pdf_file)
-        extracted_text = ""
+        if not text.strip():
+            logger.warning(f"PDF {pdf_file.name} extracted but no quality text found")
+            return "", metadata
         
-        for page_num, page in enumerate(pdf_reader.pages):
-            try:
-                page_text = page.extract_text()
-                if page_text:
-                    extracted_text += f"--- Page {page_num + 1} ---\n{page_text}\n"
-            except Exception as e:
-                logger.warning(f"Failed to extract text from page {page_num + 1}: {str(e)}")
+        # Format with page information if available
+        pages = metadata.get("pages", 1)
+        extraction_method = metadata.get("extraction_method", "unknown")
+        formatted_text = f"--- PDF: {pdf_file.name} ({pages} pages, method: {extraction_method}) ---\n{text}\n"
         
-        if not extracted_text.strip():
-            logger.warning("PDF extracted but no text content found")
-            return ""
-        
-        return extracted_text
-    except ImportError:
-        logger.error("PyPDF2 not installed. Install with: pip install PyPDF2")
-        raise RuntimeError("PDF support requires PyPDF2. Install with: pip install PyPDF2")
+        return formatted_text, metadata
     except Exception as e:
-        logger.error(f"Error extracting PDF: {str(e)}")
-        raise RuntimeError(f"Failed to extract PDF: {str(e)}")
+        logger.error(f"Error extracting PDF {pdf_file.name}: {str(e)}")
+        return "", {"error": str(e), "extraction_method": "error"}
 
 
 def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] = None):
@@ -1890,12 +1889,15 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                 with st.spinner("📄 Extracting text from PDF files..."):
                     try:
                         for pdf_file in pdf_files:
-                            pdf_text = _extract_text_from_pdf(pdf_file)
+                            pdf_text, pdf_metadata = _extract_text_from_pdf(pdf_file)
                             if pdf_text:
-                                pdf_extracted_text += f"\n--- From: {pdf_file.name} ---\n{pdf_text}"
+                                pdf_extracted_text += pdf_text
+                                extraction_method = pdf_metadata.get("extraction_method", "unknown")
+                                logger.info(f"PDF extraction success: {pdf_file.name} ({extraction_method})")
                         
                         if pdf_extracted_text:
-                            st.success(f"✓ PDF extraction complete: {len(pdf_extracted_text)} characters")
+                            words = len(pdf_extracted_text.split())
+                            st.success(f"✓ PDF extraction complete: {len(pdf_extracted_text)} chars, ~{words} words")
                     except Exception as e:
                         st.error(f"❌ PDF extraction failed: {str(e)}")
                         logger.error(f"PDF extraction error: {str(e)}")

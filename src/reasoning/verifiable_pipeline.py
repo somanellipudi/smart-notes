@@ -448,18 +448,47 @@ class VerifiablePipelineWrapper:
                 diagnostics.evidence_stats = ev_stats
         
         except ValueError as e:
-            # Evidence store validation failed - this is a HARD ERROR
-            error_msg = f"Evidence store validation failed: {str(e)}"
-            logger.error(f"❌ {error_msg}")
+            # Evidence store validation failed - fall back to baseline mode instead of hard-failing
+            error_msg = f"Evidence validation skipped: {str(e)}"
+            logger.warning(f"⚠ {error_msg}")
+            logger.warning("Insufficient evidence for verification mode. Falling back to baseline mode.")
             
-            # Return early with error status
-            raise RuntimeError(
-                f"{error_msg}\n\n"
-                "Verification cannot proceed without valid evidence. Please ensure:\n"
-                f"1. Input text is at least 500 characters (current: {len(combined_content)} chars)\n"
-                "2. Input contains substantive content (not just whitespace)\n"
-                "3. If using URLs, at least one URL successfully ingested"
-            )
+            # Generate baseline output if not already done
+            try:
+                baseline_output = self.standard_pipeline.process(
+                    combined_content=combined_content,
+                    equations=equations,
+                    external_context=external_context,
+                    session_id=session_id,
+                    output_filters=output_filters
+                )
+            except Exception as baseline_error:
+                logger.error(f"Could not generate baseline output: {baseline_error}")
+                baseline_output = None
+            
+            # Return baseline output with a flag that verification was skipped
+            verifiable_metadata = {
+                "verifiable_mode": False,
+                "status": "INSUFFICIENT_EVIDENCE",
+                "reason": "Not enough evidence for verification",
+                "error_details": str(e),
+                "message": (
+                    "Your input text is too short for verification mode.\n"
+                    "Showing baseline study guide (unverified content).\n"
+                    f"Current text: {len(combined_content)} characters | "
+                    f"Required for verification: {config.MIN_INPUT_CHARS_FOR_VERIFICATION} characters"
+                ),
+                "metrics": {
+                    "total_claims": 0,
+                    "verified_claims": 0,
+                    "rejected_claims": 0,
+                    "evidence_docs": 0,
+                    "quality_flags": [error_msg]
+                }
+            }
+            
+            # Return baseline output (or empty results if baseline failed)
+            return baseline_output or output_filters, verifiable_metadata
         
         step_timings["step_0_5_build_evidence_store"] = time.perf_counter() - step_start
         logger.info(f"Step 0.5 time: {step_timings['step_0_5_build_evidence_store']:.2f}s")
