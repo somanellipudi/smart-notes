@@ -10,6 +10,29 @@ from datetime import datetime
 from pydantic import BaseModel, Field, validator
 
 
+class Citation(BaseModel):
+    """
+    Citation information for a claim or fact in notes.
+    
+    Attributes:
+        span_id: Unique identifier for the span from verification output
+        source_id: Source identifier (URL, document ID, etc.)
+        source_type: Type of source ("local" or "online")
+        snippet: The text segment being cited
+        page_num: Optional page number if from structured document
+        authority_tier: Optional authority tier (TIER_1, TIER_2, TIER_3)
+    """
+    span_id: str = Field(..., description="Unique span identifier")
+    source_id: str = Field(..., description="Source identifier")
+    source_type: str = Field(
+        default="local",
+        description="Source type: local or online"
+    )
+    snippet: str = Field(..., description="Quoted text segment")
+    page_num: Optional[int] = Field(None, description="Page number if applicable")
+    authority_tier: Optional[str] = Field(None, description="Authority tier (TIER_1/2/3)")
+
+
 class Concept(BaseModel):
     """
     Represents a key educational concept.
@@ -19,6 +42,7 @@ class Concept(BaseModel):
         definition: Plain-language explanation
         prerequisites: Required prior knowledge
         difficulty_level: Estimated difficulty (1-5)
+        citations: Optional list of citations for this concept
     """
     name: str = Field(..., description="Concept name or term")
     definition: str = Field(..., description="Clear, concise explanation")
@@ -32,6 +56,10 @@ class Concept(BaseModel):
         le=5,
         description="Difficulty rating (1=basic, 5=advanced)"
     )
+    citations: List[Citation] = Field(
+        default_factory=list,
+        description="Supporting citations from evidence"
+    )
 
 
 class WorkedExample(BaseModel):
@@ -43,6 +71,7 @@ class WorkedExample(BaseModel):
         solution: Step-by-step solution
         key_concepts: Concepts demonstrated
         common_mistakes: Typical errors to avoid
+        citations: Optional list of citations
     """
     problem: str = Field(..., description="Problem statement or question")
     solution: str = Field(..., description="Step-by-step solution explanation")
@@ -53,6 +82,10 @@ class WorkedExample(BaseModel):
     common_mistakes: List[str] = Field(
         default_factory=list,
         description="Typical errors students make"
+    )
+    citations: List[Citation] = Field(
+        default_factory=list,
+        description="Supporting citations from evidence"
     )
 
 
@@ -65,6 +98,7 @@ class EquationExplanation(BaseModel):
         explanation: What the equation means
         variables: Description of each variable
         applications: Where this equation is used
+        citations: Optional list of citations
     """
     equation: str = Field(..., description="The mathematical equation")
     explanation: str = Field(
@@ -79,6 +113,10 @@ class EquationExplanation(BaseModel):
         default_factory=list,
         description="Practical applications or use cases"
     )
+    citations: List[Citation] = Field(
+        default_factory=list,
+        description="Supporting citations from evidence"
+    )
 
 
 class Topic(BaseModel):
@@ -91,6 +129,7 @@ class Topic(BaseModel):
         subtopics: Related subtopics
         learning_objectives: What students should learn
         timestamp_range: When discussed (for video referencing)
+        citations: Optional list of citations
     """
     name: str = Field(..., description="Topic name")
     summary: str = Field(..., description="1-2 sentence overview")
@@ -106,6 +145,10 @@ class Topic(BaseModel):
         None,
         description="Start and end timestamps from lecture"
     )
+    citations: List[Citation] = Field(
+        default_factory=list,
+        description="Supporting citations from evidence"
+    )
 
 
 class FAQ(BaseModel):
@@ -117,6 +160,7 @@ class FAQ(BaseModel):
         answer: Clear, pedagogical answer
         related_concepts: Concepts this question touches on
         difficulty: How advanced the question is
+        citations: Optional list of citations
     """
     question: str = Field(..., description="Student question or doubt")
     answer: str = Field(..., description="Clear, helpful answer")
@@ -127,6 +171,10 @@ class FAQ(BaseModel):
     difficulty: str = Field(
         default="medium",
         description="Question difficulty: easy, medium, hard"
+    )
+    citations: List[Citation] = Field(
+        default_factory=list,
+        description="Supporting citations from evidence"
     )
     
     @validator('difficulty')
@@ -147,6 +195,7 @@ class Misconception(BaseModel):
         explanation: Why it's wrong
         correct_understanding: What the correct understanding should be
         related_concepts: Concepts this misconception affects
+        citations: Optional list of citations
     """
     misconception: str = Field(
         ...,
@@ -164,6 +213,10 @@ class Misconception(BaseModel):
         default_factory=list,
         description="Concepts involved in this misconception"
     )
+    citations: List[Citation] = Field(
+        default_factory=list,
+        description="Supporting citations from evidence"
+    )
 
 
 class RealWorldConnection(BaseModel):
@@ -175,6 +228,7 @@ class RealWorldConnection(BaseModel):
         application: Real-world application
         description: How the concept applies
         relevance: Why this matters to students
+        citations: Optional list of citations
     """
     concept: str = Field(..., description="Classroom concept")
     application: str = Field(..., description="Real-world application area")
@@ -185,6 +239,10 @@ class RealWorldConnection(BaseModel):
     relevance: str = Field(
         ...,
         description="Why students should care about this connection"
+    )
+    citations: List[Citation] = Field(
+        default_factory=list,
+        description="Supporting citations from evidence"
     )
 
 

@@ -5,13 +5,21 @@ This module provides functions to build evidence stores from various sources:
 - Session input (transcript/notes)
 - External context
 - URLs (YouTube videos, articles)
+
+Now integrates with ArtifactStore for deterministic, persistent evidence.
 """
 
 import logging
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
+from datetime import datetime
 
 from src.retrieval.evidence_store import Evidence, EvidenceStore
 from src.retrieval.url_ingest import ingest_urls, chunk_url_sources, get_url_ingestion_summary
+from src.retrieval.artifact_store import (
+    ArtifactStore, SourceArtifact, SpanArtifact, RunMetadata,
+    compute_source_id, compute_span_id, compute_text_hash,
+    create_config_snapshot, get_git_commit
+)
 import config
 
 logger = logging.getLogger(__name__)
@@ -84,15 +92,16 @@ def build_session_evidence_store(
     embedding_provider: Optional["EmbeddingProvider"] = None
 ) -> tuple[EvidenceStore, Dict[str, Any]]:
     """
-    Build evidence store from session inputs.
+    Build evidence store from session inputs with artifact persistence.
 
     This function:
     1. Validates input text length
-    2. Chunks input text into evidence
-    3. Adds external context if provided
-    4. Ingests URLs if provided and enabled
-    5. Creates Evidence objects with proper metadata
-    6. Optionally embeds chunks and builds the FAISS index
+    2. Computes content hash for cache lookup
+    3. Checks for cached artifacts (if enabled)
+    4. If cache hit: loads artifacts and reuses embeddings
+    5. If cache miss: chunks text, computes embeddings, saves artifacts
+    6. Creates Evidence objects with proper metadata
+    7. Builds FAISS index
 
     Args:
         session_id: Unique session identifier
@@ -113,6 +122,46 @@ def build_session_evidence_store(
         min_input_chars = getattr(config, "MIN_INPUT_CHARS_FOR_VERIFICATION", 500)
 
     logger.info(f"Building evidence store for session {session_id}")
+    
+    # Compute content hash for cache lookup
+    combined_text = input_text + (external_context or "")
+    content_hash = compute_text_hash(combined_text)
+    model_id = embedding_provider.model_name if embedding_provider else "none"
+    
+    # Try to load from artifact store if enabled
+    artifact_store = None
+    cache_status = "disabled"
+    
+    if config.ENABLE_ARTIFACT_PERSISTENCE and config.EMBEDDING_CACHE_ENABLED:
+        matching_run_id = ArtifactStore.find_matching_run(
+            config.ARTIFACTS_DIR,
+            session_id,
+            content_hash,
+            model_id
+        )
+        
+        if matching_run_id:
+            logger.info(f"Cache HIT: Found matching artifacts for run {matching_run_id}")
+            try:
+                artifact_store = ArtifactStore.load(
+                    config.ARTIFACTS_DIR,
+                    session_id,
+                    matching_run_id
+                )
+                cache_status = "hit"
+                
+                # Convert artifacts to Evidence objects
+                return _build_store_from_artifacts(
+                    session_id,
+                    artifact_store,
+                    cache_status
+                )
+            except Exception as e:
+                logger.warning(f"Failed to load cached artifacts: {e}")
+                cache_status = "miss"
+        else:
+            logger.info("Cache MISS: No matching artifacts found")
+            cache_status = "miss"
 
     store = EvidenceStore(session_id=session_id)
 
@@ -263,30 +312,108 @@ def build_session_evidence_store(
         f"{store.total_chars} total chars from {len(store.source_counts)} sources"
     )
 
-    if embedding_provider is not None and store.evidence:
+    # Generate embeddings if provider available
+    if embedding_provider and store.evidence:
         try:
-            logger.info(f"Embedding {len(store.evidence)} evidence chunks")
-            evidence_texts = [ev.text for ev in store.evidence]
-            embeddings = embedding_provider.embed_texts(evidence_texts)
-            for i, ev in enumerate(store.evidence):
-                ev.embedding = embeddings[i]
-            store.build_index(embeddings=embeddings, embedding_dim=embeddings.shape[1])
+            logger.info(f"Generating embeddings for {len(store.evidence)} evidence chunks")
+            texts = [ev.text for ev in store.evidence]
+            embeddings = embedding_provider.embed_texts(texts)
+
             stats["embedding_model"] = embedding_provider.model_name
-            stats["embedding_dim"] = int(embeddings.shape[1])
+            stats["embedding_dim"] = embeddings.shape[1] if len(embeddings.shape) > 1 else None
+
+            # Save embeddings to artifact store
+            if artifact_store:
+                artifact_store.set_embeddings(embeddings)
+
+            # Build FAISS index
+            store.build_index(embeddings=embeddings)
             stats["index_built"] = True
+
             logger.info(
-                f"✓ Built evidence index with {len(store.evidence)} vectors "
-                f"({embeddings.shape[1]} dim)"
+                f"Built FAISS index: {len(store.evidence)} evidence, "
+                f"embedding_dim={stats['embedding_dim']}"
             )
         except Exception as exc:
             logger.error(f"Failed to build evidence index: {exc}")
             raise ValueError("Failed to embed evidence for verification") from exc
-    else:
-        if embedding_provider is None:
-            logger.info("No embedding provider supplied; skipping index build")
-        elif not store.evidence:
-            logger.info("No evidence chunks available; skipping index build")
+    
+    # Save artifacts if enabled
+    if artifact_store:
+        try:
+            metadata = RunMetadata(
+                run_id=artifact_store.run_id,
+                session_id=session_id,
+                timestamp=datetime.now().isoformat(),
+                random_seed=config.GLOBAL_RANDOM_SEED,
+                config_snapshot=create_config_snapshot(content_hash, config.GLOBAL_RANDOM_SEED),
+                git_commit=get_git_commit(),
+                model_ids={"embedding": model_id, "llm": getattr(config, "LLM_MODEL", "unknown")},
+                source_count=len(artifact_store.sources),
+                span_count=len(artifact_store.spans),
+                embedding_dim=stats["embedding_dim"] or 0,
+                cache_status=cache_status
+            )
+            artifact_store.save(metadata)
+            logger.info(f"Saved artifacts to {artifact_store.run_dir}")
+        except Exception as e:
+            logger.error(f"Failed to save artifacts: {e}")
 
+    return store, stats
+
+
+def _build_store_from_artifacts(
+    session_id: str,
+    artifact_store: ArtifactStore,
+    cache_status: str
+) -> tuple[EvidenceStore, Dict[str, Any]]:
+    """
+    Build EvidenceStore from loaded artifacts (cache hit).
+    
+    Args:
+        session_id: Session identifier
+        artifact_store: Loaded ArtifactStore with spans and embeddings
+        cache_status: Cache status string
+    
+    Returns:
+        (evidence_store, stats)
+    """
+    store = EvidenceStore(session_id=session_id)
+    
+    # Convert spans to Evidence objects
+    for span in artifact_store.spans:
+        evidence = Evidence(
+            evidence_id=span.span_id,
+            source_id=span.source_id,
+            source_type="transcript",  # Could be inferred from source_id
+            text=span.text,
+            chunk_index=span.chunk_idx,
+            char_start=span.start,
+            char_end=span.end,
+            metadata={"session_id": session_id, "from_cache": True}
+        )
+        store.add_evidence(evidence)
+    
+    # Build FAISS index with cached embeddings
+    if artifact_store.embeddings is not None:
+        store.build_index(embeddings=artifact_store.embeddings)
+    
+    stats = {
+        "session_id": session_id,
+        "input_chars": sum(s.char_count for s in artifact_store.sources),
+        "external_chars": 0,
+        "equations_count": 0,
+        "urls_count": 0,
+        "chunks_added": len(artifact_store.spans),
+        "url_ingestion": None,
+        "embedding_model": artifact_store.metadata.model_ids.get("embedding") if artifact_store.metadata else None,
+        "embedding_dim": artifact_store.metadata.embedding_dim if artifact_store.metadata else None,
+        "index_built": artifact_store.embeddings is not None,
+        "cache_status": cache_status,
+        "artifact_run_id": artifact_store.run_id
+    }
+    
+    logger.info(f"Built store from cached artifacts: {len(store.evidence)} evidence chunks")
     return store, stats
 
 

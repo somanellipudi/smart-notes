@@ -27,6 +27,11 @@ class ClaimType(str, Enum):
     ALGORITHM_STEP = "algorithm_step"
     COMPLEXITY = "complexity"
     INVARIANT = "invariant"
+    # CS-specific claim types for specialized verification
+    COMPLEXITY_CLAIM = "complexity_claim"  # Asymptotic complexity (O/Θ/Ω analysis)
+    CODE_BEHAVIOR_CLAIM = "code_behavior_claim"  # Correctness/behavior of code patterns
+    DEFINITION_CLAIM = "definition_claim"  # Formal definitions with anchor terms
+    NUMERIC_CLAIM = "numeric_claim"  # Numeric constants, counts, thresholds
 
 
 class VerificationStatus(str, Enum):

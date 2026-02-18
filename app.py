@@ -31,6 +31,16 @@ import streamlit as st
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Set global random seed for reproducibility (before any model imports)
+try:
+    import config
+    from src.utils.seed_control import set_global_seed
+    if hasattr(config, 'GLOBAL_RANDOM_SEED'):
+        set_global_seed(config.GLOBAL_RANDOM_SEED)
+        logger.info(f"Global random seed set to {config.GLOBAL_RANDOM_SEED}")
+except Exception as e:
+    logger.warning(f"Could not set global random seed: {e}")
+
 try:
     from src.audio.transcription import transcribe_audio
     from src.audio.image_ocr import ImageOCR, process_images
@@ -1859,18 +1869,58 @@ def main():
                                     ocr_pages = pdf_metadata.get("ocr_pages", 0)
                                     chars_extracted = pdf_metadata.get("chars_extracted", len(pdf_text))
                                     extraction_methods.append(extraction_method)
-                                    ingestion_diagnostics["pdf_files"].append({
+                                    
+                                    # Get ingestion report for detailed diagnostics
+                                    ingestion_report = pdf_metadata.get("ingestion_report")
+                                    
+                                    pdf_diag = {
                                         "file": pdf_file.name,
                                         "method": extraction_method,
                                         "chars": chars_extracted,
                                         "ocr_pages": ocr_pages
-                                    })
+                                    }
+                                    
+                                    # Add detailed ingestion report if available
+                                    if ingestion_report:
+                                        pdf_diag.update({
+                                            "pages_total": ingestion_report.pages_total,
+                                            "pages_low_quality": ingestion_report.pages_low_quality,
+                                            "headers_removed": ingestion_report.headers_removed_count,
+                                            "watermarks_removed": ingestion_report.watermark_removed_count,
+                                            "removed_lines": ingestion_report.removed_lines_count,
+                                            "removed_patterns": ingestion_report.removed_patterns_hit,
+                                            "quality": ingestion_report.quality_assessment
+                                        })
+                                    
+                                    ingestion_diagnostics["pdf_files"].append(pdf_diag)
                                     ingestion_diagnostics["pdf_chars"] += chars_extracted
                                     logger.info(f"PDF extraction success: {pdf_file.name} ({extraction_method})")
+                                    
+                                    # Display brief summary with option to expand
                                     st.caption(
-                                        f"{pdf_file.name}: method={extraction_method}, chars={chars_extracted}, "
-                                        f"ocr_pages={ocr_pages}"
+                                        f"✓ {pdf_file.name}: {chars_extracted:,} chars, {ocr_pages} OCR pages"
                                     )
+                                    
+                                    # Show detailed ingestion report in expander
+                                    if ingestion_report:
+                                        with st.expander(f"📊 Ingestion Report: {pdf_file.name}", expanded=False):
+                                            col1, col2, col3 = st.columns(3)
+                                            with col1:
+                                                st.metric("Pages", ingestion_report.pages_total)
+                                                st.metric("OCR Pages", ingestion_report.pages_ocr)
+                                            with col2:
+                                                st.metric("Low Quality", ingestion_report.pages_low_quality)
+                                                st.metric("Headers Removed", ingestion_report.headers_removed_count)
+                                            with col3:
+                                                st.metric("Watermarks", ingestion_report.watermark_removed_count)
+                                                st.metric("Lines Cleaned", ingestion_report.removed_lines_count)
+                                            
+                                            if ingestion_report.removed_patterns_hit:
+                                                st.write("**Patterns Removed:**")
+                                                for pattern, count in ingestion_report.removed_patterns_hit.items():
+                                                    st.text(f"  • {pattern}: {count}")
+                                            
+                                            st.caption(f"Quality: {ingestion_report.quality_assessment}")
                             except EvidenceIngestError as e:
                                 # Store ingestion error for display
                                 st.session_state.ingestion_error = e.code

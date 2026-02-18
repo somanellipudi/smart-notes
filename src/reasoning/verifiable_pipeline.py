@@ -73,6 +73,14 @@ class VerifiablePipelineWrapper:
             ollama_url: Ollama server URL
             domain_profile: Domain profile name (physics, discrete_math, algorithms)
         """
+        # Set global seed for reproducibility (if not already set)
+        try:
+            from src.utils.seed_control import set_global_seed
+            if hasattr(config, 'GLOBAL_RANDOM_SEED'):
+                set_global_seed(config.GLOBAL_RANDOM_SEED)
+        except Exception:
+            pass
+        
         # Standard pipeline
         self.standard_pipeline = ReasoningPipeline(
             model=model,

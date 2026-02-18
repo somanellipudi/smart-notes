@@ -43,11 +43,13 @@ DATA_DIR = PROJECT_ROOT / "data"
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 SESSIONS_DIR = OUTPUT_DIR / "sessions"
 LOGS_DIR = PROJECT_ROOT / os.getenv("LOG_DIR", "logs")
+ARTIFACTS_DIR = PROJECT_ROOT / os.getenv("ARTIFACTS_DIR", "artifacts")
 
 # Create directories if they don't exist
 DATA_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 SESSIONS_DIR.mkdir(exist_ok=True)
+ARTIFACTS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
 
@@ -248,6 +250,135 @@ VERIFIABLE_CONSISTENCY_THRESHOLD = float(os.getenv("VERIFIABLE_CONSISTENCY_THRES
 # Agent configuration
 VERIFIABLE_AGENT_MIN_CONFIDENCE = float(os.getenv("VERIFIABLE_AGENT_MIN_CONFIDENCE", "0.4"))
 VERIFIABLE_STRICT_MODE = os.getenv("VERIFIABLE_STRICT_MODE", "true").lower() == "true"
+
+
+# ==================== VERIFIABLE MODE PERFORMANCE OPTIMIZATION ====================
+
+# Selective verification: limit number of claims to verify (for speed)
+VERIFY_TOP_N_CLAIMS = int(os.getenv("VERIFY_TOP_N_CLAIMS", "250"))
+"""Verify only top N claims by topical relevance; 0 means verify all"""
+
+# High-risk-only verification: verify only claims with specific characteristics
+VERIFY_HIGH_RISK_ONLY = os.getenv("VERIFY_HIGH_RISK_ONLY", "false").lower() == "true"
+"""If True, verify only NUMERIC, COMPLEXITY, DEFINITION, CODE claim types and claims with negations"""
+
+# Batch NLI processing
+NLI_BATCH_SIZE = int(os.getenv("NLI_BATCH_SIZE", "32"))
+"""Batch size for NLI inference; larger = faster but more memory"""
+
+# Cache configuration for performance
+EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+"""Batch size for embedding computation"""
+
+EMBEDDING_CACHE_DISK = os.getenv("EMBEDDING_CACHE_DISK", "true").lower() == "true"
+"""Cache embeddings to disk (Artifact Store) for reuse across runs"""
+
+NLI_CACHE_DISK = os.getenv("NLI_CACHE_DISK", "true").lower() == "true"
+"""Cache NLI results to disk keyed by (claim_hash, span_id, model_id)"""
+
+# Profiling
+ENABLE_PROFILING = os.getenv("ENABLE_PROFILING", "false").lower() == "true"
+"""Profile verifiable mode performance and output to logs"""
+
+PROFILING_ARTIFACTS_DIR = PROJECT_ROOT / os.getenv("PROFILING_ARTIFACTS_DIR", "profiling")
+"""Directory for profiling artifacts"""
+PROFILING_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ==================== ARTIFACT PERSISTENCE & CACHING ====================
+
+# Artifact store (deterministic evidence persistence)
+ENABLE_ARTIFACT_PERSISTENCE = os.getenv("ENABLE_ARTIFACT_PERSISTENCE", "true").lower() == "true"
+ARTIFACTS_DIR = PROJECT_ROOT / os.getenv("ARTIFACTS_DIR", "artifacts")
+
+# Cache controls (for individual pipeline stages)
+EMBEDDING_CACHE_ENABLED = os.getenv("EMBEDDING_CACHE_ENABLED", "true").lower() == "true"
+RETRIEVAL_CACHE_ENABLED = os.getenv("RETRIEVAL_CACHE_ENABLED", "false").lower() == "true"
+NLI_CACHE_ENABLED = os.getenv("NLI_CACHE_ENABLED", "false").lower() == "true"
+
+# Random seed for reproducibility
+GLOBAL_RANDOM_SEED = int(os.getenv("GLOBAL_RANDOM_SEED", "42"))
+
+
+# ==================== ONLINE EVIDENCE AUGMENTATION ====================
+
+# Enable online authority verification for evidence augmentation
+ENABLE_ONLINE_VERIFICATION = os.getenv("ENABLE_ONLINE_VERIFICATION", "false").lower() == "true"
+
+# Online verification cache settings
+ONLINE_CACHE_ENABLED = os.getenv("ONLINE_CACHE_ENABLED", "true").lower() == "true"
+ONLINE_RATE_LIMIT = float(os.getenv("ONLINE_RATE_LIMIT", "2.0"))  # Requests per second
+ONLINE_TIMEOUT_SECONDS = int(os.getenv("ONLINE_TIMEOUT_SECONDS", "10"))  # Request timeout
+
+# Minimum authority tier for solo verification (TIER_1=1, TIER_2=2, TIER_3=3)
+# Tier 1/2 can verify claims alone. Tier 3 requires >=2 corroborating sources.
+ONLINE_MIN_TIER_FOR_SOLO_VERIFICATION = int(os.getenv("ONLINE_MIN_TIER_FOR_SOLO_VERIFICATION", "2"))
+
+# Maximum online sources to fetch per claim
+ONLINE_MAX_SOURCES_PER_CLAIM = int(os.getenv("ONLINE_MAX_SOURCES_PER_CLAIM", "5"))
+
+
+# ==================== CS-AWARE VERIFICATION SIGNALS ====================
+
+# Enable CS-specific verification signals (numeric, complexity, code, negation)
+ENABLE_CS_VERIFICATION_SIGNALS = os.getenv("ENABLE_CS_VERIFICATION_SIGNALS", "true").lower() == "true"
+
+# CS verification signal weights (sum should ≈ 1.0 for balanced scoring)
+WEIGHT_NUMERIC = float(os.getenv("WEIGHT_NUMERIC", "0.25"))  # Numeric consistency score weight
+WEIGHT_COMPLEXITY = float(os.getenv("WEIGHT_COMPLEXITY", "0.25"))  # Complexity notation consistency weight
+WEIGHT_CODE = float(os.getenv("WEIGHT_CODE", "0.30"))  # Code pattern anchoring weight
+WEIGHT_NEGATION = float(os.getenv("WEIGHT_NEGATION", "0.20"))  # Negation mismatch penalty weight (penalty only)
+
+# Evidence sufficiency for CS claims
+REQUIRE_ANCHOR_TERMS_COMPLEXITY = os.getenv("REQUIRE_ANCHOR_TERMS_COMPLEXITY", "true").lower() == "true"
+"""Require complexity-related anchor terms in evidence for COMPLEXITY_CLAIM"""
+
+REQUIRE_ANCHOR_TERMS_DEFINITION = os.getenv("REQUIRE_ANCHOR_TERMS_DEFINITION", "true").lower() == "true"
+"""Require definition-related anchor terms in evidence for DEFINITION_CLAIM"""
+
+REQUIRE_ANCHOR_TERMS_CODE = os.getenv("REQUIRE_ANCHOR_TERMS_CODE", "true").lower() == "true"
+"""Require code-related anchor terms in evidence for CODE_BEHAVIOR_CLAIM"""
+
+MIN_ANCHOR_SCORE_FOR_EVIDENCE = float(os.getenv("MIN_ANCHOR_SCORE_FOR_EVIDENCE", "0.5"))
+"""Minimum anchor term score to accept evidence for CS claims"""
+
+
+# ==================== CITATION RENDERING & DISPLAY ====================
+
+# Enable citation features (embed citations in output)
+ENABLE_CITATIONS = os.getenv("ENABLE_CITATIONS", "true").lower() == "true"
+"""Toggle citation features globally"""
+
+# Unverified claim handling
+SHOW_UNVERIFIED_WITH_LABEL = os.getenv("SHOW_UNVERIFIED_WITH_LABEL", "true").lower() == "true"
+"""Add '(needs evidence)' label to claims without supporting citations"""
+
+SHOW_UNVERIFIED_OMIT = os.getenv("SHOW_UNVERIFIED_OMIT", "false").lower() == "true"
+"""Omit claims entirely if they lack supporting citations (mutually exclusive with SHOW_UNVERIFIED_WITH_LABEL)"""
+
+# Citation display settings
+CITATION_MAX_PER_CLAIM = int(os.getenv("CITATION_MAX_PER_CLAIM", "3"))
+"""Maximum number of citations to display per claim"""
+
+SHOW_CITATION_CONFIDENCE = os.getenv("SHOW_CITATION_CONFIDENCE", "false").lower() == "true"
+"""Display confidence scores alongside citations"""
+
+CITATION_AUTHORITY_LABELS = os.getenv("CITATION_AUTHORITY_LABELS", "true").lower() == "true"
+"""Show authority tier labels (TIER_1, TIER_2, TIER_3) with citations"""
+
+CITATION_SNIPPET_MAX_CHARS = int(os.getenv("CITATION_SNIPPET_MAX_CHARS", "100"))
+"""Maximum characters to display in citation snippets (truncate if longer)"""
+
+# CS claim citation requirements
+REQUIRE_CITATIONS_FOR_CS_CLAIMS = os.getenv("REQUIRE_CITATIONS_FOR_CS_CLAIMS", "true").lower() == "true"
+"""Require citations for CS-specific claim types (COMPLEXITY_CLAIM, CODE_BEHAVIOR_CLAIM, DEFINITION_CLAIM, NUMERIC_CLAIM)"""
+
+# Citation rendering formats
+ENABLE_CITATION_HTML = os.getenv("ENABLE_CITATION_HTML", "false").lower() == "true"
+"""Enable HTML citation rendering with collapsible panels (for web display)"""
+
+CITATION_HTML_COLLAPSIBLE = os.getenv("CITATION_HTML_COLLAPSIBLE", "true").lower() == "true"
+"""Use collapsible citation panels in HTML rendering"""
 
 
 # ==================== INTERACTIVE VERIFIABILITY ASSESSMENT (RESEARCH) ====================

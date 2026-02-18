@@ -1,27 +1,35 @@
 """
-Robust PDF text extraction with multi-strategy approach and OCR fallback.
+Robust PDF text extraction with page-level processing and OCR fallback.
 
 This module implements intelligent PDF ingestion that:
-1. Tries pdfplumber extraction
-2. Uses OCR if extracted text quality is poor (PyMuPDF rendering + Tesseract/EasyOCR)
-4. Returns clean combined text with metadata
-5. Raises EvidenceIngestError if OCR is unavailable and text quality is poor
+1. Extracts text page-by-page with quality metrics
+2. Applies OCR fallback only to low-quality pages
+3. Preserves page-level provenance
+4. Returns comprehensive ingestion report with diagnostics
 """
 
 import logging
 import re
 import tempfile
 from io import BytesIO
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from pathlib import Path
+from dataclasses import dataclass, field
 
 from src.exceptions import EvidenceIngestError
-from src.preprocessing.text_cleaner import clean_extracted_text
+from src.preprocessing.text_cleaner import clean_extracted_text, CleanDiagnostics
+from src.preprocessing.pdf_page_extractor import (
+    extract_pages, 
+    extract_page_with_ocr,
+    PageText,
+    get_extraction_summary
+)
+from src.preprocessing.pdf_layout import reorder_columns
 import config
 
 logger = logging.getLogger(__name__)
 
-# Quality thresholds
+# Quality thresholds (kept for backward compatibility)
 MIN_CHARS_FOR_OCR = 300
 """Minimum characters required before skipping OCR fallback"""
 
@@ -33,6 +41,44 @@ MIN_ALPHA_RATIO = 0.30
 
 MIN_UNIQUE_CHARS = 20
 """Minimum unique characters to consider extraction successful"""
+
+
+@dataclass
+class PDFIngestionReport:
+    """Comprehensive PDF ingestion report with diagnostics."""
+    pages_total: int
+    pages_ocr: int
+    pages_low_quality: int
+    headers_removed_count: int
+    watermark_removed_count: int
+    removed_lines_count: int
+    extraction_method: str
+    chars_extracted: int
+    words_extracted: int
+    alphabetic_ratio: float
+    quality_assessment: str
+    removed_patterns_hit: Dict[str, int] = field(default_factory=dict)
+    removed_by_regex: Dict[str, int] = field(default_factory=dict)
+    top_removed_lines: List[str] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict for JSON serialization."""
+        return {
+            "pages_total": self.pages_total,
+            "pages_ocr": self.pages_ocr,
+            "pages_low_quality": self.pages_low_quality,
+            "headers_removed_count": self.headers_removed_count,
+            "watermark_removed_count": self.watermark_removed_count,
+            "removed_lines_count": self.removed_lines_count,
+            "extraction_method": self.extraction_method,
+            "chars_extracted": self.chars_extracted,
+            "words_extracted": self.words_extracted,
+            "alphabetic_ratio": self.alphabetic_ratio,
+            "quality_assessment": self.quality_assessment,
+            "removed_patterns_hit": self.removed_patterns_hit,
+            "removed_by_regex": self.removed_by_regex,
+            "top_removed_lines": self.top_removed_lines
+        }
 
 
 def _count_letters(text: str) -> int:
@@ -92,27 +138,197 @@ def _assess_extraction_quality(text: str) -> Tuple[bool, str]:
 
 def extract_pdf_text(uploaded_file, ocr: Optional[Any] = None) -> Tuple[str, Dict[str, Any]]:
     """
-    Extract text from PDF using multi-strategy approach with OCR fallback.
+    Extract text from PDF using page-level processing with selective OCR fallback.
     
     Args:
         uploaded_file: Streamlit UploadedFile object or file path
         ocr: Optional ImageOCR instance for OCR fallback
     
     Returns:
-        Tuple of (extracted_text, metadata_dict)
+        Tuple of (extracted_text, metadata_dict with ingestion_report)
     
     Raises:
         EvidenceIngestError: If OCR is unavailable and text quality is insufficient
     
     Metadata includes:
-        - extraction_method: "pdf_text" | "ocr_pymupdf_tesseract" | "ocr_easyocr"
-        - method: same as extraction_method
-        - diagnostics: structured extraction diagnostics
+        - extraction_method: primary extraction method used
+        - ingestion_report: PDFIngestionReport object with full diagnostics
         - num_pages: number of pages processed
         - chars_extracted: character count
         - words: word count
         - alphabetic_ratio: alphabetic character ratio
         - quality_assessment: success/failure reason
+    """
+    # Get file bytes
+    if hasattr(uploaded_file, 'name'):
+        file_path = uploaded_file.name
+        if hasattr(uploaded_file, 'getvalue'):
+            file_bytes = uploaded_file.getvalue()
+        else:
+            if hasattr(uploaded_file, 'seek'):
+                uploaded_file.seek(0)
+            file_bytes = uploaded_file.read()
+    else:
+        file_path = str(uploaded_file)
+        with open(file_path, 'rb') as f:
+            file_bytes = f.read()
+    
+    logger.info(f"Extracting PDF from: {file_path}")
+    
+    # Step 1: Extract pages with quality metrics
+    logger.info("Step 1: Extracting pages with quality assessment...")
+    pages = extract_pages(file_bytes, use_pdfplumber=True)
+    
+    if not pages:
+        raise EvidenceIngestError(
+            "EXTRACTION_FAILED",
+            "No pages could be extracted from PDF",
+            details={"file": file_path}
+        )
+    
+    # Step 2: Apply per-page OCR fallback for low-quality pages
+    logger.info("Step 2: Applying OCR fallback to low-quality pages...")
+    pages_ocr = 0
+    pages_low_quality = 0
+    
+    for i, page in enumerate(pages):
+        if not page.quality_metrics.is_acceptable:
+            pages_low_quality += 1
+            
+            # Try OCR fallback if enabled
+            if config.ENABLE_OCR_FALLBACK:
+                logger.info(f"  Page {page.page_num}: Low quality, attempting OCR...")
+                try:
+                    ocr_page = extract_page_with_ocr(file_bytes, page.page_num, ocr)
+                    
+                    # Only replace if OCR is better
+                    if ocr_page.quality_metrics.is_acceptable:
+                        logger.info(f"  Page {page.page_num}: OCR successful")
+                        pages[i] = ocr_page
+                        pages_ocr += 1
+                    else:
+                        logger.warning(f"  Page {page.page_num}: OCR also poor quality, keeping original")
+                except Exception as e:
+                    logger.warning(f"  Page {page.page_num}: OCR failed: {e}")
+            else:
+                logger.warning(f"  Page {page.page_num}: Low quality but OCR disabled")
+    
+    # Step 3: Combine page texts with page markers
+    logger.info("Step 3: Combining page texts...")
+    raw_combined_parts = []
+    for page in pages:
+        text = page.raw_text if page.raw_text else page.cleaned_text
+        if text.strip():
+            # Apply layout reordering if multi-column detected
+            text = reorder_columns(text, safe_mode=True)
+            raw_combined_parts.append(f"--- Page {page.page_num} ---\n{text}")
+    
+    raw_combined = "\n\n".join(raw_combined_parts)
+    
+    # Step 4: Clean text with diagnostics
+    logger.info("Step 4: Cleaning text with header/footer removal...")
+    cleaned_text, clean_diag = clean_extracted_text(raw_combined)
+    
+    # Step 5: Compute final metrics
+    chars = len(cleaned_text)
+    words = _count_words(cleaned_text)
+    letters = _count_letters(cleaned_text)
+    alpha_ratio = _compute_alphabetic_ratio(cleaned_text)
+    
+    # Determine primary extraction method
+    extraction_methods = {}
+    for page in pages:
+        method = page.extraction_method
+        extraction_methods[method] = extraction_methods.get(method, 0) + 1
+    
+    primary_method = max(extraction_methods.items(), key=lambda x: x[1])[0] if extraction_methods else "unknown"
+    if pages_ocr > 0:
+        primary_method = f"{primary_method}_with_ocr"
+    
+    # Create ingestion report
+    ingestion_report = PDFIngestionReport(
+        pages_total=len(pages),
+        pages_ocr=pages_ocr,
+        pages_low_quality=pages_low_quality,
+        headers_removed_count=clean_diag.headers_removed_count,
+        watermark_removed_count=clean_diag.watermark_removed_count,
+        removed_lines_count=clean_diag.removed_lines_count,
+        extraction_method=primary_method,
+        chars_extracted=chars,
+        words_extracted=words,
+        alphabetic_ratio=alpha_ratio,
+        quality_assessment=_assess_final_quality(cleaned_text),
+        removed_patterns_hit=clean_diag.removed_patterns_hit,
+        removed_by_regex=clean_diag.removed_by_regex,
+        top_removed_lines=clean_diag.top_removed_lines
+    )
+    
+    # Build metadata dict (backward compatible)
+    metadata: Dict[str, Any] = {
+        "extraction_method": primary_method,
+        "method": primary_method,
+        "num_pages": len(pages),
+        "pages": len(pages),
+        "ocr_pages": pages_ocr,
+        "pages_low_quality": pages_low_quality,
+        "chars_extracted": chars,
+        "words": words,
+        "letters": letters,
+        "alphabetic_ratio": alpha_ratio,
+        "quality_assessment": ingestion_report.quality_assessment,
+        "ingestion_report": ingestion_report,
+        "diagnostics": {
+            "method": primary_method,
+            "chars_extracted": chars,
+            "word_count": words,
+            "alphabetic_ratio": alpha_ratio,
+            "unique_chars": len(set(cleaned_text)),
+            "ocr_pages": pages_ocr,
+            "pages_low_quality": pages_low_quality,
+            "quality_assessment": ingestion_report.quality_assessment,
+            "removed_lines_count": clean_diag.removed_lines_count,
+            "headers_removed_count": clean_diag.headers_removed_count,
+            "watermark_removed_count": clean_diag.watermark_removed_count,
+            "removed_by_regex": clean_diag.removed_by_regex,
+            "removed_patterns_hit": clean_diag.removed_patterns_hit,
+            "removed_repeated_lines_count": clean_diag.removed_repeated_lines_count,
+            "top_removed_lines": clean_diag.top_removed_lines,
+            "repeat_threshold_used": clean_diag.repeat_threshold_used
+        },
+        "result": {
+            "text": cleaned_text,
+            "method": primary_method,
+            "diagnostics": ingestion_report.to_dict()
+        }
+    }
+    
+    logger.info(
+        f"Final extraction: {words} words, {chars} chars, "
+        f"alpha_ratio={alpha_ratio:.3f}, method={primary_method}, "
+        f"ocr_pages={pages_ocr}/{len(pages)}, low_quality={pages_low_quality}"
+    )
+    
+    if clean_diag.removed_lines_count > 0:
+        logger.info(
+            f"Text cleaning removed {clean_diag.removed_lines_count} lines "
+            f"(headers={clean_diag.headers_removed_count}, watermarks={clean_diag.watermark_removed_count})"
+        )
+    
+    return cleaned_text, metadata
+
+
+def _assess_final_quality(text: str) -> str:
+    """Simple quality assessment for final text."""
+    is_good, assessment = _assess_extraction_quality(text)
+    return assessment
+
+
+def extract_pdf_text_legacy(uploaded_file, ocr: Optional[Any] = None) -> Tuple[str, Dict[str, Any]]:
+    """
+    Legacy extraction method (whole-document OCR).
+    Kept for backward compatibility testing.
+    
+    Use extract_pdf_text() for new code.
     """
     metadata: Dict[str, Any] = {
         "extraction_method": None,
@@ -127,23 +343,19 @@ def extract_pdf_text(uploaded_file, ocr: Optional[Any] = None) -> Tuple[str, Dic
     
     # Get file bytes
     if hasattr(uploaded_file, 'name'):
-        # Streamlit UploadedFile
         file_path = uploaded_file.name
-        # Use getvalue() to avoid file pointer issues, fallback to read() if needed
         if hasattr(uploaded_file, 'getvalue'):
             file_bytes = uploaded_file.getvalue()
         else:
-            # Reset pointer and read for file-like objects
             if hasattr(uploaded_file, 'seek'):
                 uploaded_file.seek(0)
             file_bytes = uploaded_file.read()
     else:
-        # Assume it's a file path string
         file_path = str(uploaded_file)
         with open(file_path, 'rb') as f:
             file_bytes = f.read()
     
-    logger.info(f"Extracting PDF from: {file_path}")
+    logger.info(f"[LEGACY] Extracting PDF from: {file_path}")
     
     # Count pages once
     num_pages = _count_pdf_pages(file_bytes)

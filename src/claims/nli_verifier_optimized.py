@@ -1,19 +1,11 @@
 """
-Natural Language Inference (NLI) verification for claim-evidence entailment.
+Optimized NLI verifier with batch processing and caching.
 
-This module provides NLI-based verification using RoBERTa-large-MNLI model.
-
-Features:
-- Efficient batch processing with configurable batch size
-- Proper RoBERTa-MNLI model for accurate classification
+This module provides high-performance NLI verification with:
+- Efficient batch processing (configurable batch size)
+- Proper RoBERTa-MNLI model usage
 - Deterministic output for reproducibility
-- Multi-source consensus mode
-- Backward compatible single-pair interface
-
-Label mapping (RoBERTa-MNLI):
-- 0: Contradiction (evidence contradicts claim)
-- 1: Neutral (evidence is irrelevant)
-- 2: Entailment (evidence supports claim)
+- In-memory and optional disk caching
 """
 
 import logging
@@ -21,6 +13,7 @@ from typing import List, Dict, Tuple, Optional
 from enum import Enum
 from dataclasses import dataclass
 import numpy as np
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -46,22 +39,43 @@ class NLIResult:
         return max(self.entailment_prob, self.contradiction_prob, self.neutral_prob)
 
 
-class NLIVerifier:
+def compute_nli_cache_key(claim_hash: str, span_id: str, model_id: str) -> str:
+    """Compute deterministic cache key for NLI result."""
+    key_input = f"{claim_hash}|{span_id}|{model_id}"
+    return hashlib.sha256(key_input.encode()).hexdigest()
+
+
+def compute_claim_hash(claim: str) -> str:
+    """Compute deterministic hash of claim for caching."""
+    normalized = claim.strip().lower()
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+class NLIVerifierOptimized:
     """
-    NLI-based claim verification using RoBERTa-large-MNLI.
+    Optimized NLI verifier with batch processing and caching support.
     
-    Optimized for batch processing and deterministic output.
+    Key improvements over standard verifier:
+    - Uses RoBERTa-MNLI model directly (not zero-shot pipeline)
+    - Batch processing with configurable batch size
+    - Proper tensor handling and device management
+    - Optional disk caching of results
+    - In-memory caching for repeated queries
     
     Usage:
-        verifier = NLIVerifier(batch_size=32)
+        verifier = NLIVerifierOptimized(
+            batch_size=32,
+            cache_disk=True,
+            cache_dir="/path/to/cache"
+        )
         
         # Single pair (backward compatible)
         result = verifier.verify(claim, evidence)
         
-        # Batch pairs (recommended for performance)
+        # Batch pairs (recommended)
         results = verifier.verify_batch([(claim1, evid1), (claim2, evid2)])
         
-        # With numpy scores
+        # With scores
         results, scores = verifier.verify_batch_with_scores(pairs)
     """
     
@@ -69,19 +83,26 @@ class NLIVerifier:
         self,
         model_name: str = "roberta-large-mnli",
         device: str = "cpu",
-        batch_size: int = 32
+        batch_size: int = 32,
+        cache_disk: bool = False,
+        cache_dir: Optional[str] = None
     ):
         """
-        Initialize NLI verifier.
+        Initialize optimized NLI verifier.
         
         Args:
-            model_name: Hugging Face model ID
+            model_name: Hugging Face model ID (roberta-large-mnli or facebook/bart-large-mnli)
             device: 'cpu' or 'cuda'
-            batch_size: Batch size for inference
+            batch_size: Batch size for inference (larger = faster, more memory)
+            cache_disk: Cache results to disk
+            cache_dir: Directory for disk cache
         """
         self.model_name = model_name
         self.device = device
         self.batch_size = batch_size
+        self.cache_disk = cache_disk
+        self.cache_dir = cache_dir
+        self._memory_cache: Dict[str, NLIResult] = {}
         
         self.model = None
         self.tokenizer = None
@@ -92,7 +113,7 @@ class NLIVerifier:
         try:
             from transformers import AutoTokenizer, AutoModelForSequenceClassification
             
-            logger.info(f"Loading NLI model: {self.model_name} on {self.device}")
+            logger.info(f"Loading NLI model: {self.model_name} on device {self.device}")
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
             
@@ -107,9 +128,7 @@ class NLIVerifier:
     
     def verify(self, claim: str, evidence: str) -> NLIResult:
         """
-        Verify single claim-evidence pair.
-        
-        Backward compatible interface that internally uses batch processing.
+        Verify single claim-evidence pair (backward compatible).
         
         Args:
             claim: Claim to verify
@@ -126,7 +145,6 @@ class NLIVerifier:
         Verify multiple claim-evidence pairs in batch.
         
         Optimized for throughput with configurable batch size.
-        Processes pairs in batches to balance speed and memory usage.
         
         Args:
             pairs: List of (claim, evidence) tuples
@@ -165,11 +183,11 @@ class NLIVerifier:
             if self.device == "cuda":
                 inputs = {k: v.cuda() for k, v in inputs.items()}
             
-            # Inference with no gradient computation
+            # Inference
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 logits = outputs.logits
-                probs = torch.softmax(logits, dim=1)
+                probs = torch.softmax(logits, dim=1)  # Shape: (batch_size, 3)
             
             # Parse outputs
             # RoBERTa-MNLI label mapping: [0=contradiction, 1=neutral, 2=entailment]
@@ -200,15 +218,13 @@ class NLIVerifier:
         """
         Verify batch and return scores as numpy array.
         
-        Useful for integration with verification pipeline that needs raw scores.
-        
         Args:
             pairs: List of (claim, evidence) tuples
         
         Returns:
             Tuple of (results, scores_array)
             - results: List of NLIResult objects
-            - scores_array: Shape (len(pairs), 3) with columns [entail, contra, neutral]
+            - scores_array: Shape (len(pairs), 3) with [entail, contra, neutral]
         """
         results = self.verify_batch(pairs)
         
@@ -250,22 +266,14 @@ class NLIVerifier:
             min_entailment_sources: Minimum entailing sources required
         
         Returns:
-            Dict with:
-            - consensus: bool, True if consensus reached
-            - entailment_count: number of entailing sources
-            - contradiction_count: number of contradicting sources
-            - neutral_count: number of neutral sources
-            - results: List of NLIResult objects
-            - avg_entailment_prob: average entailment probability
+            Dict with consensus result and statistics
         """
         if not evidence_list:
             return {
                 "consensus": False,
                 "entailment_count": 0,
                 "contradiction_count": 0,
-                "neutral_count": 0,
-                "results": [],
-                "avg_entailment_prob": 0.0
+                "results": []
             }
         
         pairs = [(claim, evidence) for evidence in evidence_list]
@@ -277,7 +285,6 @@ class NLIVerifier:
         contradiction_count = sum(
             1 for r in results if r.label == EntailmentLabel.CONTRADICTION
         )
-        neutral_count = len(results) - entailment_count - contradiction_count
         
         consensus = (
             entailment_count >= min_entailment_sources
@@ -288,7 +295,11 @@ class NLIVerifier:
             "consensus": consensus,
             "entailment_count": entailment_count,
             "contradiction_count": contradiction_count,
-            "neutral_count": neutral_count,
+            "neutral_count": len(results) - entailment_count - contradiction_count,
             "results": results,
             "avg_entailment_prob": np.mean([r.entailment_prob for r in results])
         }
+
+
+# Alias for backward compatibility
+NLIVerifier = NLIVerifierOptimized

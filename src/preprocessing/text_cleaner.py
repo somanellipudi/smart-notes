@@ -18,6 +18,13 @@ class CleanDiagnostics:
     top_removed_lines: List[str]
     kept_lines_count: int
     repeat_threshold_used: int
+    headers_removed_count: int = 0
+    watermark_removed_count: int = 0
+    removed_patterns_hit: Dict[str, int] = None  # Pattern name -> count
+    
+    def __post_init__(self):
+        if self.removed_patterns_hit is None:
+            self.removed_patterns_hit = {}
 
 
 def normalize_line(line: str) -> str:
@@ -87,6 +94,56 @@ def matches_boilerplate_regex(line: str, rules: List[Tuple[str, re.Pattern]]) ->
     for name, pattern in rules:
         if pattern.search(line):
             return name
+    return None
+
+
+def _detect_specific_patterns(line: str) -> Optional[str]:
+    """
+    Detect specific common PDF artifacts:
+    - UNIT/CHAPTER headers
+    - CamScanner watermarks
+    - Isolated page numbers
+    - Date stamps
+    
+    Returns pattern name if matched, None otherwise.
+    """
+    stripped = line.strip()
+    lower = stripped.lower()
+    
+    # CamScanner variants
+    camscanner_patterns = [
+        r'camscanner',
+        r'scanned\s+by\s+camscanner',
+        r'created\s+with\s+camscanner',
+        r'www\.camscanner\.com'
+    ]
+    for pat in camscanner_patterns:
+        if re.search(pat, lower):
+            return "camscanner_watermark"
+    
+    # UNIT/CHAPTER headers (often floating headers)
+    if re.match(r'^(unit|chapter|section|module)\s+\d+', lower):
+        return "unit_chapter_header"
+    
+    # Isolated page numbers (just numbers or "Page N")
+    if re.match(r'^\s*\d+\s*$', stripped):
+        return "isolated_page_number"
+    
+    if re.match(r'^page\s+\d+\s*$', lower):
+        return "page_number_label"
+    
+    # Date/timestamp stamps (often watermarks)
+    if re.match(r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$', stripped):
+        return "date_stamp"
+    
+    # Copyright notices (common footers)
+    if re.search(r'©|\(c\)\s*\d{4}|copyright\s+\d{4}', lower):
+        return "copyright_footer"
+    
+    # "Downloaded from" / "Source:" patterns
+    if re.match(r'^(downloaded from|source:|url:)', lower):
+        return "download_source"
+    
     return None
 
 
@@ -169,12 +226,12 @@ def clean_extracted_text(
     page_separator_regex: str = r"--- Page \d+ ---"
 ) -> Tuple[str, CleanDiagnostics]:
     if not raw_text:
-        diagnostics = CleanDiagnostics(0, {}, 0, [], 0, 0)
+        diagnostics = CleanDiagnostics(0, {}, 0, [], 0, 0, 0, 0, {})
         return "", diagnostics
 
     if not config.CLEANING_ENABLED:
         kept_lines = [line for line in raw_text.splitlines() if line.strip()]
-        diagnostics = CleanDiagnostics(0, {}, 0, [], len(kept_lines), 0)
+        diagnostics = CleanDiagnostics(0, {}, 0, [], len(kept_lines), 0, 0, 0, {})
         return raw_text, diagnostics
 
     pages = _split_pages(raw_text, page_separator_regex)
@@ -190,6 +247,9 @@ def clean_extracted_text(
     removed_lines = 0
     removed_samples: Dict[str, int] = {}
     kept_lines = 0
+    headers_removed = 0
+    watermarks_removed = 0
+    removed_patterns_hit: Dict[str, int] = {}
 
     cleaned_lines: List[str] = []
 
@@ -206,6 +266,19 @@ def clean_extracted_text(
                 cleaned_lines.append(line)
                 kept_lines += 1
                 continue
+            
+            # Check specific patterns first (more targeted)
+            specific_pattern = _detect_specific_patterns(line)
+            if specific_pattern:
+                removed_patterns_hit[specific_pattern] = removed_patterns_hit.get(specific_pattern, 0) + 1
+                removed_lines += 1
+                removed_samples[stripped] = removed_samples.get(stripped, 0) + 1
+                
+                # Track watermarks separately
+                if 'watermark' in specific_pattern or 'camscanner' in specific_pattern:
+                    watermarks_removed += 1
+                
+                continue
 
             rule_name = matches_boilerplate_regex(stripped, boilerplate_rules)
             if rule_name:
@@ -220,16 +293,19 @@ def clean_extracted_text(
                 removed_samples[stripped] = removed_samples.get(stripped, 0) + 1
                 continue
 
+            # Repeated line (likely header/footer)
             if normalized in repeated_lines:
                 removed_repeated_lines += 1
                 removed_lines += 1
                 removed_samples[stripped] = removed_samples.get(stripped, 0) + 1
+                headers_removed += 1  # Count repeated lines as headers/footers
                 continue
 
             next_line = ""
             if idx + 1 < len(page):
                 next_line = page[idx + 1].strip()
 
+            # Short all-caps title lines followed by normal text
             if (
                 len(stripped) <= config.MAX_TITLE_LEN
                 and _uppercase_ratio(stripped) >= 0.7
@@ -240,6 +316,7 @@ def clean_extracted_text(
                 removed_by_regex["title_block"] = removed_by_regex.get("title_block", 0) + 1
                 removed_lines += 1
                 removed_samples[stripped] = removed_samples.get(stripped, 0) + 1
+                headers_removed += 1  # Title blocks are headers
                 continue
 
             cleaned_lines.append(line)
@@ -258,7 +335,10 @@ def clean_extracted_text(
         removed_repeated_lines_count=removed_repeated_lines,
         top_removed_lines=top_removed_lines,
         kept_lines_count=kept_lines,
-        repeat_threshold_used=repeat_threshold
+        repeat_threshold_used=repeat_threshold,
+        headers_removed_count=headers_removed,
+        watermark_removed_count=watermarks_removed,
+        removed_patterns_hit=removed_patterns_hit
     )
 
     return cleaned_text, diagnostics
