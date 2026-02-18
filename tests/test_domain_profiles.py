@@ -38,7 +38,15 @@ class TestDomainProfiles:
         assert profile.name == "algorithms"
         assert profile.display_name == "Algorithms & Data Structures"
         assert profile.require_pseudocode is True
-        assert "equation" in profile.allowed_claim_types
+        assert "algorithm_step" in profile.allowed_claim_types
+
+    def test_cs_profile_exists(self):
+        """CS profile should be defined."""
+        profile = get_domain_profile("cs")
+        assert profile.name == "cs"
+        assert profile.display_name == "CS Algorithms & Data Structures"
+        assert profile.require_pseudocode is True
+        assert "complexity" in profile.allowed_claim_types
     
     def test_default_profile(self):
         """Default profile should be physics."""
@@ -52,7 +60,7 @@ class TestDomainProfiles:
     
     def test_all_profiles_have_required_fields(self):
         """All domain profiles should have required fields."""
-        for domain_name in ["physics", "discrete_math", "algorithms"]:
+        for domain_name in ["physics", "discrete_math", "algorithms", "cs"]:
             profile = get_domain_profile(domain_name)
             assert profile.name
             assert profile.display_name
@@ -67,7 +75,7 @@ class TestDomainProfiles:
     
     def test_evidence_expectations_valid(self):
         """Evidence type expectations should be valid for all claim types."""
-        for domain_name in ["physics", "discrete_math", "algorithms"]:
+        for domain_name in ["physics", "discrete_math", "algorithms", "cs"]:
             profile = get_domain_profile(domain_name)
             
             # Check that all allowed claim types have evidence expectations

@@ -13,6 +13,8 @@ from datetime import datetime
 from typing import Literal, List, Optional, Dict, Any
 from urllib.parse import urlparse
 
+from src.preprocessing.text_cleaner import clean_extracted_text
+
 logger = logging.getLogger(__name__)
 
 # Optional dependencies
@@ -50,6 +52,7 @@ MAX_DOWNLOAD_SIZE_MB = 2
 MAX_DOWNLOAD_SIZE_BYTES = MAX_DOWNLOAD_SIZE_MB * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 10
 MIN_TEXT_LENGTH_CHARS = 200
+YOUTUBE_INCLUDE_TIMESTAMPS = False  # Set to True to include timestamps with transcripts
 
 
 @dataclass
@@ -61,6 +64,7 @@ class UrlSource:
     fetched_at: str  # ISO format datetime
     text: str
     error: Optional[str] = None  # If fetching failed
+    metadata: Optional[Dict[str, Any]] = None  # Additional metadata (e.g., video_id, language)
 
 
 def detect_source_type(url: str) -> Literal["youtube", "article", "unknown"]:
@@ -116,16 +120,22 @@ def extract_youtube_video_id(url: str) -> Optional[str]:
     return None
 
 
-def fetch_youtube_transcript(url: str) -> UrlSource:
+def fetch_youtube_transcript(url: str, include_timestamps: bool = None) -> UrlSource:
     """
     Fetch YouTube video transcript.
     
     Args:
         url: YouTube video URL
+        include_timestamps: Whether to include timestamps in transcript.
+                          If None, uses YOUTUBE_INCLUDE_TIMESTAMPS config.
+                          Format: [HH:MM:SS] Text (e.g., "[00:01:23] This is a sample")
     
     Returns:
-        UrlSource with transcript text
+        UrlSource with transcript text (with optional timestamps)
     """
+    if include_timestamps is None:
+        include_timestamps = YOUTUBE_INCLUDE_TIMESTAMPS
+    
     video_id = extract_youtube_video_id(url)
     
     if not video_id:
@@ -149,23 +159,76 @@ def fetch_youtube_transcript(url: str) -> UrlSource:
         )
     
     try:
-        # Fetch transcript
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+        # Try to fetch transcript in English first, then fallback to available
+        transcript_list = None
+        transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
         
-        # Concatenate all text entries
-        text = " ".join(entry['text'] for entry in transcript_list)
+        # Try to get English transcript
+        try:
+            transcript_list = transcripts.find_transcript(['en', 'en-US'])
+            logger.info(f"Using English transcript for video {video_id}")
+        except Exception:
+            # Fallback to first available transcript
+            try:
+                transcript_list = transcripts.find_manually_created_transcript(
+                    language_codes=['en', 'en-US']
+                )
+                logger.info(f"Using manual English transcript for video {video_id}")
+            except Exception:
+                # Get any available transcript
+                available = transcripts.get_available_transcripts()
+                if available:
+                    transcript_list = available[0]
+                    logger.info(
+                        f"Using {transcript_list.language} transcript (English unavailable) for video {video_id}"
+                    )
+                else:
+                    raise ValueError("No transcripts available for this video")
+        
+        # Fetch the actual transcript
+        transcript = transcript_list.fetch()
+        
+        # Format transcript text
+        if include_timestamps:
+            # Include timestamps: [HH:MM:SS] Text
+            text_parts = []
+            for entry in transcript:
+                # Convert seconds to HH:MM:SS format
+                start_time = entry.get('start', 0)
+                hours = int(start_time // 3600)
+                minutes = int((start_time % 3600) // 60)
+                seconds = int(start_time % 60)
+                timestamp = f"[{hours:02d}:{minutes:02d}:{seconds:02d}]"
+                
+                text = entry.get('text', '').strip()
+                if text:
+                    text_parts.append(f"{timestamp} {text}")
+            
+            text = "\n".join(text_parts)
+        else:
+            # Concatenate text without timestamps
+            text = " ".join(entry['text'] for entry in transcript if entry.get('text'))
         
         # Basic cleanup
+        text, _ = clean_extracted_text(text)
         text = re.sub(r'\s+', ' ', text).strip()
         
-        logger.info(f"Fetched YouTube transcript: {len(text)} chars from video {video_id}")
+        logger.info(
+            f"Fetched YouTube transcript: {len(text)} chars from video {video_id} "
+            f"(timestamps: {'yes' if include_timestamps else 'no'})"
+        )
         
         return UrlSource(
             url=url,
             source_type="youtube",
             title=f"YouTube Video {video_id}",
             fetched_at=datetime.utcnow().isoformat(),
-            text=text
+            text=text,
+            metadata={
+                "video_id": video_id,
+                "include_timestamps": include_timestamps,
+                "language": transcript_list.language if transcript_list else None
+            }
         )
     
     except Exception as e:
@@ -283,6 +346,7 @@ def fetch_article_content(url: str) -> UrlSource:
                 text = soup.get_text(separator=' ', strip=True)
         
         # Final cleanup
+        text, _ = clean_extracted_text(text)
         text = re.sub(r'\s+', ' ', text).strip()
         
         # Validate minimum length
@@ -329,22 +393,27 @@ def fetch_article_content(url: str) -> UrlSource:
         )
 
 
-def ingest_urls(urls: List[str]) -> List[UrlSource]:
+def ingest_urls(urls: List[str], include_timestamps: bool = None) -> List[UrlSource]:
     """
     Ingest content from multiple URLs.
     
     Supports:
-    - YouTube videos (fetches transcripts)
+    - YouTube videos (fetches transcripts with optional timestamps)
     - Web articles (extracts main content)
     
     Args:
         urls: List of URLs to ingest
+        include_timestamps: Whether to include timestamps in YouTube transcripts.
+                          If None, uses YOUTUBE_INCLUDE_TIMESTAMPS config.
     
     Returns:
         List of UrlSource objects (may include errors)
     """
     if not urls:
         return []
+    
+    if include_timestamps is None:
+        include_timestamps = YOUTUBE_INCLUDE_TIMESTAMPS
     
     results = []
     
@@ -387,7 +456,7 @@ def ingest_urls(urls: List[str]) -> List[UrlSource]:
         logger.info(f"Ingesting {source_type} URL: {url}")
         
         if source_type == "youtube":
-            result = fetch_youtube_transcript(url)
+            result = fetch_youtube_transcript(url, include_timestamps=include_timestamps)
         elif source_type == "article":
             result = fetch_article_content(url)
         else:

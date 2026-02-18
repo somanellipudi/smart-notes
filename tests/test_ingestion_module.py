@@ -105,11 +105,12 @@ class TestEvidenceValidation:
         store = EvidenceStore("test_session")
         # Empty store should fail validation
         
-        is_valid, error_msg = store.validate(min_chars=500)
+        is_valid, error_msg, classification = store.validate(min_chars=500)
         
         assert is_valid is False
         assert "Ingestion" in error_msg
         assert "No text" in error_msg
+        assert classification == "NO_EVIDENCE"
     
     def test_ingestion_diagnostics_actionable(self):
         """Diagnostics should provide actionable suggestions."""

@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 import config
 from src.preprocessing.text_quality import compute_text_quality, log_quality_report
+from src.preprocessing.text_cleaner import clean_extracted_text
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +86,23 @@ class PdfIngestor:
                     result = self._extract_with_ocr(pdf_file)
                 return result
             
-            # Phase 2: Assess extracted text quality
+            # Phase 2: Clean boilerplate before quality assessment
+            cleaned_text, clean_diag = clean_extracted_text(result.text)
+            result.text = cleaned_text
+
+            # Phase 3: Assess extracted text quality
             quality = compute_text_quality(result.text)
             result.quality_report = {
                 'alphabetic_ratio': quality.alphabetic_ratio,
                 'cid_ratio': quality.cid_ratio,
                 'printable_ratio': quality.printable_ratio,
                 'passes_quality': quality.passes_quality,
-                'failure_reasons': quality.failure_reasons
+                'failure_reasons': quality.failure_reasons,
+                'removed_lines_count': clean_diag.removed_lines_count,
+                'removed_by_regex': clean_diag.removed_by_regex,
+                'removed_repeated_lines_count': clean_diag.removed_repeated_lines_count,
+                'top_removed_lines': clean_diag.top_removed_lines,
+                'repeat_threshold_used': clean_diag.repeat_threshold_used
             }
             
             log_quality_report(quality, context="PDF extraction")

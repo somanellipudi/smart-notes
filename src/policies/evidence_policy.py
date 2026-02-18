@@ -5,18 +5,19 @@ This module implements explicit, reproducible rules for determining whether
 evidence is sufficient to verify a claim.
 
 Policy:
-- Require min_entailment_prob (default 0.60)
+- Use adaptive entailment threshold based on session distribution
 - Require min_supporting_sources (default 2 independent sources)
-- Require max_contradiction_prob (default 0.30)
+- Allow single-source systems to pass with 1 source
+- Require max_contradiction_prob (default 0.35)
 - Define "independent source" = different source_id or source_type
 
 Reference: Selena's research-rigor requirements for evidence sufficiency.
 """
 
 import logging
-from typing import List, Optional, Tuple
+import math
+from typing import List, Optional
 from dataclasses import dataclass
-from collections import Counter
 
 from src.claims.schema import (
     LearningClaim,
@@ -48,6 +49,10 @@ class SufficiencyDecision:
     contradiction_count: int
     confidence_score: float
     independent_sources: int
+    required_sources: int
+    entailment_threshold_used: float
+    max_entailment: float
+    max_contradiction: float
 
 
 def count_independent_sources(evidence_items: List[EvidenceItem]) -> int:
@@ -85,24 +90,44 @@ def count_independent_sources(evidence_items: List[EvidenceItem]) -> int:
     return len(unique_sources)
 
 
+def _percentile(values: List[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+
+    sorted_values = sorted(values)
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+
+    k = (len(sorted_values) - 1) * (percentile / 100.0)
+    lower_index = int(math.floor(k))
+    upper_index = int(math.ceil(k))
+    if lower_index == upper_index:
+        return sorted_values[lower_index]
+
+    lower_value = sorted_values[lower_index]
+    upper_value = sorted_values[upper_index]
+    return lower_value + (upper_value - lower_value) * (k - lower_index)
+
+
 def evaluate_evidence_sufficiency(
     claim: LearningClaim,
     evidence_items: List[EvidenceItem],
     nli_results: Optional[List[dict]] = None,
+    entailment_score_distribution: Optional[List[float]] = None,
     min_entailment_prob: float = None,
     min_supporting_sources: int = None,
-    max_contradiction_prob: float = None
+    max_contradiction_prob: float = None,
+    total_independent_sources: Optional[int] = None
 ) -> SufficiencyDecision:
     """
     Evaluate whether evidence is sufficient to verify a claim.
     
     Deterministic decision rules:
     1. If no evidence, return REJECTED (NO_EVIDENCE)
-    2. If entailment_prob < min_entailment_prob, return REJECTED (INSUFFICIENT_CONFIDENCE)
-    3. If independent_sources < min_supporting_sources, return LOW_CONFIDENCE (INSUFFICIENT_SOURCES)
-    4. If contradiction_prob > max_contradiction_prob, return LOW_CONFIDENCE (CONFLICT)
-    5. If both entailment and contradiction exist, return LOW_CONFIDENCE (CONFLICT)
-    6. Otherwise, return VERIFIED
+    2. If max_entailment < adaptive_threshold, return REJECTED (INSUFFICIENT_CONFIDENCE)
+    3. If independent_sources < required_sources, return LOW_CONFIDENCE (INSUFFICIENT_SOURCES)
+    4. If max_contradiction > max_contradiction_prob, return LOW_CONFIDENCE (CONFLICT)
+    5. Otherwise, return VERIFIED
     
     Relaxed Mode:
     If config.RELAXED_VERIFICATION_MODE is True, uses relaxed thresholds:
@@ -115,9 +140,11 @@ def evaluate_evidence_sufficiency(
         evidence_items: List of evidence supporting the claim
         nli_results: Optional NLI results with entailment/contradiction probabilities
                      Format: [{"label": "entailment/contradiction/neutral", "score": float}, ...]
+        entailment_score_distribution: Optional list of entailment scores across claims
         min_entailment_prob: Minimum entailment probability (default from config)
         min_supporting_sources: Minimum independent sources (default from config)
         max_contradiction_prob: Maximum contradiction probability (default from config)
+        total_independent_sources: Total independent sources available in the system
     
     Returns:
         SufficiencyDecision with status override and explanation
@@ -146,7 +173,11 @@ def evaluate_evidence_sufficiency(
     if min_supporting_sources is None:
         min_supporting_sources = config.MIN_SUPPORTING_SOURCES
     if max_contradiction_prob is None:
-        max_contradiction_prob = config.MAX_CONTRADICTION_PROB
+        max_contradiction_prob = 0.35
+
+    required_sources = min_supporting_sources
+    if total_independent_sources is not None and total_independent_sources <= 1:
+        required_sources = 1
     
     # Rule 1: No evidence → REJECTED
     if not evidence_items:
@@ -157,105 +188,114 @@ def evaluate_evidence_sufficiency(
             support_count=0,
             contradiction_count=0,
             confidence_score=0.0,
-            independent_sources=0
+            independent_sources=0,
+            required_sources=required_sources,
+            entailment_threshold_used=min_entailment_prob,
+            max_entailment=0.0,
+            max_contradiction=0.0
         )
     
     support_count = len(evidence_items)
     independent_sources = count_independent_sources(evidence_items)
     
     # Analyze NLI results if provided
-    entailment_prob = 0.0
-    contradiction_prob = 0.0
+    max_entailment = 0.0
+    max_contradiction = 0.0
     if nli_results:
         # Aggregate NLI scores
         entailment_scores = [r["score"] for r in nli_results if r.get("label") == "entailment"]
         contradiction_scores = [r["score"] for r in nli_results if r.get("label") == "contradiction"]
-        
-        entailment_prob = max(entailment_scores) if entailment_scores else 0.0
-        contradiction_prob = max(contradiction_scores) if contradiction_scores else 0.0
+
+        max_entailment = max(entailment_scores) if entailment_scores else 0.0
+        max_contradiction = max(contradiction_scores) if contradiction_scores else 0.0
     else:
         # If no NLI results, use similarity scores as proxy
         # High similarity → high entailment probability
         if evidence_items:
-            avg_similarity = sum(ev.similarity for ev in evidence_items) / len(evidence_items)
-            entailment_prob = avg_similarity
-            contradiction_prob = 0.0  # No contradiction detection without NLI
+            similarities = [ev.similarity for ev in evidence_items if ev.similarity is not None]
+            max_entailment = max(similarities) if similarities else 0.0
+            max_contradiction = 0.0  # No contradiction detection without NLI
     
     contradiction_count = len([r for r in (nli_results or []) if r.get("label") == "contradiction"])
     
+    adaptive_threshold = min_entailment_prob
+    if entailment_score_distribution:
+        adaptive_threshold = max(0.50, _percentile(entailment_score_distribution, 40))
+
     # Rule 2: Low entailment probability → REJECTED
-    if entailment_prob < min_entailment_prob:
+    if max_entailment < adaptive_threshold:
         logger.debug(
             f"Claim {claim.claim_id[:8]}: "
-            f"entailment_prob={entailment_prob:.2f} < {min_entailment_prob} → REJECTED"
+            f"max_entailment={max_entailment:.2f} < {adaptive_threshold:.2f} → REJECTED"
         )
         return SufficiencyDecision(
             status_override=VerificationStatus.REJECTED,
-            reason=f"Insufficient entailment probability ({entailment_prob:.2f} < {min_entailment_prob})",
+            reason=f"Insufficient entailment probability ({max_entailment:.2f} < {adaptive_threshold:.2f})",
             support_count=support_count,
             contradiction_count=contradiction_count,
-            confidence_score=entailment_prob,
-            independent_sources=independent_sources
+            confidence_score=max_entailment,
+            independent_sources=independent_sources,
+            required_sources=required_sources,
+            entailment_threshold_used=adaptive_threshold,
+            max_entailment=max_entailment,
+            max_contradiction=max_contradiction
         )
     
     # Rule 3: Insufficient independent sources → LOW_CONFIDENCE
-    if independent_sources < min_supporting_sources:
+    if independent_sources < required_sources:
         logger.debug(
             f"Claim {claim.claim_id[:8]}: "
-            f"independent_sources={independent_sources} < {min_supporting_sources} → LOW_CONFIDENCE"
+            f"independent_sources={independent_sources} < {required_sources} → LOW_CONFIDENCE"
         )
         return SufficiencyDecision(
             status_override=VerificationStatus.LOW_CONFIDENCE,
-            reason=f"Insufficient independent sources ({independent_sources} < {min_supporting_sources})",
+            reason=f"Insufficient independent sources ({independent_sources} < {required_sources})",
             support_count=support_count,
             contradiction_count=contradiction_count,
-            confidence_score=entailment_prob * 0.7,  # Penalize for insufficient sources
-            independent_sources=independent_sources
+            confidence_score=max_entailment * 0.7,
+            independent_sources=independent_sources,
+            required_sources=required_sources,
+            entailment_threshold_used=adaptive_threshold,
+            max_entailment=max_entailment,
+            max_contradiction=max_contradiction
         )
     
     # Rule 4: High contradiction probability → LOW_CONFIDENCE
-    if contradiction_prob > max_contradiction_prob:
+    if max_contradiction > max_contradiction_prob:
         logger.debug(
             f"Claim {claim.claim_id[:8]}: "
-            f"contradiction_prob={contradiction_prob:.2f} > {max_contradiction_prob} → LOW_CONFIDENCE"
+            f"max_contradiction={max_contradiction:.2f} > {max_contradiction_prob:.2f} → LOW_CONFIDENCE"
         )
         return SufficiencyDecision(
             status_override=VerificationStatus.LOW_CONFIDENCE,
-            reason=f"High contradiction probability ({contradiction_prob:.2f} > {max_contradiction_prob})",
+            reason=f"High contradiction probability ({max_contradiction:.2f} > {max_contradiction_prob:.2f})",
             support_count=support_count,
             contradiction_count=contradiction_count,
-            confidence_score=entailment_prob * 0.5,  # Heavily penalize for contradiction
-            independent_sources=independent_sources
-        )
-    
-    # Rule 5: Both entailment and contradiction exist (with significant scores) → LOW_CONFIDENCE (conflict)
-    if entailment_prob >= min_entailment_prob and contradiction_prob > max_contradiction_prob:
-        logger.debug(
-            f"Claim {claim.claim_id[:8]}: "
-            f"Both strong entailment and contradiction detected → LOW_CONFIDENCE"
-        )
-        return SufficiencyDecision(
-            status_override=VerificationStatus.LOW_CONFIDENCE,
-            reason=f"Conflicting evidence detected (entailment={entailment_prob:.2f}, contradiction={contradiction_prob:.2f})",
-            support_count=support_count,
-            contradiction_count=contradiction_count,
-            confidence_score=entailment_prob * 0.6,  # Penalize for conflict
-            independent_sources=independent_sources
+            confidence_score=max_entailment * 0.5,
+            independent_sources=independent_sources,
+            required_sources=required_sources,
+            entailment_threshold_used=adaptive_threshold,
+            max_entailment=max_entailment,
+            max_contradiction=max_contradiction
         )
     
     # Rule 6: All checks passed → VERIFIED
     logger.debug(
         f"Claim {claim.claim_id[:8]}: "
         f"All sufficiency checks passed → VERIFIED "
-        f"(entailment={entailment_prob:.2f}, sources={independent_sources})"
+        f"(entailment={max_entailment:.2f}, sources={independent_sources})"
     )
     return SufficiencyDecision(
         status_override=VerificationStatus.VERIFIED,
         reason=f"Sufficient evidence with {independent_sources} independent sources",
         support_count=support_count,
         contradiction_count=contradiction_count,
-        confidence_score=entailment_prob,
-        independent_sources=independent_sources
+        confidence_score=max_entailment,
+        independent_sources=independent_sources,
+        required_sources=required_sources,
+        entailment_threshold_used=adaptive_threshold,
+        max_entailment=max_entailment,
+        max_contradiction=max_contradiction
     )
 
 
@@ -294,7 +334,7 @@ def apply_sufficiency_policy(
         else:
             claim.rejection_reason = RejectionReason.INSUFFICIENT_CONFIDENCE
     elif decision.status_override == VerificationStatus.LOW_CONFIDENCE:
-        if decision.independent_sources < config.MIN_SUPPORTING_SOURCES:
+        if decision.independent_sources < decision.required_sources:
             claim.rejection_reason = RejectionReason.INSUFFICIENT_SOURCES
         elif decision.contradiction_count > 0:
             claim.rejection_reason = RejectionReason.CONFLICT
@@ -309,6 +349,10 @@ def apply_sufficiency_policy(
         "support_count": decision.support_count,
         "contradiction_count": decision.contradiction_count,
         "independent_sources": decision.independent_sources,
+        "required_sources": decision.required_sources,
+        "entailment_threshold_used": decision.entailment_threshold_used,
+        "max_entailment": decision.max_entailment,
+        "max_contradiction": decision.max_contradiction,
         "applied_at": "evidence_policy"
     }
     

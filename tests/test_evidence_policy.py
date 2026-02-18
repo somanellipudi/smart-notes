@@ -227,6 +227,104 @@ class TestEvidenceSufficiencyEvaluation:
         assert decision.status_override == VerificationStatus.LOW_CONFIDENCE
         assert "contradiction" in decision.reason.lower()
 
+    def test_adaptive_threshold_rejects_below_percentile(self):
+        """Adaptive entailment threshold should reject low max entailment."""
+        claim = LearningClaim(
+            claim_type=ClaimType.DEFINITION,
+            claim_text="Test claim",
+            confidence=0.0
+        )
+
+        evidence = [
+            EvidenceItem(
+                source_id="lec1",
+                source_type="transcript",
+                snippet="Supporting text",
+                similarity=0.55
+            )
+        ]
+
+        nli_results = [
+            {"label": "entailment", "score": 0.55},
+            {"label": "contradiction", "score": 0.05}
+        ]
+
+        distribution = [0.4, 0.5, 0.6, 0.7, 0.9]
+
+        decision = evaluate_evidence_sufficiency(
+            claim,
+            evidence,
+            nli_results=nli_results,
+            entailment_score_distribution=distribution,
+            min_supporting_sources=1
+        )
+
+        assert decision.entailment_threshold_used >= 0.50
+        assert decision.status_override == VerificationStatus.REJECTED
+
+    def test_adaptive_threshold_allows_above_percentile(self):
+        """Adaptive entailment threshold should allow when max entailment is high enough."""
+        claim = LearningClaim(
+            claim_type=ClaimType.DEFINITION,
+            claim_text="Test claim",
+            confidence=0.0
+        )
+
+        evidence = [
+            EvidenceItem(
+                source_id="lec1",
+                source_type="transcript",
+                snippet="Supporting text",
+                similarity=0.62
+            )
+        ]
+
+        nli_results = [
+            {"label": "entailment", "score": 0.62},
+            {"label": "contradiction", "score": 0.05}
+        ]
+
+        distribution = [0.4, 0.5, 0.6, 0.7, 0.9]
+
+        decision = evaluate_evidence_sufficiency(
+            claim,
+            evidence,
+            nli_results=nli_results,
+            entailment_score_distribution=distribution,
+            min_supporting_sources=1
+        )
+
+        assert decision.entailment_threshold_used >= 0.50
+        assert decision.status_override == VerificationStatus.VERIFIED
+
+    def test_single_source_system_allows_one_source(self):
+        """Allow single source when only one independent source exists system-wide."""
+        claim = LearningClaim(
+            claim_type=ClaimType.DEFINITION,
+            claim_text="Test claim",
+            confidence=0.0
+        )
+
+        evidence = [
+            EvidenceItem(
+                source_id="lec1",
+                source_type="transcript",
+                snippet="Supporting text",
+                similarity=0.80
+            )
+        ]
+
+        decision = evaluate_evidence_sufficiency(
+            claim,
+            evidence,
+            min_entailment_prob=0.60,
+            min_supporting_sources=2,
+            total_independent_sources=1
+        )
+
+        assert decision.required_sources == 1
+        assert decision.status_override == VerificationStatus.VERIFIED
+
 
 class TestPolicyApplication:
     """Test policy application to claims."""

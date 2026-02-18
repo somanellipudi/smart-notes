@@ -11,6 +11,7 @@ import logging
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
 
+from src.preprocessing.text_cleaner import clean_extracted_text
 try:
     import nltk
     from nltk.tokenize import sent_tokenize
@@ -82,6 +83,8 @@ class TextPreprocessor:
         if not text:
             return ""
         
+        text, _ = clean_extracted_text(text)
+
         # Remove excessive whitespace and newlines
         text = re.sub(r'\s+', ' ', text)
         

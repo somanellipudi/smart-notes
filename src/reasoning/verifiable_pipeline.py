@@ -7,7 +7,8 @@ converting outputs to claims, retrieving evidence, validating, and filtering.
 
 import logging
 import time
-from typing import Dict, List, Any, Optional, Tuple
+import math
+from typing import Dict, List, Any, Optional, Tuple, Callable
 from datetime import datetime
 
 import config
@@ -24,6 +25,7 @@ from src.agents.base import AgentRefusalError
 from src.preprocessing.claim_preprocessor import ClaimPreprocessor
 from src.policies.granularity_policy import enforce_granularity
 from src.policies.evidence_policy import apply_sufficiency_policy
+from src.policies.verification_policy import evaluate_claim, tag_claim_type
 from src.verification.dependency_checker import check_dependencies, apply_dependency_enforcement
 from src.policies.threat_model import get_threat_model_summary
 from src.verification.diagnostics import VerificationDiagnostics
@@ -32,8 +34,13 @@ from src.preprocessing.text_quality import compute_text_quality, log_quality_rep
 from src.verification.rejection_analysis import (
     RejectionHistogram, VerificationDebugMetadata, create_verification_response_metadata
 )
-from src.retrieval.evidence_store import EvidenceStore, validate_evidence_store
+from src.retrieval.evidence_store import (
+    EvidenceStore,
+    validate_evidence_store,
+    get_ingestion_diagnostics
+)
 from src.retrieval.evidence_builder import build_session_evidence_store
+from src.retrieval.embedding_provider import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +89,7 @@ class VerifiablePipelineWrapper:
         # Verifiable components
         self.claim_extractor = ClaimExtractor()
         self.evidence_retriever = ClaimRAG()
+        self.embedding_provider = EmbeddingProvider.from_config()
         self.claim_validator = ClaimValidator(
             verified_threshold=config.VERIFIABLE_VERIFIED_THRESHOLD,
             rejected_threshold=config.VERIFIABLE_REJECTED_THRESHOLD,
@@ -132,7 +140,8 @@ class VerifiablePipelineWrapper:
         session_id: str = None,
         verifiable_mode: bool = False,
         output_filters: Dict[str, bool] = None,
-        urls: List[str] = None
+        urls: List[str] = None,
+        progress_callback: Optional[Callable[[str, str], None]] = None
     ) -> Tuple[ClassSessionOutput, Optional[Dict[str, Any]]]:
         """
         Process content through pipeline with optional verifiable mode.
@@ -189,7 +198,8 @@ class VerifiablePipelineWrapper:
                 external_context=external_context,
                 session_id=session_id,
                 output_filters=output_filters,
-                urls=urls
+                urls=urls,
+                progress_callback=progress_callback
             )
     
     def _process_verifiable(
@@ -199,7 +209,8 @@ class VerifiablePipelineWrapper:
         external_context: str,
         session_id: str,
         output_filters: Dict[str, bool] = None,
-        urls: List[str] = None
+        urls: List[str] = None,
+        progress_callback: Optional[Callable[[str, str], None]] = None
     ) -> Tuple[ClassSessionOutput, Dict[str, Any]]:
         """
         Process content in verifiable mode.
@@ -224,6 +235,13 @@ class VerifiablePipelineWrapper:
         """
         start_time = time.perf_counter()
         step_timings: Dict[str, float] = {}
+
+        def _update_progress(stage: str, status: str) -> None:
+            if progress_callback:
+                try:
+                    progress_callback(stage, status)
+                except Exception:
+                    pass
         
         # Initialize diagnostics if enabled
         diagnostics = VerificationDiagnostics(session_id) if config.DEBUG_VERIFICATION else None
@@ -381,6 +399,7 @@ class VerifiablePipelineWrapper:
         logger.info("Step 0.5: Building session evidence store")
         step_start = time.perf_counter()
         
+        evidence_stats = None
         try:
             # Build evidence store from all inputs
             evidence_store, evidence_stats = build_session_evidence_store(
@@ -389,88 +408,30 @@ class VerifiablePipelineWrapper:
                 external_context=external_context,
                 equations=equations,
                 urls=urls if config.ENABLE_URL_SOURCES else None,
-                min_input_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION
+                min_input_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION,
+                embedding_provider=self.embedding_provider
             )
             
-            # Add embeddings to evidence store
-            logger.info(f"Computing embeddings for {len(evidence_store.evidence)} evidence chunks")
+            if not evidence_store.index_built:
+                raise ValueError("Evidence index not built; dense retrieval unavailable")
             
-            # Check if semantic retriever has encoder
-            if not hasattr(self.evidence_retriever, 'encoder') or self.evidence_retriever.encoder is None:
-                # Fallback: initialize semantic retriever
-                from src.retrieval.semantic_retriever import SemanticRetriever
-                semantic_ret = SemanticRetriever()
-                encoder = semantic_ret.encoder
-                embedding_dim = semantic_ret.embedding_dim
-            else:
-                encoder = self.evidence_retriever.encoder if hasattr(self.evidence_retriever, 'encoder') else None
-                embedding_dim = getattr(self.evidence_retriever, 'embedding_dim', None)
-            
-            # Encode all evidence texts
-            if encoder is not None:
-                evidence_texts = [ev.text for ev in evidence_store.evidence]
-                logger.info(f"Encoding {len(evidence_texts)} texts using encoder")
-                
-                # Handle both SentenceTransformer (has batch_size) and fallback embedders
-                try:
-                    embeddings = encoder.encode(
-                        evidence_texts,
-                        batch_size=32,
-                        show_progress_bar=False,
-                        convert_to_numpy=True
-                    )
-                except TypeError:
-                    # Fallback embedder (TF-IDF) doesn't have these parameters
-                    logger.info("Using fallback embedder (doesn't support batch processing)")
-                    embeddings = encoder.encode(evidence_texts)
-                
-                # Add embeddings to evidence objects
-                import numpy as np
-                embeddings = np.atleast_2d(embeddings)  # Ensure 2D
-                for i, ev in enumerate(evidence_store.evidence):
-                    ev.embedding = embeddings[i].astype('float32')
-                
-                # Get actual embedding dimension from computed embeddings
-                actual_embedding_dim = embeddings.shape[1]
-                logger.info(f"Actual embedding dimension: {actual_embedding_dim}")
-                
-                # Build FAISS index with actual dimension
-                evidence_store.build_index(embeddings=embeddings.astype('float32'), embedding_dim=actual_embedding_dim)
-                logger.info(f"✓ Built FAISS index with {len(evidence_store.evidence)} vectors of {actual_embedding_dim}-dim")
-            else:
-                logger.warning("No encoder available, creating store without embeddings")
-                # Create dummy embeddings for structure
-                import numpy as np
-                dummy_embeddings = np.random.rand(len(evidence_store.evidence), 128).astype('float32')
-                for i, ev in enumerate(evidence_store.evidence):
-                    ev.embedding = dummy_embeddings[i]
-                evidence_store.build_index(embeddings=dummy_embeddings, embedding_dim=128)
-            
-            # Validate evidence store (CRITICAL)
-            validate_evidence_store(evidence_store, min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION)
+            # Validate evidence store (non-blocking)
+            is_valid, validation_msg, classification = validate_evidence_store(
+                evidence_store,
+                min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION,
+                strict=False
+            )
             
             # Log evidence statistics
             ev_stats = evidence_store.get_statistics()
+            evidence_stats = ev_stats
             logger.info(
-                f"✓ Evidence store validated: "
-                f"{ev_stats['num_chunks']} chunks, "
-                f"{ev_stats['total_chars']} chars, "
-                f"{ev_stats['num_sources']} sources, "
-                f"FAISS index size: {ev_stats['faiss_index_size']}"
+                f"Evidence store stats: {ev_stats['num_chunks']} chunks, "
+                f"{ev_stats['total_chars']} chars, {ev_stats['num_sources']} sources"
             )
-            
-            # Store evidence stats for diagnostics
-            if diagnostics:
-                diagnostics.evidence_stats = ev_stats
-        
-        except ValueError as e:
-            # Evidence store validation failed - fall back to baseline mode instead of hard-failing
-            error_msg = f"Evidence validation skipped: {str(e)}"
-            logger.warning(f"⚠ {error_msg}")
-            logger.warning("Insufficient evidence for verification mode. Falling back to baseline mode.")
-            
-            # Generate baseline output if not already done
-            try:
+
+            if not is_valid:
+                logger.warning("Insufficient evidence for verification mode. Falling back to baseline mode.")
                 baseline_output = self.standard_pipeline.process(
                     combined_content=combined_content,
                     equations=equations,
@@ -478,21 +439,56 @@ class VerifiablePipelineWrapper:
                     session_id=session_id,
                     output_filters=output_filters
                 )
-            except Exception as baseline_error:
-                logger.error(f"Could not generate baseline output: {baseline_error}")
-                baseline_output = None
-            
-            # Return baseline output with a flag that verification was skipped
+
+                verifiable_metadata = {
+                    "verifiable_mode": False,
+                    "verification_unavailable": True,
+                    "status": classification,
+                    "reason": validation_msg,
+                    "message": (
+                        "Verification unavailable due to insufficient evidence. "
+                        "Showing baseline study guide (unverified content)."
+                    ),
+                    "metrics": {
+                        "total_claims": 0,
+                        "verified_claims": 0,
+                        "rejected_claims": 0,
+                        "evidence_docs": 0,
+                        "quality_flags": [validation_msg]
+                    },
+                    "evidence_diagnostics": get_ingestion_diagnostics(
+                        evidence_store,
+                        min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION
+                    )
+                }
+
+                return baseline_output, verifiable_metadata
+
+            # Store evidence stats for diagnostics
+            if diagnostics:
+                diagnostics.evidence_stats = ev_stats
+
+        except ValueError as e:
+            error_msg = f"Evidence validation skipped: {str(e)}"
+            logger.warning(f"⚠ {error_msg}")
+            logger.warning("Insufficient evidence for verification mode. Falling back to baseline mode.")
+
+            baseline_output = self.standard_pipeline.process(
+                combined_content=combined_content,
+                equations=equations,
+                external_context=external_context,
+                session_id=session_id,
+                output_filters=output_filters
+            )
+
             verifiable_metadata = {
                 "verifiable_mode": False,
+                "verification_unavailable": True,
                 "status": "INSUFFICIENT_EVIDENCE",
-                "reason": "Not enough evidence for verification",
-                "error_details": str(e),
+                "reason": str(e),
                 "message": (
-                    "Your input text is too short for verification mode.\n"
-                    "Showing baseline study guide (unverified content).\n"
-                    f"Current text: {len(combined_content)} characters | "
-                    f"Required for verification: {config.MIN_INPUT_CHARS_FOR_VERIFICATION} characters"
+                    "Verification unavailable due to insufficient evidence. "
+                    "Showing baseline study guide (unverified content)."
                 ),
                 "metrics": {
                     "total_claims": 0,
@@ -502,24 +498,7 @@ class VerifiablePipelineWrapper:
                     "quality_flags": [error_msg]
                 }
             }
-            
-            # Ensure we return a ClassSessionOutput, not a dict
-            if baseline_output is None:
-                from src.schema.output_schema import ClassSessionOutput
-                baseline_output = ClassSessionOutput(
-                    session_id=session_id,
-                    class_summary="Unable to process input. The provided content does not meet minimum requirements for verification mode. Please provide at least 500 characters of substantive lecture content or notes, then try again.",
-                    topics=[],
-                    key_concepts=[],
-                    equation_explanations=[],
-                    worked_examples=[],
-                    common_mistakes=[],
-                    faqs=[],
-                    real_world_connections=[],
-                    metadata={"verifiable": False, "status": "INSUFFICIENT_EVIDENCE", "error": "baseline_generation_failed"}
-                )
-            
-            # Return baseline output with a flag that verification was skipped
+
             return baseline_output, verifiable_metadata
         
         step_timings["step_0_5_build_evidence_store"] = time.perf_counter() - step_start
@@ -540,10 +519,12 @@ class VerifiablePipelineWrapper:
         
         # Step 2: Extract claims from baseline
         logger.info("Step 2: Extracting claims from baseline output")
+        _update_progress("claim_extraction", "running")
         step_start = time.perf_counter()
         claim_collection = self.claim_extractor.extract_from_session(baseline_output)
         step_timings["step_2_extract_claims"] = time.perf_counter() - step_start
         logger.info(f"Step 2 time: {step_timings['step_2_extract_claims']:.2f}s")
+        _update_progress("claim_extraction", "complete")
         
         # Step 2.5: Enforce claim granularity (split compound claims)
         logger.info("Step 2.5: Enforcing claim granularity policy")
@@ -553,72 +534,95 @@ class VerifiablePipelineWrapper:
             max_propositions=config.MAX_PROPOSITIONS_PER_CLAIM
         )
         claim_collection.claims = atomic_claims
+        for claim in claim_collection.claims:
+            tag_claim_type(claim, self.domain_profile)
         step_timings["step_2_5_enforce_granularity"] = time.perf_counter() - step_start
         logger.info(f"Step 2.5 time: {step_timings['step_2_5_enforce_granularity']:.2f}s")
         
         # Step 3: Retrieve evidence for each claim
         logger.info("Step 3: Retrieving evidence for claims")
+        _update_progress("retrieval", "running")
         step_start = time.perf_counter()
         
         # Use evidence store built in Step 0.5
-        # Encode claim texts to get query embeddings
-        claim_texts = [claim.claim_text for claim in claim_collection.claims]
+        claim_texts = [
+            (claim.claim_text or claim.metadata.get("draft_text", ""))
+            for claim in claim_collection.claims
+        ]
         logger.info(f"Encoding {len(claim_texts)} claims for evidence retrieval")
-        
-        # Handle both SentenceTransformer and fallback embedders
-        try:
-            claim_embeddings = encoder.encode(
-                claim_texts,
-                batch_size=32,
-                show_progress_bar=False,
-                convert_to_numpy=True
-            )
-        except TypeError:
-            # Fallback embedder (TF-IDF) doesn't have these parameters
-            logger.info("Using fallback embedder for claim encoding")
-            claim_embeddings = encoder.encode(claim_texts)
-        
-        import numpy as np
-        claim_embeddings = np.atleast_2d(claim_embeddings)  # Ensure 2D
-        
-        # Retrieve evidence for each claim using vector search
+
+        claim_embeddings = self.embedding_provider.embed_queries(claim_texts)
+
+        retrieval_top_k = config.DENSE_RETRIEVAL_TOP_K
+        min_similarity = config.DENSE_RETRIEVAL_MIN_SIMILARITY
+        use_reranker = config.ENABLE_RERANKER
+        rerank_top_k = config.RERANKER_TOP_K if use_reranker else retrieval_top_k
+        final_top_k = config.RERANKER_KEEP_K if use_reranker else config.VERIFIABLE_MAX_EVIDENCE_PER_CLAIM
+
+        def _sigmoid(value: float) -> float:
+            return 1.0 / (1.0 + math.exp(-value))
+
         all_nli_results = []
         for i, claim in enumerate(claim_collection.claims):
-            # Search evidence store with claim embedding
-            query_embedding = claim_embeddings[i].astype('float32')
+            query_embedding = claim_embeddings[i].astype("float32")
             retrieved = evidence_store.search(
                 query_embedding=query_embedding,
-                top_k=config.TOP_K_EVIDENCE if hasattr(config, 'TOP_K_EVIDENCE') else 10,
-                min_similarity=0.3  # Filter low-quality matches
+                top_k=rerank_top_k,
+                min_similarity=min_similarity
             )
-            
-            # Convert Evidence objects to evidence format expected by policy
-            # Create EvidenceItem objects with similarity scores
+
+            reranked = []
+            if use_reranker and retrieved:
+                passages = [ev.text for ev, _ in retrieved]
+                raw_scores = self.embedding_provider.rerank(claim.claim_text, passages)
+                if raw_scores:
+                    for (ev, vec_sim), raw_score in zip(retrieved, raw_scores):
+                        reranked.append((ev, _sigmoid(raw_score), vec_sim, raw_score))
+                    reranked.sort(key=lambda item: item[1], reverse=True)
+                    reranked = reranked[:final_top_k]
+                else:
+                    reranked = [(ev, sim, sim, None) for ev, sim in retrieved[:final_top_k]]
+            else:
+                reranked = [(ev, sim, sim, None) for ev, sim in retrieved[:final_top_k]]
+
             from src.claims.schema import EvidenceItem
             evidence = []
-            for ev, similarity in retrieved:
+            for ev, score, vec_sim, raw_score in reranked:
+                span_metadata = {"vector_similarity": vec_sim}
+                if raw_score is not None:
+                    span_metadata["rerank_score"] = raw_score
                 evidence_obj = EvidenceItem(
                     source_id=ev.source_id,
                     source_type=ev.source_type,
                     snippet=ev.text,
-                    span_metadata={"similarity": similarity},
-                    similarity=similarity,
+                    span_metadata=span_metadata,
+                    similarity=score,
                     reliability_prior=0.8
                 )
                 evidence.append(evidence_obj)
             
-            claim.evidence_objects.extend(evidence)
-            
-            # Apply decision policy to this claim
-            status, reason, confidence = self.evidence_retriever.apply_decision_policy(claim, evidence)
-            claim.status = status
-            claim.confidence = confidence
+            claim.evidence_objects = evidence
+            claim.evidence_ids = [ev.evidence_id for ev in evidence]
+
+            decision = evaluate_claim(
+                claim=claim,
+                evidence_items=evidence,
+                domain_profile=self.domain_profile,
+                nli_results=claim.metadata.get("nli_results") if hasattr(claim, "metadata") else None
+            )
+            claim.status = decision.status
+            claim.confidence = decision.confidence
+            claim.rejection_reason = decision.rejection_reason
             
             # Track in rejection histogram
             rejection_histogram.add_claim_result(
                 claim_text=claim.claim_text,
-                status=status,
-                rejection_reason=reason if status == VerificationStatus.REJECTED else None,
+                status=claim.status,
+                rejection_reason=(
+                    claim.rejection_reason.value
+                    if claim.status == VerificationStatus.REJECTED and claim.rejection_reason
+                    else None
+                ),
                 retrieval_hit_count=len(evidence)
             )
             
@@ -651,8 +655,8 @@ class VerifiablePipelineWrapper:
                     entailments=entailments,
                     contradictions=contradictions,
                     independent_sources=independent_sources,
-                    status=status,
-                    reason=reason
+                    status=claim.status,
+                    reason=claim.rejection_reason
                 )
                 
                 # Log retrieval health if enabled
@@ -665,12 +669,17 @@ class VerifiablePipelineWrapper:
                         num_candidates=len(evidence)
                     )
         
+        _update_progress("nli", "running")
+
         # Log NLI distribution if enabled
         if diagnostics and config.DEBUG_NLI_DISTRIBUTION and all_nli_results:
             diagnostics.log_nli_distribution(all_nli_results)
+
+        _update_progress("nli", "complete")
         
         step_timings["step_3_retrieve_evidence"] = time.perf_counter() - step_start
         logger.info(f"Step 3 time: {step_timings['step_3_retrieve_evidence']:.2f}s")
+        _update_progress("retrieval", "complete")
 
         # Step 3.5: Evidence-first claim text generation
         logger.info("Step 3.5: Generating claim text only after evidence")
@@ -706,10 +715,12 @@ class VerifiablePipelineWrapper:
         
         # Step 4: Validate claims
         logger.info("Step 4: Validating claims")
+        _update_progress("decision_policy", "running")
         step_start = time.perf_counter()
         claim_collection = self.claim_validator.validate_collection(claim_collection)
         step_timings["step_4_validate_claims"] = time.perf_counter() - step_start
         logger.info(f"Step 4 time: {step_timings['step_4_validate_claims']:.2f}s")
+        _update_progress("decision_policy", "complete")
         
         # Step 5: Build claim-evidence graph and compute metrics
         logger.info("Step 5: Building claim-evidence graph")
@@ -798,13 +809,15 @@ class VerifiablePipelineWrapper:
                     logger.info("Re-evaluating claims with relaxed thresholds...")
                     for claim in claim_collection.claims:
                         if claim.evidence_objects:
-                            # Re-apply decision policy with relaxed thresholds
-                            status, reason, confidence = self.evidence_retriever.apply_decision_policy(
-                                claim,
-                                claim.evidence_objects
+                            decision = evaluate_claim(
+                                claim=claim,
+                                evidence_items=claim.evidence_objects,
+                                domain_profile=self.domain_profile,
+                                nli_results=claim.metadata.get("nli_results") if hasattr(claim, "metadata") else None
                             )
-                            claim.status = status
-                            claim.confidence = confidence
+                            claim.status = decision.status
+                            claim.confidence = decision.confidence
+                            claim.rejection_reason = decision.rejection_reason
                     
                     # Re-filter to verified claims
                     verified_collection = self.claim_validator.filter_collection(
@@ -906,6 +919,7 @@ class VerifiablePipelineWrapper:
             "claim_graph_dict": claim_graph_dict,  # Serialized version for exports
             "graph_metrics": graph_metrics_dict,
             "metrics": metrics,
+            "evidence_stats": evidence_stats,
             "baseline_output": baseline_output,
             "baseline_output_dict": baseline_output_dict,  # Serialized version for exports
             "timings": step_timings,

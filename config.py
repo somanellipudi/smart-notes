@@ -97,6 +97,47 @@ MIN_SEGMENT_LENGTH = int(os.getenv("MIN_SEGMENT_LENGTH", "50"))
 MAX_SEGMENT_LENGTH = int(os.getenv("MAX_SEGMENT_LENGTH", "1000"))
 TOPIC_BOUNDARY_THRESHOLD = float(os.getenv("TOPIC_BOUNDARY_THRESHOLD", "0.6"))
 
+# Text cleaning (boilerplate removal)
+CLEANING_ENABLED = os.getenv("CLEANING_ENABLED", "true").lower() == "true"
+REPEAT_FRAC = float(os.getenv("REPEAT_FRAC", "0.30"))
+MIN_LINE_LEN = int(os.getenv("MIN_LINE_LEN", "4"))
+MAX_TITLE_LEN = int(os.getenv("MAX_TITLE_LEN", "40"))
+
+BOILERPLATE_REGEX_RULES = [
+    {"name": "unit", "pattern": r"^\s*(unit|chapter|module|lesson|week)\s*[:\-]?\s*\d+\b"},
+    {"name": "course_meta", "pattern": r"\b(b\.?tech|btech|m\.?tech|semester|dept\.?|department|university|college|institute)\b"},
+    {"name": "scan_watermark", "pattern": r"\b(scanned\s+with|camscanner|adobe\s+scan|genius\s+scan|microsoft\s+lens)\b"},
+    {"name": "file_marker", "pattern": r"^\s*---\s*(from|page)\b"},
+    {"name": "separator", "pattern": r"^\s*[-_=]{3,}\s*$"}
+]
+
+CODE_LINE_PROTECT_REGEXES = [
+    r"\bO\s*\([^)]*\)",
+    r"\bTheta\s*\([^)]*\)",
+    r"[{}\[\]();]",
+    r"\bfor\b|\bwhile\b|\bif\b|\belse\b|\breturn\b"
+]
+
+CODE_LINE_PROTECT_TOKENS = [
+    "push",
+    "pop",
+    "enqueue",
+    "dequeue",
+    "stack",
+    "queue",
+    "heap",
+    "graph",
+    "dfs",
+    "bfs"
+]
+
+
+# ==================== PDF OCR FALLBACK ====================
+
+ENABLE_OCR_FALLBACK = os.getenv("ENABLE_OCR_FALLBACK", "true").lower() == "true"
+OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "10"))
+OCR_DPI = int(os.getenv("OCR_DPI", "200"))
+
 
 # ==================== REASONING PIPELINE ====================
 
@@ -181,6 +222,23 @@ VERIFIABLE_MIN_INDEPENDENT_SOURCES = int(os.getenv("VERIFIABLE_MIN_INDEPENDENT_S
 # Evidence retrieval settings
 VERIFIABLE_MIN_EVIDENCE_LENGTH = int(os.getenv("VERIFIABLE_MIN_EVIDENCE_LENGTH", "15"))
 VERIFIABLE_RELEVANCE_THRESHOLD = float(os.getenv("VERIFIABLE_RELEVANCE_THRESHOLD", "0.2"))
+
+# Dense retrieval settings (sentence-transformers)
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "intfloat/e5-base-v2")
+EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
+EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+EMBEDDING_NORMALIZE = os.getenv("EMBEDDING_NORMALIZE", "true").lower() == "true"
+DENSE_RETRIEVAL_TOP_K = int(os.getenv("DENSE_RETRIEVAL_TOP_K", "20"))
+DENSE_RETRIEVAL_MIN_SIMILARITY = float(os.getenv("DENSE_RETRIEVAL_MIN_SIMILARITY", "0.2"))
+
+# Optional reranker settings
+ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "false").lower() == "true"
+RERANKER_MODEL_NAME = os.getenv(
+    "RERANKER_MODEL_NAME",
+    "cross-encoder/ms-marco-MiniLM-L-6-v2"
+)
+RERANKER_TOP_K = int(os.getenv("RERANKER_TOP_K", "20"))
+RERANKER_KEEP_K = int(os.getenv("RERANKER_KEEP_K", "5"))
 
 # Evidence consistency scoring (hybrid: rule-based + model-based)
 VERIFIABLE_CONSISTENCY_ENABLED = os.getenv("VERIFIABLE_CONSISTENCY_ENABLED", "true").lower() == "true"
@@ -394,118 +452,25 @@ def is_staging() -> bool:
 
 # ==================== DOMAIN PROFILES ====================
 
-from dataclasses import dataclass
-from typing import List, Dict
-
-
-@dataclass
-class DomainProfile:
-    """
-    Domain-specific validation profile for research-grade verifiability.
-    
-    Each domain has specific claim types, evidence expectations, and validation rules.
-    Enables domain-specific rigor while maintaining general framework.
-    
-    Attributes:
-        name: Domain identifier (physics, discrete_math, algorithms)
-        display_name: Human-readable name
-        description: Domain description
-        allowed_claim_types: Claim types relevant to this domain
-        evidence_type_expectations: Expected evidence types per claim type
-        require_units: Whether unit checking is required (physics)
-        require_proof_steps: Whether proof-step strictness is enforced (discrete_math)
-        require_pseudocode: Whether pseudocode checks are required (algorithms)
-        require_equations: Whether equations must be present (physics, algorithms)
-        strict_dependencies: Whether to enforce strict dependency checking
-    """
-    name: str
-    display_name: str
-    description: str
-    allowed_claim_types: List[str]
-    evidence_type_expectations: Dict[str, List[str]]
-    require_units: bool = False
-    require_proof_steps: bool = False
-    require_pseudocode: bool = False
-    require_equations: bool = False
-    strict_dependencies: bool = False
-
-
-# Define domain profiles
-DOMAIN_PROFILES: Dict[str, DomainProfile] = {
-    "physics": DomainProfile(
-        name="physics",
-        display_name="Physics",
-        description="Physics domain with equations, units, and physical laws",
-        allowed_claim_types=["definition", "equation", "example", "misconception"],
-        evidence_type_expectations={
-            "definition": ["transcript", "notes", "external"],
-            "equation": ["transcript", "notes", "external", "equation"],
-            "example": ["transcript", "notes", "external"],
-            "misconception": ["transcript", "notes"]
-        },
-        require_units=True,
-        require_proof_steps=False,
-        require_pseudocode=False,
-        require_equations=True,
-        strict_dependencies=False
-    ),
-    "discrete_math": DomainProfile(
-        name="discrete_math",
-        display_name="Discrete Mathematics",
-        description="Discrete math domain with definitions, proofs, and formal logic",
-        allowed_claim_types=["definition", "example", "misconception"],
-        evidence_type_expectations={
-            "definition": ["transcript", "notes", "external"],
-            "example": ["transcript", "notes", "external"],
-            "misconception": ["transcript", "notes"]
-        },
-        require_units=False,
-        require_proof_steps=True,
-        require_pseudocode=False,
-        require_equations=False,
-        strict_dependencies=True
-    ),
-    "algorithms": DomainProfile(
-        name="algorithms",
-        display_name="Algorithms & Data Structures",
-        description="Algorithms domain with pseudocode, complexity analysis, and implementations",
-        allowed_claim_types=["definition", "equation", "example", "misconception"],
-        evidence_type_expectations={
-            "definition": ["transcript", "notes", "external"],
-            "equation": ["transcript", "notes", "external", "equation"],
-            "example": ["transcript", "notes", "external"],
-            "misconception": ["transcript", "notes"]
-        },
-        require_units=False,
-        require_proof_steps=False,
-        require_pseudocode=True,
-        require_equations=False,
-        strict_dependencies=False
-    )
-}
+from src.policies.domain_profiles import (
+    DomainProfile,
+    DOMAIN_PROFILES,
+    get_domain_profile as _get_domain_profile
+)
 
 
 def get_domain_profile(domain_name: str = None) -> DomainProfile:
     """
     Get domain profile by name.
-    
+
     Args:
-        domain_name: Domain name (physics, discrete_math, algorithms). 
+        domain_name: Domain name (physics, discrete_math, algorithms, cs).
                      If None, returns default domain.
-    
+
     Returns:
         DomainProfile instance
-    
+
     Raises:
         ValueError: If domain name is invalid
     """
-    if domain_name is None:
-        domain_name = DEFAULT_DOMAIN_PROFILE
-    
-    if domain_name not in DOMAIN_PROFILES:
-        raise ValueError(
-            f"Invalid domain: {domain_name}. "
-            f"Valid domains: {', '.join(DOMAIN_PROFILES.keys())}"
-        )
-    
-    return DOMAIN_PROFILES[domain_name]
+    return _get_domain_profile(domain_name, DEFAULT_DOMAIN_PROFILE)

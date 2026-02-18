@@ -5,5 +5,11 @@ from .text_processing import (
     TextSegment,
     preprocess_classroom_content
 )
+from .text_cleaner import clean_extracted_text
 
-__all__ = ["TextPreprocessor", "TextSegment", "preprocess_classroom_content"]
+__all__ = [
+    "TextPreprocessor",
+    "TextSegment",
+    "preprocess_classroom_content",
+    "clean_extracted_text"
+]

@@ -241,7 +241,7 @@ class EvidenceStore:
             "faiss_available": FAISS_AVAILABLE
         }
     
-    def validate(self, min_chars: int = 500) -> tuple[bool, str]:
+    def validate(self, min_chars: int = 500) -> tuple[bool, str, str]:
         """
         Validate that evidence store is ready for verification.
         
@@ -251,13 +251,13 @@ class EvidenceStore:
             min_chars: Minimum total characters required
         
         Returns:
-            (is_valid, error_message)
+            (is_valid, message, classification)
         """
         if len(self.evidence) == 0:
             return False, (
                 "**Ingestion Failed**: No text could be extracted from uploaded files. "
                 "Try uploading a different PDF or use OCR-compatible files."
-            )
+            ), "NO_EVIDENCE"
         
         # If very low text, suggest OCR or file quality issues
         if self.total_chars < 50:
@@ -265,7 +265,7 @@ class EvidenceStore:
                 f"**Ingestion Failed**: Extracted only {self.total_chars} characters. "
                 "This suggests the file may be corrupted, empty, or an unsupported format. "
                 "Try:\n  1. OCR mode if available\n  2. A different file\n  3. Plain text instead of PDF"
-            )
+            ), "INSUFFICIENT_EVIDENCE"
         
         # If under min for verification but reasonable amount, provide guidance
         if self.total_chars < min_chars:
@@ -274,25 +274,29 @@ class EvidenceStore:
                 f"**Ingestion Insufficient**: Extracted {self.total_chars} chars (need {min_chars}). "
                 f"Need {shortfall} more characters. "
                 "Try:\n  1. Upload additional materials\n  2. Use simpler language detection\n  3. Skip verification mode"
-            )
+            ), "INSUFFICIENT_EVIDENCE"
         
         if not self.index_built:
             return False, (
                 "**System Error**: Evidence index not built. "
                 "This is an internal error - please report it."
-            )
+            ), "INDEX_NOT_BUILT"
         
         if FAISS_AVAILABLE and isinstance(self.faiss_index, faiss.Index):
             if self.faiss_index.ntotal == 0:
                 return False, (
                     "**System Error**: FAISS index is empty despite evidence being present. "
                     "Please report this error."
-                )
-        
-        return True, "Evidence store is valid"
+                ), "EMPTY_INDEX"
+
+            return True, "Evidence store is valid", "OK"
 
 
-def validate_evidence_store(store: EvidenceStore, min_chars: int = 500) -> None:
+def validate_evidence_store(
+    store: EvidenceStore,
+    min_chars: int = 500,
+    strict: bool = True
+) -> tuple[bool, str, str]:
     """
     Validate evidence store and raise error if invalid.
     
@@ -300,14 +304,26 @@ def validate_evidence_store(store: EvidenceStore, min_chars: int = 500) -> None:
         store: Evidence store to validate
         min_chars: Minimum total characters required
     
+    Returns:
+        (is_valid, message, classification)
+
     Raises:
-        ValueError: If store is invalid
+        ValueError: If store is invalid and strict=True
     """
-    is_valid, error_msg = store.validate(min_chars=min_chars)
-    if not is_valid:
-        raise ValueError(f"Evidence store validation failed: {error_msg}")
-    
-    logger.info(f"✓ Evidence store validated: {len(store.evidence)} chunks, {store.total_chars} chars")
+    is_valid, message, classification = store.validate(min_chars=min_chars)
+    if not is_valid and strict:
+        raise ValueError(f"Evidence store validation failed: {message}")
+
+    if is_valid:
+        logger.info(
+            f"✓ Evidence store validated: {len(store.evidence)} chunks, {store.total_chars} chars"
+        )
+    else:
+        logger.warning(
+            f"Evidence store validation failed ({classification}): {message}"
+        )
+
+    return is_valid, message, classification
 
 
 def get_ingestion_diagnostics(store: EvidenceStore, min_chars: int = 500) -> Dict[str, Any]:
@@ -323,13 +339,14 @@ def get_ingestion_diagnostics(store: EvidenceStore, min_chars: int = 500) -> Dic
     Returns:
         Dictionary with diagnostic details
     """
-    is_valid, error_msg = store.validate(min_chars=min_chars)
+    is_valid, error_msg, classification = store.validate(min_chars=min_chars)
     
     stats = store.get_statistics()
     
     diagnostics = {
         "is_valid": is_valid,
         "error_message": error_msg if not is_valid else None,
+        "classification": classification,
         "extracted_text_length": store.total_chars,
         "minimum_required": min_chars,
         "chunks_count": len(store.evidence),

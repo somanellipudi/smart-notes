@@ -27,7 +27,11 @@ except ImportError:
 def _check_easyocr():
     return importlib.util.find_spec("easyocr") is not None
 
+def _check_pytesseract():
+    return importlib.util.find_spec("pytesseract") is not None
+
 EASYOCR_AVAILABLE = _check_easyocr()
+PYTESSERACT_AVAILABLE = _check_pytesseract()
 
 logger = logging.getLogger(__name__)
 
@@ -49,46 +53,45 @@ class ImageOCR:
         """
         self.reader = None
         self.ocr_backend = None
+        self.backend_error = None
         
-        try:
-            # Re-check backend in case it was just installed
-            easyocr_ok = _check_easyocr()
-            
-            logger.info(f"OCR Init: easyocr={easyocr_ok}")
-            
-            # Try to initialize EasyOCR
-            if easyocr_ok:
-                try:
-                    logger.info("Initializing EasyOCR...")
-                    import easyocr
-                    # Use with cache to avoid re-downloading on Streamlit reruns
-                    self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory='/tmp/easyocr')
-                    self.ocr_backend = "easyocr"
-                    logger.info("✓ EasyOCR initialized successfully")
-                except ImportError as e:
-                    if "torch" in str(e).lower():
-                        logger.error(f"❌ PyTorch initialization failed: {e}")
-                        raise RuntimeError(
-                            f"OCR system unavailable: PyTorch C extensions failed to load.\n\n"
-                            f"This can be fixed by reinstalling PyTorch:\n"
-                            f"  pip install --no-build-isolation -v -e .\n"
-                            f"Or run Python from a different directory."
-                        )
-                    else:
-                        logger.error(f"❌ Failed to initialize EasyOCR: {e}")
-                        raise RuntimeError(f"OCR system unavailable: {e}")
-                except Exception as e:
-                    logger.error(f"❌ Failed to initialize EasyOCR: {e}")
-                    raise RuntimeError(f"OCR system unavailable: {e}")
-            else:
-                raise ImportError("EasyOCR module not found")
-                
-        except Exception as e:
-            logger.error(f"❌ OCR initialization failed: {e}")
-            # Re-raise if it's already a RuntimeError with our message
-            if isinstance(e, RuntimeError):
-                raise
-            raise RuntimeError(f"OCR system unavailable: {e}")
+        # Re-check backend in case it was just installed
+        easyocr_ok = _check_easyocr()
+        pytesseract_ok = _check_pytesseract()
+
+        logger.info(f"OCR Init: easyocr={easyocr_ok}, pytesseract={pytesseract_ok}")
+
+        if easyocr_ok:
+            try:
+                logger.info("Initializing EasyOCR...")
+                import easyocr
+                self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory='/tmp/easyocr')
+                self.ocr_backend = "easyocr"
+                logger.info("✓ EasyOCR initialized successfully")
+                return
+            except Exception as e:
+                global EASYOCR_AVAILABLE
+                EASYOCR_AVAILABLE = False
+                self.backend_error = f"EasyOCR failed: {e}"
+                logger.warning(f"EasyOCR unavailable, falling back: {e}")
+
+        if pytesseract_ok:
+            try:
+                import pytesseract
+                self.ocr_backend = "pytesseract"
+                logger.info("✓ pytesseract initialized successfully")
+                return
+            except Exception as e:
+                self.backend_error = f"pytesseract failed: {e}"
+                logger.error(f"pytesseract initialization failed: {e}")
+
+        error_detail = self.backend_error or "No OCR backend available"
+        raise RuntimeError(
+            "OCR system unavailable. "
+            f"{error_detail}. "
+            "Fix: pip install easyocr==1.7.1 python-bidi bidi, "
+            "or install pytesseract plus the Tesseract OCR binary."
+        )
     
     def extract_text_from_image(
         self,
@@ -122,7 +125,10 @@ class ImageOCR:
                 image = self._preprocess_notes_image(image)
             
             # Extract text
-            result = self._extract_with_easyocr(image)
+            if self.ocr_backend == "easyocr":
+                result = self._extract_with_easyocr(image)
+            else:
+                result = self._extract_with_tesseract(image)
             
             logger.info(
                 f"OCR extracted {len(result['text'])} characters "
@@ -271,6 +277,33 @@ class ImageOCR:
                 "num_detections": len(results)
             }
         }
+
+    def _extract_with_tesseract(self, image: Image.Image) -> Dict[str, Any]:
+        """Extract text using pytesseract fallback."""
+        try:
+            import pytesseract
+        except Exception as e:
+            logger.error(f"pytesseract import failed: {e}")
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "metadata": {"backend": "pytesseract", "error": str(e)}
+            }
+
+        try:
+            text = pytesseract.image_to_string(image)
+            return {
+                "text": text.strip(),
+                "confidence": 0.0,
+                "metadata": {"backend": "pytesseract"}
+            }
+        except Exception as e:
+            logger.error(f"pytesseract OCR failed: {e}")
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "metadata": {"backend": "pytesseract", "error": str(e)}
+            }
     
     
 def process_images(

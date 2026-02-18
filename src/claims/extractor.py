@@ -10,6 +10,7 @@ See docs/VERIFIABILITY_CONTRACT.md for details.
 """
 
 import logging
+import re
 from typing import List, Dict, Any
 import uuid
 
@@ -229,6 +230,37 @@ class ClaimExtractor:
             claims.append(claim)
             logger.info(f"Extracted 1 summary claim from {len(sentences)} sentences")
         
+        return claims
+
+    @staticmethod
+    def extract_atomic_claims(text: str, domain: str = "cs") -> List[LearningClaim]:
+        """
+        Extract simple atomic claims from raw text.
+
+        Uses sentence splitting and emits definition-style claims as a fallback
+        when structured outputs are unavailable.
+        """
+        if not text or not text.strip():
+            return []
+
+        sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()]
+        claims = []
+        for sentence in sentences:
+            if len(sentence) < 20:
+                continue
+            claim = LearningClaim(
+                claim_id=f"claim_{uuid.uuid4().hex[:8]}",
+                claim_type=ClaimType.DEFINITION,
+                claim_text=sentence,
+                status=VerificationStatus.REJECTED,
+                metadata={
+                    "source": "raw_text",
+                    "domain": domain,
+                    "draft_text": sentence
+                }
+            )
+            claims.append(claim)
+
         return claims
     
     @staticmethod

@@ -258,12 +258,9 @@ def _clean_text(text: str) -> str:
     """Clean and normalize extracted text."""
     if not text:
         return ""
-    
-    # Remove excessive whitespace
-    text = re.sub(r'\s+', ' ', text)
-    
-    # Remove common garbage
-    text = re.sub(r'\(cid:[0-9]+\)', '', text)  # CID glyphs
-    text = re.sub(r'[^\x20-\x7E\n\t]', '', text)  # Non-printable chars
-    
-    return text.strip()
+
+    from src.preprocessing.text_cleaner import clean_extracted_text
+
+    cleaned, _ = clean_extracted_text(text)
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned.strip()

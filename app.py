@@ -14,9 +14,9 @@ from pathlib import Path
 from datetime import datetime
 import tempfile
 import hashlib
-from typing import Tuple, Optional, Dict, Any
+import textwrap
+from typing import Tuple, Optional, Dict, Any, Callable
 import requests
-from io import StringIO
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -45,10 +45,7 @@ try:
     from src.output_formatter import StreamingOutputDisplay
     from src.reasoning.fallback_handler import FallbackGenerator, PipelineEnhancer
     from src.streamlit_display import StreamlitProgressDisplay, QuickExportButtons
-    from src.display.interactive_claims import InteractiveClaimDisplay
-    from src.graph.graph_sanitize import export_graphml_bytes
-    from src.graph.claim_graph import export_adjacency_json
-    from src.retrieval.evidence_store import get_ingestion_diagnostics
+    from src.exporters.report_exporter import export_report_json, export_report_pdf
     from src.schema.output_schema import (
         ClassSessionOutput,
         Topic,
@@ -375,8 +372,10 @@ def process_session(
     external_context: str,
     session_id: str,
     verifiable_mode: bool = False,
-    domain_profile: str = "physics",
-    llm_provider_type: str = "openai"
+    domain_profile: str = "algorithms",
+    llm_provider_type: str = "openai",
+    progress_callback: Optional[Callable[[str, str], None]] = None,
+    debug_mode: bool = False
 ) -> Tuple[dict, Optional[dict]]:
     """
     Process classroom session through the complete pipeline.
@@ -388,8 +387,10 @@ def process_session(
         external_context: Reference material text
         session_id: Unique session identifier
         verifiable_mode: Whether to use verifiable mode
-        domain_profile: Domain profile (physics, discrete_math, algorithms)
+        domain_profile: Domain profile (algorithms)
         llm_provider_type: LLM provider to use
+        progress_callback: Optional progress callback for verifiable stages
+        debug_mode: Whether to show debug details
     
     Returns:
         Tuple of (result_dict, verifiable_metadata)
@@ -478,7 +479,7 @@ def process_session(
         if llm_provider_type == "openai" and not config.OPENAI_API_KEY:
             st.error("❌ OPENAI_API_KEY is not set. Please add it to your .env file.")
             st.warning("Continuing with fallback output so the app remains responsive.")
-            llm_provider_type = "ollama"
+            llm_provider_type = "fallback"
 
         if llm_provider_type == "ollama":
             try:
@@ -497,15 +498,15 @@ def process_session(
             domain_profile=domain_profile if verifiable_mode else None
         )
         
-        # Debug: Log what filters are being passed
-        st.info(f"🔍 Filters being sent to pipeline: {st.session_state.output_filters}")
+        if debug_mode:
+            st.info(f"Filters being sent to pipeline: {st.session_state.output_filters}")
         
         # Parse URLs from text area
         urls = []
         if 'urls_text' in locals() and urls_text and urls_text.strip():
             urls = [url.strip() for url in urls_text.strip().split('\n') if url.strip()]
-            if urls:
-                st.info(f"🌐 Will ingest {len(urls)} URL(s) as evidence sources")
+            if urls and debug_mode:
+                st.info(f"Will ingest {len(urls)} URL(s) as evidence sources")
         
         if llm_provider_type != "fallback":
             try:
@@ -516,7 +517,8 @@ def process_session(
                     session_id=session_id,
                     verifiable_mode=verifiable_mode,
                     output_filters=st.session_state.output_filters,
-                    urls=urls
+                    urls=urls,
+                    progress_callback=progress_callback
                 )
             except Exception as e:
                 error_text = str(e)
@@ -554,21 +556,17 @@ def process_session(
                     output, verifiable_metadata = _build_fallback_output(error_text)
         
         if verifiable_mode and verifiable_metadata:
-            metrics = verifiable_metadata["metrics"]
-            st.success(
-                f"✓ Verifiable reasoning complete: "
-                f"{metrics['verified_claims']}/{metrics['total_claims']} claims verified "
-                f"(rejection rate: {metrics['rejection_rate']:.1%})"
-            )
-            timings = verifiable_metadata.get("timings", {})
-            total_time = verifiable_metadata.get("total_time_seconds")
-            if timings or total_time is not None:
-                with st.expander("⏱️ Processing Time Breakdown", expanded=False):
-                    if total_time is not None:
-                        st.metric("Total Time (s)", f"{total_time:.2f}")
-                    if timings:
-                        for step, seconds in timings.items():
-                            st.write(f"• {step.replace('_', ' ')}: {seconds:.2f}s")
+            st.success("Verifiability report ready.")
+            if debug_mode:
+                timings = verifiable_metadata.get("timings", {})
+                total_time = verifiable_metadata.get("total_time_seconds")
+                if timings or total_time is not None:
+                    with st.expander("Processing Time Breakdown", expanded=False):
+                        if total_time is not None:
+                            st.metric("Total Time (s)", f"{total_time:.2f}")
+                        if timings:
+                            for step, seconds in timings.items():
+                                st.write(f"- {step.replace('_', ' ')}: {seconds:.2f}s")
         else:
             st.success(
                 f"✓ Reasoning complete: {len(output.topics)} topics, "
@@ -633,10 +631,9 @@ def _extract_text_from_pdf(pdf_file, ocr=None) -> Tuple[str, Dict[str, Any]]:
     """
     Extract text from a PDF file with multi-strategy fallback.
     
-    Uses new robust extraction module with 3-level fallback:
-    1. PyMuPDF (fitz) - faster, better PDF support
-    2. pdfplumber - alternative extraction
-    3. OCR (pdf2image + pytesseract) - for scanned/corrupted PDFs
+    Uses new robust extraction module with OCR fallback:
+    1. pdfplumber extraction
+    2. OCR (PyMuPDF rendering + Tesseract/EasyOCR fallback) for scanned PDFs
     
     Args:
         pdf_file: Streamlit uploaded file object
@@ -644,7 +641,12 @@ def _extract_text_from_pdf(pdf_file, ocr=None) -> Tuple[str, Dict[str, Any]]:
         
     Returns:
         Tuple of (extracted_text, metadata_dict)
+        
+    Raises:
+        EvidenceIngestError: If extraction fails and OCR is unavailable
     """
+    from src.exceptions import EvidenceIngestError
+    
     try:
         # Use new robust extraction module with OCR fallback
         text, metadata = extract_pdf_text(pdf_file, ocr=ocr)
@@ -654,12 +656,26 @@ def _extract_text_from_pdf(pdf_file, ocr=None) -> Tuple[str, Dict[str, Any]]:
             return "", metadata
         
         # Format with page information if available
-        pages = metadata.get("pages", 1)
-        # Handle both "extraction_method_used" and "extraction_method" keys for compatibility
-        extraction_method = metadata.get("extraction_method_used") or metadata.get("extraction_method", "unknown")
-        formatted_text = f"--- PDF: {pdf_file.name} ({pages} pages, method: {extraction_method}) ---\n{text}\n"
+        pages = metadata.get("pages", metadata.get("num_pages", 1))
+        extraction_method = metadata.get("extraction_method") or metadata.get("extraction_method_used", "unknown")
+        ocr_pages = metadata.get("ocr_pages", 0)
+        logger.info(
+            "PDF ingestion diagnostics: file=%s method=%s chars=%s ocr_pages=%s",
+            pdf_file.name,
+            extraction_method,
+            metadata.get("chars_extracted", 0),
+            ocr_pages
+        )
+        formatted_text = (
+            f"--- PDF: {pdf_file.name} ({pages} pages, method: {extraction_method}, "
+            f"ocr_pages: {ocr_pages}) ---\n{text}\n"
+        )
         
         return formatted_text, metadata
+    except EvidenceIngestError as e:
+        # Re-raise EvidenceIngestError for proper handling upstream
+        logger.error(f"Evidence ingestion failed for {pdf_file.name}: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error extracting PDF {pdf_file.name}: {str(e)}")
         return "", {"error": str(e), "extraction_method": "error"}
@@ -745,6 +761,266 @@ def display_ingestion_diagnostics(diagnostics: Dict[str, Any], show_minimal: boo
     """)
 
 
+def _create_verifiability_progress_ui():
+    stages = [
+        ("claim_extraction", "Claim extraction"),
+        ("retrieval", "Evidence retrieval"),
+        ("nli", "NLI consistency"),
+        ("decision_policy", "Decision policy")
+    ]
+    stage_labels = {key: label for key, label in stages}
+    stage_state = {key: "pending" for key, _ in stages}
+
+    progress_bar = st.progress(0, text="Preparing verifiability report...")
+    container = st.container()
+    placeholders = {}
+
+    with container:
+        for key, label in stages:
+            placeholders[key] = st.empty()
+            placeholders[key].markdown(f"○ {label}")
+
+    def update_progress(stage_key: str, status: str) -> None:
+        if stage_key not in placeholders:
+            return
+
+        stage_state[stage_key] = status
+        icon = "○"
+        if status == "running":
+            icon = "⏳"
+        elif status == "complete":
+            icon = "✅"
+
+        placeholders[stage_key].markdown(f"{icon} {stage_labels[stage_key]}")
+        completed = sum(1 for value in stage_state.values() if value == "complete")
+        progress_bar.progress(completed / len(stages))
+
+    return update_progress
+
+
+def _build_verifiability_report(verifiable_metadata: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+    claim_collection = verifiable_metadata.get("claim_collection")
+    claims = claim_collection.claims if claim_collection else []
+    metrics = verifiable_metadata.get("metrics", {})
+
+    report_claims = []
+    for claim in claims:
+        status_value = getattr(claim.status, "value", str(claim.status))
+        claim_type = getattr(claim.claim_type, "value", str(claim.claim_type))
+        rejection_reason = getattr(claim.rejection_reason, "value", str(claim.rejection_reason))
+
+        display_text = (
+            claim.metadata.get("ui_display", "") or
+            claim.claim_text or
+            claim.metadata.get("draft_text", "")
+        )
+
+        evidence_items = []
+        for ev in getattr(claim, "evidence_objects", []) or []:
+            span_meta = getattr(ev, "span_metadata", {}) or {}
+            location = span_meta.get("location") or span_meta.get("line") or span_meta.get("page")
+            evidence_items.append({
+                "source_id": getattr(ev, "source_id", ""),
+                "source_type": getattr(ev, "source_type", ""),
+                "snippet": (getattr(ev, "snippet", "") or getattr(ev, "text", ""))[:500],
+                "similarity": getattr(ev, "similarity", None),
+                "location": location
+            })
+
+        report_claims.append({
+            "claim_id": claim.claim_id,
+            "claim_type": claim_type,
+            "status": status_value,
+            "confidence": claim.confidence,
+            "evidence_ids": list(getattr(claim, "evidence_ids", []) or []),
+            "rejection_reason": rejection_reason if rejection_reason != "None" else None,
+            "claim_text": claim.claim_text or display_text,
+            "evidence": evidence_items
+        })
+
+    report = {
+        "session_id": session_id,
+        "generated_at": datetime.utcnow().isoformat(),
+        "metrics": metrics,
+        "claims": report_claims,
+        "claim_count": len(report_claims)
+    }
+
+    return report
+
+
+def _build_verifiability_report_pdf(report: Dict[str, Any]) -> bytes:
+    try:
+        import fitz  # PyMuPDF
+    except Exception as exc:
+        raise RuntimeError("PyMuPDF is required to export PDF reports.") from exc
+
+    def wrap_lines(text: str, width: int = 90) -> list[str]:
+        return textwrap.wrap(text, width=width) if text else []
+
+    def add_line(page_obj, line: str, y_pos: float) -> float:
+        page_obj.insert_text((72, y_pos), line, fontsize=11)
+        return y_pos + 14
+
+    doc = fitz.open()
+    page = doc.new_page()
+    y = 72
+
+    def ensure_space(lines_needed: int = 1):
+        nonlocal page, y
+        if y + (lines_needed * 14) > page.rect.height - 72:
+            page = doc.new_page()
+            y = 72
+
+    title = f"Verifiability Report: {report.get('session_id', 'session')}"
+    for line in wrap_lines(title, 80):
+        ensure_space()
+        y = add_line(page, line, y)
+    ensure_space()
+    y = add_line(page, f"Generated: {report.get('generated_at', '')}", y)
+    ensure_space()
+    y = add_line(page, "", y)
+
+    metrics = report.get("metrics", {})
+    summary_lines = [
+        f"Total claims: {metrics.get('total_claims', report.get('claim_count', 0))}",
+        f"Verified: {metrics.get('verified_claims', 0)}",
+        f"Low confidence: {metrics.get('low_confidence_claims', 0)}",
+        f"Rejected: {metrics.get('rejected_claims', 0)}",
+        f"Rejection rate: {metrics.get('rejection_rate', 0):.1%}",
+        f"Avg confidence: {metrics.get('avg_confidence', 0):.2f}",
+    ]
+    for line in summary_lines:
+        ensure_space()
+        y = add_line(page, line, y)
+
+    y = add_line(page, "", y)
+
+    def render_claim_table(title_text: str, claims: list[Dict[str, Any]]):
+        nonlocal page, y
+        ensure_space(2)
+        y = add_line(page, title_text, y)
+        if not claims:
+            y = add_line(page, "(none)", y)
+            return
+
+        for claim in claims:
+            claim_text = (claim.get("claim_text") or claim.get("text") or "").strip()
+            claim_text = claim_text if len(claim_text) <= 140 else claim_text[:137] + "..."
+            evidence = claim.get("evidence", [])
+            top_evidence = evidence[0].get("snippet", "") if evidence else ""
+            top_evidence = top_evidence if len(top_evidence) <= 160 else top_evidence[:157] + "..."
+            line = (
+                f"- {claim_text} (conf: {claim.get('confidence', 0):.2f}, "
+                f"evidence: {len(evidence)})"
+            )
+            for wrapped in wrap_lines(line, 92):
+                ensure_space()
+                y = add_line(page, wrapped, y)
+            if top_evidence:
+                for wrapped in wrap_lines(f"  Top evidence: {top_evidence}", 92):
+                    ensure_space()
+                    y = add_line(page, wrapped, y)
+        y = add_line(page, "", y)
+
+    claims = report.get("claims", [])
+    verified = [c for c in claims if str(c.get("status", "")).lower() == "verified"]
+    low_conf = [c for c in claims if str(c.get("status", "")).lower() == "low_confidence"]
+    rejected = [c for c in claims if str(c.get("status", "")).lower() == "rejected"]
+
+    render_claim_table("Verified claims", verified)
+    render_claim_table("Low-confidence claims", low_conf)
+    render_claim_table("Rejected claims", rejected)
+
+    return doc.tobytes()
+
+
+def display_verifiability_report(
+    verifiable_metadata: Dict[str, Any],
+    output: Any,
+    debug_mode: bool = False
+) -> None:
+    session_id = output.session_id if hasattr(output, "session_id") else "session"
+    report = _build_verifiability_report(verifiable_metadata, session_id)
+    metrics = report.get("metrics", {})
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Verified", metrics.get("verified_claims", 0))
+    with col2:
+        st.metric("Low confidence", metrics.get("low_confidence_claims", 0))
+    with col3:
+        st.metric("Rejected", metrics.get("rejected_claims", 0))
+    with col4:
+        st.metric("Avg confidence", f"{metrics.get('avg_confidence', 0):.2f}")
+
+    claims = report.get("claims", [])
+    verified = [c for c in claims if str(c.get("status", "")).lower() == "verified"]
+    low_conf = [c for c in claims if str(c.get("status", "")).lower() == "low_confidence"]
+    rejected = [c for c in claims if str(c.get("status", "")).lower() == "rejected"]
+
+    def _render_claim_table(title: str, rows: list[Dict[str, Any]]):
+        st.subheader(title)
+        if not rows:
+            st.caption("No claims in this category.")
+            return
+        table_rows = []
+        for claim in rows:
+            evidence = claim.get("evidence", [])
+            top_evidence = evidence[0].get("snippet", "") if evidence else ""
+            table_rows.append({
+                "Claim": (
+                    claim.get("claim_text", "")[:140] + "..."
+                    if len(claim.get("claim_text", "")) > 140
+                    else claim.get("claim_text", "")
+                ),
+                "Confidence": f"{claim.get('confidence', 0):.2f}",
+                "Evidence": len(evidence),
+                "Top evidence": (top_evidence[:160] + "...") if len(top_evidence) > 160 else top_evidence
+            })
+        try:
+            st.dataframe(table_rows, use_container_width=True)
+        except Exception:
+            st.table(table_rows)
+
+    _render_claim_table("Verified claims", verified)
+    _render_claim_table("Low-confidence claims", low_conf)
+    _render_claim_table("Rejected claims", rejected)
+
+    st.divider()
+    report_json = export_report_json(report)
+    pdf_bytes = None
+    pdf_error = None
+    try:
+        pdf_bytes = export_report_pdf(report)
+    except Exception as exc:
+        pdf_error = str(exc)
+
+    export_col1, export_col2 = st.columns(2)
+    with export_col1:
+        st.download_button(
+            label="Export report JSON",
+            data=report_json,
+            file_name=f"verifiability_report_{session_id}.json",
+            mime="application/json"
+        )
+    with export_col2:
+        if pdf_bytes:
+            st.download_button(
+                label="Export report PDF",
+                data=pdf_bytes,
+                file_name=f"verifiability_report_{session_id}.pdf",
+                mime="application/pdf"
+            )
+        else:
+            st.caption(f"PDF export unavailable: {pdf_error}")
+
+    if debug_mode:
+        st.divider()
+        st.caption("Debug: full report JSON")
+        st.json(report)
+
+
 def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] = None):
     """
     Display structured output using new streaming display system.
@@ -755,502 +1031,6 @@ def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] =
     """
     output = result["output"]
     evaluation = result["evaluation"]
-    
-    # ========================================================================
-    # VERIFIABLE MODE METRICS (if enabled)
-    # ========================================================================
-    
-    if verifiable_metadata:
-        st.header("🔬 Verifiable Mode Metrics")
-        
-        metrics = verifiable_metadata["metrics"]
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "Verified Claims",
-                metrics["verified_claims"],
-                help="Claims with sufficient evidence"
-            )
-        
-        with col2:
-            st.metric(
-                "Rejected Claims",
-                metrics["rejected_claims"],
-                help="Claims lacking evidence"
-            )
-        
-        with col3:
-            st.metric(
-                "Rejection Rate",
-                f"{metrics['rejection_rate']:.1%}",
-                help="Percentage of claims rejected"
-            )
-        
-        with col4:
-            st.metric(
-                "Avg Confidence",
-                f"{metrics['avg_confidence']:.2f}",
-                help="Average claim confidence"
-            )
-        
-        # Evidence metrics
-        ev_metrics = metrics.get("evidence_metrics", {})
-        if ev_metrics:
-            st.subheader("Evidence Quality")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    "Avg Evidence/Claim",
-                    f"{ev_metrics.get('avg_evidence_per_claim', 0):.1f}",
-                    help="Average evidence items per claim"
-                )
-            
-            with col2:
-                st.metric(
-                    "Unsupported Rate",
-                    f"{ev_metrics.get('unsupported_rate', 0):.1%}",
-                    help="Claims without evidence"
-                )
-            
-            with col3:
-                st.metric(
-                    "Evidence Quality",
-                    f"{ev_metrics.get('avg_evidence_quality', 0):.2f}",
-                    help="Average evidence relevance score"
-                )
-        
-        # Quality flags
-        if metrics.get("quality_flags"):
-            st.warning("**Quality Flags:**\n\n" + "\n".join(f"• {flag}" for flag in metrics["quality_flags"]))
-        
-        # Baseline comparison (only if available)
-        if "baseline_comparison" in metrics and metrics["baseline_comparison"] is not None:
-            with st.expander("📊 Comparison to Baseline (Standard Mode)"):
-                comp = metrics["baseline_comparison"]
-                st.write(f"**Baseline Items:** {comp.get('baseline_total_items', 'N/A')}")
-                st.write(f"**Verified Claims:** {comp.get('verifiable_verified_claims', 'N/A')}")
-                st.write(f"**Reduction Rate:** {comp.get('reduction_rate', 0):.1%}")
-                st.write(f"**Est. Hallucination Reduction:** {comp.get('hallucination_reduction_estimate', 0):.1%}")
-        
-        # Claim review section for research
-        st.subheader("📌 Claim Review")
-        
-        # Claim review section for research
-        st.subheader("📌 Claim Review - AI Content Authenticity Assessment")
-        
-        st.info(
-            "🔬 **Research Mode**: Hover over content to inspect AI-generated claims. "
-            "Each claim shows confidence score, evidence sources, and verifiability assessment."
-        )
-        
-        claim_filter = st.selectbox(
-            "Show claims",
-            ["All", "Verified", "Low confidence", "Rejected"],
-            index=0
-        )
-        
-        claim_collection = verifiable_metadata.get("claim_collection")
-        all_claims = claim_collection.claims if claim_collection else []
-        
-        def _matches_filter(claim_status: str) -> bool:
-            if claim_filter == "All":
-                return True
-            return claim_status.lower().replace("_", " ") == claim_filter.lower()
-        
-        filtered_claims = [
-            c for c in all_claims
-            if _matches_filter(getattr(c.status, "value", str(c.status)))
-        ]
-        
-        claim_rows = []
-        for c in filtered_claims:
-            status_value = getattr(c.status, "value", str(c.status))
-            # Use ui_display from metadata or fallback to claim_text or draft_text
-            display_text = (
-                c.metadata.get("ui_display", "") or 
-                c.claim_text or 
-                c.metadata.get("draft_text", "[No description]")
-            )
-            claim_rows.append({
-                "Claim ID": c.claim_id[:8] + "...",  # Truncate ID for readability
-                "Type": getattr(c.claim_type, "value", str(c.claim_type)),
-                "Status": status_value,
-                "Confidence": round(c.confidence, 3),
-                "Evidence Count": len(c.evidence_ids),
-                "Claim": (display_text[:100] + "…") if len(display_text) > 100 else display_text
-            })
-        
-        # Use st.table() when pyarrow is available; otherwise fall back to JSON
-        if claim_rows:
-            try:
-                import pyarrow  # noqa: F401
-                st.table(claim_rows)
-            except Exception:
-                st.warning("PyArrow is unavailable. Showing claims as JSON.")
-                st.json(claim_rows)
-        else:
-            st.info("No claims to display")
-        
-        # New interactive claims display with authenticity assessment
-        st.subheader("🔬 Interactive Verifiability Assessment")
-        st.write("Click on any claim below to inspect sources, confidence scores, and authenticity indicators.")
-        
-        # Use new interactive display
-        InteractiveClaimDisplay.display_claims_summary_with_verifiability(
-            filtered_claims,
-            show_ai_badge=True
-        )
-        
-        # Dependency warnings display
-        if verifiable_metadata.get("dependency_warnings"):
-            st.divider()
-            dep_warnings = verifiable_metadata["dependency_warnings"]
-            st.subheader("⚠️ Cross-Claim Dependency Warnings")
-            st.write(f"Found {len(dep_warnings)} claims with undefined term references:")
-            
-            for i, warning in enumerate(dep_warnings[:10], 1):  # Show first 10
-                with st.expander(f"Warning {i}: {warning.claim_text[:60]}..."):
-                    st.write(f"**Claim ID:** {warning.claim_id[:8]}...")
-                    st.write(f"**Severity:** {warning.severity}")
-                    st.write(f"**Undefined Terms:** {', '.join(warning.undefined_terms)}")
-                    st.write(f"**Suggestion:** {warning.suggestion}")
-            
-            if len(dep_warnings) > 10:
-                st.info(f"+ {len(dep_warnings) - 10} more warnings (see export for full list)")
-        
-        # Domain profile and threat model info
-        st.divider()
-        st.subheader("🎯 Research Configuration")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write(f"**Domain Profile:** {verifiable_metadata.get('domain_profile_display', 'N/A')}")
-            if verifiable_metadata.get("domain_profile"):
-                profile_name = verifiable_metadata["domain_profile"]
-                try:
-                    profile = config.get_domain_profile(profile_name)
-                    st.caption(profile.description)
-                except:
-                    pass
-        
-        with col2:
-            if verifiable_metadata.get("threat_model"):
-                threat_summary = verifiable_metadata["threat_model"]
-                st.write(f"**Threat Model:** {threat_summary['in_scope_count']} in-scope threats")
-                st.caption(f"{', '.join(threat_summary['in_scope_threats'][:3])}...")
-        
-        # Authenticity report for research
-        if filtered_claims:
-            with st.expander("📊 Authenticity Report (for Research)", expanded=False):
-                report = InteractiveClaimDisplay.create_claim_authenticity_report(
-                    filtered_claims,
-                    st.session_state.result['output'].session_id if 'output' in st.session_state.result else "unknown"
-                )
-                
-                st.json(report)
-                
-                # Export button
-                report_json = json.dumps(report, indent=2)
-                st.download_button(
-                    label="📥 Download Authenticity Report (JSON)",
-                    data=report_json,
-                    file_name=f"authenticity_report_{report['session_id']}.json",
-                    mime="application/json"
-                )
-        
-        # Graph visualization
-        st.divider()
-        st.subheader("📊 Claim-Evidence Network Graph")
-        
-        claim_graph = verifiable_metadata.get("claim_graph")
-        if claim_graph:
-            try:
-                import networkx as nx
-                HAS_MATPLOTLIB = True
-                try:
-                    import matplotlib.pyplot as plt
-                    import matplotlib.patches as mpatches
-                except ImportError:
-                    HAS_MATPLOTLIB = False
-                
-                # Build networkx graph
-                G = nx.DiGraph()
-                claim_info = {}  # Store claim metadata for better labeling
-                
-                # Add nodes for claims
-                if hasattr(claim_graph, 'graph') and claim_graph.graph:
-                    for node_id, node_data in claim_graph.graph.nodes(data=True):
-                        node_type = node_data.get("node_type", "claim")
-                        G.add_node(node_id, node_type=node_type, data=node_data)
-                        if node_type == "claim":
-                            claim_info[node_id] = node_data
-                    
-                    # Add edges for evidence relationships
-                    for source, target, edge_data in claim_graph.graph.edges(data=True):
-                        G.add_edge(source, target, weight=edge_data.get("weight", 1.0))
-                
-                # If graph is empty, create fallback visualization with just claims
-                if G.number_of_nodes() == 0:
-                    # Fallback: Create graph from all claims (even if no evidence)
-                    claim_collection = verifiable_metadata.get("claim_collection")
-                    if claim_collection and claim_collection.claims:
-                        for claim in claim_collection.claims:
-                            claim_id = claim.claim_id
-                            G.add_node(
-                                claim_id,
-                                node_type="claim",
-                                claim_type=getattr(claim.claim_type, 'value', str(claim.claim_type)),
-                                status=getattr(claim.status, 'value', str(claim.status)),
-                                confidence=claim.confidence
-                            )
-                            claim_info[claim_id] = {
-                                "claim_type": getattr(claim.claim_type, 'value', str(claim.claim_type)),
-                                "status": getattr(claim.status, 'value', str(claim.status)),
-                                "confidence": claim.confidence
-                            }
-                
-                if G.number_of_nodes() > 0:
-                    # Layout algorithm - use hierarchical layout if evidence exists
-                    claim_nodes = [node for node, attr in G.nodes(data=True) if attr.get("node_type") == "claim"]
-                    evidence_nodes = [node for node, attr in G.nodes(data=True) if attr.get("node_type") == "evidence"]
-
-                    # Build DOT representation (always available)
-                    status_colors = {
-                        "verified": "#28a745",
-                        "low_confidence": "#ffc107",
-                        "rejected": "#dc3545"
-                    }
-                    dot_lines = ["digraph ClaimEvidence {", "  rankdir=TB;", "  node [shape=box, style=rounded];"]
-
-                    for node in claim_nodes:
-                        node_data = G.nodes[node].get("data", {})
-                        status = str(node_data.get("status", "rejected")).lower()
-                        color = status_colors.get(status, "#6c757d")
-                        label_type = str(node_data.get("claim_type", "claim")).split(".")[-1].replace("_", " ").title()
-                        confidence = node_data.get("confidence", 0)
-                        label = f"{label_type}\\n{confidence:.0%}"
-                        dot_lines.append(f"  \"{node}\" [label=\"{label}\", color=\"{color}\"];" )
-
-                    for node in evidence_nodes:
-                        dot_lines.append(f"  \"{node}\" [label=\"Evidence\\n{node[:6]}\", shape=ellipse, color=\"#17a2b8\"];" )
-
-                    for u, v in G.edges():
-                        weight = G[u][v].get("weight", 1.0)
-                        dot_lines.append(f"  \"{u}\" -> \"{v}\" [label=\"{weight:.2f}\"];" )
-
-                    dot_lines.append("}")
-                    dot_graph = "\n".join(dot_lines)
-
-                    # GraphML + adjacency JSON export (always available)
-                    graphml_data = None
-                    graphml_error = None
-                    try:
-                        graphml_data = export_graphml_bytes(G)
-                    except Exception as e:
-                        graphml_error = e
-                        logger.error(f"GraphML export failed: {e}")
-
-                    adjacency_json = export_adjacency_json(G)
-
-                    export_col1, export_col2, export_col3 = st.columns(3)
-                    with export_col1:
-                        st.download_button(
-                            label="📥 Download Graph (DOT)",
-                            data=dot_graph,
-                            file_name=f"claim_graph_{st.session_state.result.get('output').session_id if st.session_state.result else 'unknown'}.dot",
-                            mime="text/vnd.graphviz"
-                        )
-                    with export_col2:
-                        if graphml_data:
-                            st.download_button(
-                                label="📥 Download Graph (GraphML)",
-                                data=graphml_data,
-                                file_name=f"claim_graph_{st.session_state.result.get('output').session_id if st.session_state.result else 'unknown'}.graphml",
-                                mime="application/graphml+xml"
-                            )
-                        elif graphml_error:
-                            st.error(f"GraphML export failed: {graphml_error}")
-                        else:
-                            st.warning("GraphML export unavailable for this graph.")
-                    with export_col3:
-                        st.download_button(
-                            label="📥 Download Graph (Adjacency JSON)",
-                            data=adjacency_json,
-                            file_name=f"claim_graph_{st.session_state.result.get('output').session_id if st.session_state.result else 'unknown'}.json",
-                            mime="application/json"
-                        )
-
-                    if HAS_MATPLOTLIB:
-                        # Create visualization with better styling
-                        fig, ax = plt.subplots(figsize=(14, 10))
-                        fig.patch.set_facecolor('#f8f9fa')
-                        ax.set_facecolor('#ffffff')
-                        
-                        if evidence_nodes:
-                            # Hierarchical layout: claims on top, evidence below
-                            pos = {}
-                            for i, node in enumerate(claim_nodes):
-                                pos[node] = (i * 2, 1)
-                            for i, node in enumerate(evidence_nodes):
-                                pos[node] = (i * 1.5, 0)
-                        else:
-                            # Circular layout for claims only
-                            pos = nx.spring_layout(G, k=3, iterations=50, seed=42)
-                        
-                        # Color claims by status
-                        claim_colors = []
-                        claim_labels = {}
-                        for node in claim_nodes:
-                            node_data = G.nodes[node].get("data", {})
-                            status = node_data.get("status", "rejected")
-                            if isinstance(status, str):
-                                status_lower = status.lower()
-                            else:
-                                status_lower = str(status).lower()
-                            
-                            claim_colors.append(status_colors.get(status_lower, "#6c757d"))
-                            
-                            # Create readable label
-                            claim_type = node_data.get("claim_type", "claim")
-                            if isinstance(claim_type, str):
-                                claim_type = claim_type.split(".")[-1].replace("_", " ").title()
-                            confidence = node_data.get("confidence", 0)
-                            claim_labels[node] = f"{claim_type}\n{confidence:.0%}"
-                        
-                        # Draw claim nodes with status colors
-                        if claim_nodes:
-                            nx.draw_networkx_nodes(
-                                G, pos, nodelist=claim_nodes, 
-                                node_color=claim_colors,
-                                node_size=2000, 
-                                node_shape='o',
-                                edgecolors='#333333',
-                                linewidths=2,
-                                ax=ax
-                            )
-                        
-                        # Draw evidence nodes
-                        if evidence_nodes:
-                            nx.draw_networkx_nodes(
-                                G, pos, nodelist=evidence_nodes, 
-                                node_color="#17a2b8",
-                                node_size=1200, 
-                                node_shape="s",
-                                edgecolors='#333333',
-                                linewidths=2,
-                                ax=ax,
-                                alpha=0.8
-                            )
-                            
-                            # Evidence labels
-                            evidence_labels = {node: f"Evidence\n{node[:6]}" for node in evidence_nodes}
-                            nx.draw_networkx_labels(G, pos, evidence_labels, font_size=8, font_weight='bold', ax=ax)
-                        
-                        # Draw edges with weights
-                        if G.number_of_edges() > 0:
-                            edge_weights = [G[u][v].get('weight', 1.0) for u, v in G.edges()]
-                            nx.draw_networkx_edges(
-                                G, pos, 
-                                edge_color='#666666', 
-                                arrows=True,
-                                arrowsize=15, 
-                                arrowstyle='-|>',
-                                width=[w * 2 for w in edge_weights],
-                                ax=ax,
-                                alpha=0.6,
-                                connectionstyle='arc3,rad=0.1'
-                            )
-                        
-                        # Draw claim labels
-                        nx.draw_networkx_labels(G, pos, claim_labels, font_size=9, font_weight='bold', ax=ax)
-                        
-                        # Create informative title
-                        if evidence_nodes:
-                            title = f"📊 Claim-Evidence Network\n{len(claim_nodes)} Claims • {len(evidence_nodes)} Evidence Sources"
-                        else:
-                            title = f"📊 Extracted Claims Overview\n{len(claim_nodes)} Claims Identified"
-                        ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
-                        
-                        # Create legend
-                        legend_elements = [
-                            mpatches.Patch(color='#28a745', label='✓ Verified (High Confidence)'),
-                            mpatches.Patch(color='#ffc107', label='⚠ Low Confidence'),
-                            mpatches.Patch(color='#dc3545', label='✗ Rejected (No Evidence)')
-                        ]
-                        if evidence_nodes:
-                            legend_elements.append(mpatches.Patch(color='#17a2b8', label='📄 Evidence Source'))
-                        
-                        ax.legend(handles=legend_elements, loc='upper left', fontsize=10, frameon=True, 
-                                 fancybox=True, shadow=True, bbox_to_anchor=(0, 1))
-                        
-                        # Add explanation text
-                        explanation = (
-                            "Each circle represents a claim extracted from the AI output.\n"
-                            "Colors indicate verification status based on evidence found in source materials."
-                        )
-                        if evidence_nodes:
-                            explanation += "\nSquares are evidence sources supporting claims (arrows show connections)."
-                        
-                        ax.text(0.5, -0.05, explanation, 
-                               transform=ax.transAxes, 
-                               fontsize=9, 
-                               ha='center',
-                               style='italic',
-                               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
-                        
-                        ax.axis("off")
-                        plt.tight_layout()
-                        
-                        st.pyplot(fig, use_container_width=True)
-                        plt.close(fig)
-                        
-                        # Add summary statistics below graph
-                        col1, col2, col3 = st.columns(3)
-                        verified_count = sum(1 for c in claim_colors if c == status_colors["verified"])
-                        low_conf_count = sum(1 for c in claim_colors if c == status_colors["low_confidence"])
-                        rejected_count = sum(1 for c in claim_colors if c == status_colors["rejected"])
-                        
-                        with col1:
-                            st.metric("✓ Verified", verified_count, help="Claims with strong evidence support")
-                        with col2:
-                            st.metric("⚠ Low Confidence", low_conf_count, help="Claims with weak evidence")
-                        with col3:
-                            st.metric("✗ Rejected", rejected_count, help="Claims lacking sufficient evidence")
-                    else:
-                        st.warning(
-                            "Matplotlib not installed. Install with pip install matplotlib to enable PNG rendering. "
-                            f"Python: {sys.executable}"
-                        )
-                        st.info("Showing a DOT graph plus a readable edge list.")
-                        st.write(
-                            f"Claims: {len(claim_nodes)} • Evidence Sources: {len(evidence_nodes)} • "
-                            f"Edges: {G.number_of_edges()}"
-                        )
-
-                        st.code(dot_graph, language="dot")
-
-                        # Render a readable edge list as markdown
-                        if G.number_of_edges() > 0:
-                            st.markdown("**Edges (source → target, weight):**")
-                            edge_rows = [
-                                f"- {u} → {v} (w={G[u][v].get('weight', 1.0):.2f})"
-                                for u, v in G.edges()
-                            ]
-                            st.markdown("\n".join(edge_rows[:100]))
-                else:
-                    st.info("❌ No claims or evidence available for graph visualization")
-            except Exception as e:
-                st.warning(f"Could not visualize graph: {e}")
-                import traceback
-                st.error(traceback.format_exc())
-        else:
-            st.info("Graph data not available")
-        
-        st.divider()
     
     # Initialize display system
     display = StreamlitProgressDisplay()
@@ -1540,6 +1320,28 @@ def main():
         st.session_state.verifiable_metadata = None
     if 'processing_complete' not in st.session_state:
         st.session_state.processing_complete = False
+    if 'ingestion_error' not in st.session_state:
+        st.session_state.ingestion_error = None
+    if 'ingestion_error_details' not in st.session_state:
+        st.session_state.ingestion_error_details = None
+    if 'ingestion_ready' not in st.session_state:
+        st.session_state.ingestion_ready = False
+    if 'ingestion_payload' not in st.session_state:
+        st.session_state.ingestion_payload = None
+    if 'notes_char_count' not in st.session_state:
+        st.session_state.notes_char_count = 0
+    if 'extraction_methods' not in st.session_state:
+        st.session_state.extraction_methods = []
+    if 'ingestion_diagnostics' not in st.session_state:
+        st.session_state.ingestion_diagnostics = {}
+    if 'debug_mode' not in st.session_state:
+        st.session_state.debug_mode = False
+    if (
+        st.session_state.processing_complete
+        and not st.session_state.ingestion_error
+        and st.session_state.ingestion_payload
+    ):
+        st.session_state.ingestion_ready = True
     if 'has_pyarrow' not in st.session_state:
         try:
             import pyarrow  # noqa: F401
@@ -1627,9 +1429,15 @@ def main():
         if enable_verifiable_mode and not st.session_state.has_pyarrow and not st.session_state.pyarrow_warned:
             st.warning("pyarrow missing; install with pip install pyarrow. Dataframe rendering may be limited.")
             st.session_state.pyarrow_warned = True
+
+        st.session_state.debug_mode = st.checkbox(
+            "Debug mode",
+            value=st.session_state.debug_mode,
+            help="Show diagnostic details and raw report data."
+        )
         
         # Domain Profile selector (only shown in verifiable mode)
-        domain_profile = "physics"  # Default
+        domain_profile = "algorithms"  # Default
         if enable_verifiable_mode:
             st.info(
                 "🔬 **Verifiable Mode** enabled\n\n"
@@ -1641,17 +1449,13 @@ def main():
             
             domain_profile = st.selectbox(
                 "Select Domain Profile",
-                options=["physics", "discrete_math", "algorithms"],
+                options=["algorithms"],
                 format_func=lambda x: {
-                    "physics": "⚛️ Physics (equations + units)",
-                    "discrete_math": "🔢 Discrete Math (definitions + proofs)",
-                    "algorithms": "💻 Algorithms (pseudocode + complexity)"
+                    "algorithms": "💻 Computer Science (algorithms + complexity)"
                 }[x],
                 help=(
                     "Domain profile controls validation rules:\n"
-                    "• Physics: unit checking, equation validation\n"
-                    "• Discrete Math: strict dependencies, proof-step rigor\n"
-                    "• Algorithms: pseudocode checks, complexity analysis"
+                    "• Computer Science: pseudocode checks, complexity analysis"
                 )
             )
         
@@ -1768,69 +1572,63 @@ def main():
             
             st.caption("💡 Switch to '🔧 Custom' to manually adjust sections")
         
-        st.caption("✓ 🔬 **Verifiability Graph** always generates in Research Mode")
+        st.caption("✓ Verifiability report includes claim summaries and evidence highlights")
         
-        # Debug: Show current filter state
-        enabled_sections = [k for k, v in st.session_state.output_filters.items() if v]
-        disabled_sections = [k for k, v in st.session_state.output_filters.items() if not v]
-        
-        with st.expander("🔍 Filter Debug Info", expanded=False):
-            st.caption("**Enabled sections:**")
-            st.write(", ".join(enabled_sections) if enabled_sections else "None")
-            st.caption("**Disabled sections:**")
-            st.write(", ".join(disabled_sections) if disabled_sections else "None")
-        
-        # Diagnostics expander for troubleshooting
-        with st.expander("🔧 System Diagnostics", expanded=False):
-            st.caption("**Python Environment:**")
-            st.code(sys.executable, language="text")
+        if st.session_state.debug_mode:
+            # Debug: Show current filter state
+            enabled_sections = [k for k, v in st.session_state.output_filters.items() if v]
+            disabled_sections = [k for k, v in st.session_state.output_filters.items() if not v]
             
-            st.caption("**Package Versions:**")
-            try:
-                import streamlit
-                import pandas
-                import networkx
-                st.text(f"streamlit: {streamlit.__version__}")
-                st.text(f"pandas: {pandas.__version__}")
-                st.text(f"networkx: {networkx.__version__}")
-                
-                try:
-                    import pyarrow
-                    st.text(f"pyarrow: {pyarrow.__version__} ✅")
-                except ImportError:
-                    st.text("pyarrow: NOT INSTALLED ❌")
-                    st.caption("Install: pip install pyarrow")
-                
-                try:
-                    import matplotlib
-                    st.text(f"matplotlib: {matplotlib.__version__} ✅")
-                except ImportError:
-                    st.text("matplotlib: NOT INSTALLED ❌")
-                    st.caption("Install: pip install matplotlib")
-                
-                try:
-                    import sentence_transformers
-                    st.text(f"sentence-transformers: {sentence_transformers.__version__} ✅")
-                except ImportError:
-                    st.text("sentence-transformers: NOT INSTALLED ⚠️")
-                    st.caption("Semantic verification unavailable")
-                
-            except Exception as e:
-                st.error(f"Error fetching package info: {e}")
+            with st.expander("Filter Debug Info", expanded=False):
+                st.caption("Enabled sections:")
+                st.write(", ".join(enabled_sections) if enabled_sections else "None")
+                st.caption("Disabled sections:")
+                st.write(", ".join(disabled_sections) if disabled_sections else "None")
             
-            st.caption("**Working Directory:**")
-            st.code(str(Path.cwd()), language="text")
-            
-            if st.button("📋 Copy Diagnostic Info"):
-                diag_info = f"""Python: {sys.executable}
-Working Directory: {Path.cwd()}
-Streamlit: {streamlit.__version__}
-Pandas: {pandas.__version__}
-NetworkX: {networkx.__version__}
-PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
-"""
-                st.code(diag_info)
-                st.success("Diagnostic info displayed above - copy manually")
+            # Diagnostics expander for troubleshooting
+            with st.expander("System Diagnostics", expanded=False):
+                st.caption("Python Environment:")
+                st.code(sys.executable, language="text")
+                
+                st.caption("Package Versions:")
+                try:
+                    import streamlit
+                    import pandas
+                    import networkx
+                    st.text(f"streamlit: {streamlit.__version__}")
+                    st.text(f"pandas: {pandas.__version__}")
+                    st.text(f"networkx: {networkx.__version__}")
+                    
+                    try:
+                        import pyarrow
+                        st.text(f"pyarrow: {pyarrow.__version__} OK")
+                    except ImportError:
+                        st.text("pyarrow: NOT INSTALLED")
+                        st.caption("Install: pip install pyarrow")
+                    
+                    try:
+                        import matplotlib
+                        st.text(f"matplotlib: {matplotlib.__version__} OK")
+                    except ImportError:
+                        st.text("matplotlib: NOT INSTALLED")
+                        st.caption("Install: pip install matplotlib")
+                    
+                    try:
+                        import faiss
+                        st.text(f"faiss: {faiss.__version__} OK")
+                    except ImportError:
+                        st.text("faiss: NOT INSTALLED")
+                        st.caption("Install: pip install faiss-cpu")
+                except Exception as e:
+                    st.error(f"Error loading diagnostic info: {e}")
+                
+                st.divider()
+                st.caption("System Information")
+                st.code(f"Python: {sys.version}", language="text")
+                st.code(f"OS: {os.name}", language="text")
+                
+                if st.button("Copy Diagnostic Info"):
+                    st.success("Diagnostic info displayed above - copy manually")
         
         st.divider()
     
@@ -1949,31 +1747,70 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
 
     st.divider()
 
-    # Mode selection with two buttons
+    has_input_now = bool(
+        (notes_text and notes_text.strip())
+        or (notes_images and len(notes_images) > 0)
+        or audio_file
+    )
+    if has_input_now and not st.session_state.ingestion_error:
+        st.session_state.ingestion_ready = True
+
+    notes_text_len = len(notes_text.strip()) if notes_text else 0
+    files_present = bool(notes_images and len(notes_images) > 0)
+    notes_ready_for_verification = (
+        (notes_text_len >= config.MIN_INPUT_CHARS_FOR_VERIFICATION)
+        or files_present
+        or bool(audio_file)
+    )
+
+    # Primary + secondary actions
     col_fast, col_verifiable = st.columns(2)
-    
+
     fast_button = False
     verifiable_button = False
-    
+
     with col_fast:
         fast_button = st.button(
-            "🚀 Generate Study Guide (Fast)",
-            type="secondary",
+            "Generate Notes",
+            type="primary",
             use_container_width=True,
             key="fast_btn",
             disabled=(llm_type == "demo"),
-            help="Quick analysis without evidence verification (suitable for any content)"
+            help="Clean notes without verification"
         )
-    
+
     with col_verifiable:
         verifiable_button = st.button(
-            "🔬 Run Verifiable Mode",
-            type="primary",
+            "Run Verification",
+            type="secondary",
             use_container_width=True,
             key="verifiable_btn",
-            disabled=(llm_type == "demo"),
-            help="Evidence-grounded analysis with claim verification (requires 500+ chars)"
+            disabled=(
+                llm_type == "demo"
+                or not enable_verifiable_mode
+                or not notes_ready_for_verification
+            ),
+            help="Evidence-grounded verification with claim scoring"
         )
+        if not enable_verifiable_mode:
+            st.caption("Enable Verifiable Mode in Settings to run the report.")
+        elif not has_input_now:
+            st.caption("Upload a file or paste text first.")
+        elif notes_text_len and notes_text_len < config.MIN_INPUT_CHARS_FOR_VERIFICATION and not files_present:
+            st.caption(
+                f"Need at least {config.MIN_INPUT_CHARS_FOR_VERIFICATION} characters before verification."
+            )
+        elif files_present and notes_text_len < config.MIN_INPUT_CHARS_FOR_VERIFICATION:
+            st.caption("Text will be extracted during verification.")
+
+        if st.session_state.get("debug_mode"):
+            logger.info(
+                "Verification gate: notes_len=%s, files_present=%s, has_input=%s, ready=%s",
+                notes_text_len,
+                files_present,
+                has_input_now,
+                notes_ready_for_verification
+            )
     
     # Show message if buttons are disabled
     if llm_type == "demo":
@@ -1985,6 +1822,7 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
     
     # Process when either button clicked
     if generate_button:
+        st.session_state.ingestion_ready = False
         # Initialize OCR for PDF processing
         ocr_instance = initialize_ocr()
         
@@ -1992,7 +1830,13 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
         ocr_extracted_text = ""
         pdf_extracted_text = ""
         combined_extracted_text = ""
-        ingestion_diagnostics = None
+        extraction_methods = []
+        ingestion_diagnostics = {
+            "pdf_files": [],
+            "ocr_images": 0,
+            "pdf_chars": 0,
+            "ocr_chars": 0
+        }
         
         if notes_images and len(notes_images) > 0:
             # Separate images and PDFs
@@ -2002,18 +1846,68 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
             # Process PDFs
             if pdf_files:
                 with st.spinner("📄 Extracting text from PDF files..."):
+                    from src.exceptions import EvidenceIngestError, INGESTION_ERRORS
+                    
                     try:
                         for pdf_file in pdf_files:
-                            pdf_text, pdf_metadata = _extract_text_from_pdf(pdf_file, ocr=ocr_instance)
-                            if pdf_text:
-                                pdf_extracted_text += pdf_text
-                                # Handle both "extraction_method_used" and "extraction_method" keys
-                                extraction_method = pdf_metadata.get("extraction_method_used") or pdf_metadata.get("extraction_method", "unknown")
-                                logger.info(f"PDF extraction success: {pdf_file.name} ({extraction_method})")
+                            try:
+                                pdf_text, pdf_metadata = _extract_text_from_pdf(pdf_file, ocr=ocr_instance)
+                                if pdf_text:
+                                    pdf_extracted_text += pdf_text
+                                    # Handle both old and new metadata keys
+                                    extraction_method = pdf_metadata.get("extraction_method") or pdf_metadata.get("extraction_method_used", "unknown")
+                                    ocr_pages = pdf_metadata.get("ocr_pages", 0)
+                                    chars_extracted = pdf_metadata.get("chars_extracted", len(pdf_text))
+                                    extraction_methods.append(extraction_method)
+                                    ingestion_diagnostics["pdf_files"].append({
+                                        "file": pdf_file.name,
+                                        "method": extraction_method,
+                                        "chars": chars_extracted,
+                                        "ocr_pages": ocr_pages
+                                    })
+                                    ingestion_diagnostics["pdf_chars"] += chars_extracted
+                                    logger.info(f"PDF extraction success: {pdf_file.name} ({extraction_method})")
+                                    st.caption(
+                                        f"{pdf_file.name}: method={extraction_method}, chars={chars_extracted}, "
+                                        f"ocr_pages={ocr_pages}"
+                                    )
+                            except EvidenceIngestError as e:
+                                # Store ingestion error for display
+                                st.session_state.ingestion_error = e.code
+                                st.session_state.ingestion_error_details = {
+                                    "file": pdf_file.name,
+                                    "code": e.code,
+                                    "message": e.get_user_message(),
+                                    "next_steps": e.get_next_steps(),
+                                    "details": e.details
+                                }
+                                
+                                # Show error with actionable next steps
+                                error_config = INGESTION_ERRORS.get(e.code, {})
+                                st.error(f"❌ **Evidence ingestion failed: {pdf_file.name}**\n\n{e.get_user_message()}")
+                                
+                                if e.get_next_steps():
+                                    st.info("💡 **Next steps:**\n" + "\n".join(f"- {step}" for step in e.get_next_steps()))
+                                
+                                logger.error(f"Evidence ingestion error for {pdf_file.name}: code={e.code}, {e.message}")
+                                # Don't continue - mark as ingestion failure and stop processing
+                                break
                         
-                        if pdf_extracted_text:
+                        if pdf_extracted_text and not st.session_state.ingestion_error:
                             words = len(pdf_extracted_text.split())
                             st.success(f"✓ PDF extraction complete: {len(pdf_extracted_text)} chars, ~{words} words")
+                    except EvidenceIngestError as e:
+                        # Ingestion error occurred
+                        st.session_state.ingestion_error = e.code
+                        st.session_state.ingestion_error_details = {
+                            "code": e.code,
+                            "message": e.get_user_message(),
+                            "next_steps": e.get_next_steps()
+                        }
+                        st.error(f"❌ **Evidence ingestion failed**\n\n{e.get_user_message()}")
+                        if e.get_next_steps():
+                            st.info("💡 **Next steps:**\n" + "\n".join(f"- {step}" for step in e.get_next_steps()))
+                        logger.error(f"PDF ingestion error: code={e.code}, {e.message}")
                     except Exception as e:
                         st.error(f"❌ PDF extraction failed: {str(e)}")
                         logger.error(f"PDF extraction error: {str(e)}")
@@ -2032,6 +1926,9 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                         if cache_key in cache["items"]:
                             ocr_extracted_text = cache["items"][cache_key]
                             st.success(f"✓ Using cached OCR: {len(ocr_extracted_text)} characters")
+                            ingestion_diagnostics["ocr_chars"] = len(ocr_extracted_text)
+                            ingestion_diagnostics["ocr_images"] = len(image_files)
+                            extraction_methods.append("image_ocr_cache")
                         else:
                             selected_model = config.OLLAMA_MODEL if llm_type == "ollama" else config.LLM_MODEL
                             ocr_extracted_text = process_images(
@@ -2042,6 +1939,9 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                                 ollama_url=config.OLLAMA_URL,
                                 model=selected_model
                             )
+                            ingestion_diagnostics["ocr_chars"] = len(ocr_extracted_text)
+                            ingestion_diagnostics["ocr_images"] = len(image_files)
+                            extraction_methods.append("image_ocr")
                             cache["items"][cache_key] = ocr_extracted_text
                             cache["order"] = [k for k in cache["order"] if k != cache_key]
                             cache["order"].append(cache_key)
@@ -2077,12 +1977,29 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                 combined_notes += "\n\n---\n\n" + combined_extracted_text
             else:
                 combined_notes = combined_extracted_text
+
+        st.session_state.notes_char_count = len(combined_notes or "")
+        st.session_state.extraction_methods = extraction_methods
+        st.session_state.ingestion_diagnostics = ingestion_diagnostics
         
         # Validation - check if we have any input at all
         has_input = combined_notes or audio_file or (notes_images and len(notes_images) > 0)
         
         if not has_input:
             st.error("Please provide notes, images, or audio.")
+        # Check if ingestion failed (don't proceed with verification)
+        elif st.session_state.ingestion_error:
+            st.error(
+                f"🚫 **Evidence ingestion failed**\n\n"
+                f"**Error Code**: {st.session_state.ingestion_error}\n\n"
+                f"**Reason**: {st.session_state.ingestion_error_details.get('message', 'Unknown error')}"
+            )
+            
+            if st.session_state.ingestion_error_details.get('next_steps'):
+                st.info("💡 **How to fix this:**\n" + "\n".join(f"• {step}" for step in st.session_state.ingestion_error_details['next_steps']))
+            
+            st.error("❌ Cannot proceed to verification or analysis until evidence ingestion succeeds.")
+            logger.warning(f"Verification skipped due to ingestion error: {st.session_state.ingestion_error}")
         else:
             # Override verifiable mode based on button clicked
             actual_verifiable_mode = should_run_verifiable and enable_verifiable_mode
@@ -2095,6 +2012,13 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                 actual_verifiable_mode = False
             
             # Show information about what will happen
+            if actual_verifiable_mode and len(combined_notes or "") < config.MIN_INPUT_CHARS_FOR_VERIFICATION:
+                st.warning(
+                    f"Verification needs at least {config.MIN_INPUT_CHARS_FOR_VERIFICATION} characters. "
+                    "Running notes only."
+                )
+                actual_verifiable_mode = False
+
             if actual_verifiable_mode:
                 st.info(
                     "🔬 **Running in Verifiable Mode**\n\n"
@@ -2110,6 +2034,10 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                     "• Suitable for any content type"
                 )
             
+            progress_callback = None
+            if actual_verifiable_mode:
+                progress_callback = _create_verifiability_progress_ui()
+
             # Process the session and store in session state
             result, verifiable_metadata = process_session(
                 audio_file=audio_file,
@@ -2118,39 +2046,126 @@ PyArrow: {'Available' if st.session_state.has_pyarrow else 'Missing'}
                 external_context=external_context,
                 session_id=session_id,
                 verifiable_mode=actual_verifiable_mode,
-                domain_profile=domain_profile if actual_verifiable_mode else "physics",
-                llm_provider_type=llm_type
+                domain_profile=domain_profile if actual_verifiable_mode else "algorithms",
+                llm_provider_type=llm_type,
+                progress_callback=progress_callback,
+                debug_mode=st.session_state.debug_mode
             )
             
             # Store results in session state
             st.session_state.result = result
             st.session_state.verifiable_metadata = verifiable_metadata
             st.session_state.processing_complete = True
+            st.session_state.ingestion_ready = True
+            st.session_state.ingestion_payload = {
+                "notes_text": combined_notes,
+                "equations": equations,
+                "external_context": external_context,
+                "session_id": session_id,
+                "urls_text": urls_text if 'urls_text' in locals() else ""
+            }
     
-    # Display results if available (persists across tab switches)
-    if st.session_state.processing_complete and st.session_state.result:
+    # ========================================================================
+    # RESULTS DISPLAY
+    # ========================================================================
+    
+    # Show ingestion error if present (takes precedence over results)
+    if st.session_state.ingestion_error:
+        st.divider()
+        with st.container(border=True):
+            st.error(
+                f"🚫 **Evidence ingestion failed** - Cannot proceed with analysis\n\n"
+                f"**Error**: {st.session_state.ingestion_error_details.get('message', 'Unknown error')}\n\n"
+                f"**Status**: Verification pipeline skipped (no usable evidence extracted)"
+            )
+            
+            if st.session_state.ingestion_error_details.get('next_steps'):
+                st.markdown("**How to fix this:**")
+                for step in st.session_state.ingestion_error_details['next_steps']:
+                    st.markdown(f"• {step}")
+        
+        st.divider()
+        st.info("🔄 Please fix the issue above and try again with different input.")
+    
+    # Display results only if processing succeeded and no ingestion error
+    elif st.session_state.processing_complete and st.session_state.result:
         st.success("✅ Processing complete!")
         st.divider()
-        display_output(st.session_state.result, st.session_state.verifiable_metadata)
-        
-        # Export buttons
-        st.divider()
-        output_obj = st.session_state.result.get('output')
-        session_id_for_export = output_obj.session_id if output_obj and hasattr(output_obj, 'session_id') else ""
-        export_data = {}
-        if output_obj is not None:
-            if hasattr(output_obj, "model_dump"):
-                export_data = output_obj.model_dump()
-            elif hasattr(output_obj, "dict"):
-                export_data = output_obj.dict()
+
+        notes_tab, report_tab = st.tabs(["Notes", "Verifiability Report"])
+
+        with notes_tab:
+            if st.session_state.verifiable_metadata and st.session_state.verifiable_metadata.get("verification_unavailable"):
+                diagnostics = st.session_state.verifiable_metadata.get("evidence_diagnostics", {})
+                st.warning(
+                    "Verification unavailable due to insufficient evidence. "
+                    "Showing baseline study guide instead."
+                )
+                if diagnostics:
+                    st.caption(
+                        f"Extracted {diagnostics.get('extracted_text_length', 0)} chars "
+                        f"(min required: {diagnostics.get('minimum_required', 0)})."
+                    )
+                    suggestions = diagnostics.get("suggestions", [])
+                    if suggestions:
+                        st.info("How to fix:\n" + "\n".join(f"- {s}" for s in suggestions))
+
+            display_output(st.session_state.result, None)
+
+            st.divider()
+            output_obj = st.session_state.result.get('output')
+            session_id_for_export = output_obj.session_id if output_obj and hasattr(output_obj, 'session_id') else ""
+            export_data = {}
+            if output_obj is not None:
+                if hasattr(output_obj, "model_dump"):
+                    export_data = output_obj.model_dump()
+                elif hasattr(output_obj, "dict"):
+                    export_data = output_obj.dict()
+                else:
+                    export_data = output_obj
+
+                if isinstance(export_data, dict):
+                    if "summary" not in export_data and "class_summary" in export_data:
+                        export_data["summary"] = export_data["class_summary"]
+
+            notes_md = QuickExportButtons._to_markdown(export_data) if export_data else ""
+            st.download_button(
+                label="Export Notes (Markdown)",
+                data=notes_md,
+                file_name=f"notes_{session_id_for_export}.md",
+                mime="text/markdown",
+                disabled=not bool(notes_md)
+            )
+
+            with st.expander("Diagnostics", expanded=False):
+                methods = st.session_state.extraction_methods or []
+                if methods:
+                    st.write(f"Extraction methods: {', '.join(sorted(set(methods)))}")
+                st.write(f"Notes characters: {st.session_state.notes_char_count:,}")
+
+                evidence_stats = (st.session_state.verifiable_metadata or {}).get("evidence_stats")
+                if evidence_stats:
+                    st.write(f"Evidence chunks: {evidence_stats.get('num_chunks', 0)}")
+
+                metrics = (st.session_state.verifiable_metadata or {}).get("metrics", {})
+                evidence_metrics = metrics.get("evidence_metrics", {})
+                if evidence_metrics:
+                    st.write(
+                        "Retrieval stats: avg evidence/claim "
+                        f"{evidence_metrics.get('avg_evidence_per_claim', 0):.2f}, "
+                        "avg evidence quality "
+                        f"{evidence_metrics.get('avg_evidence_quality', 0):.2f}"
+                    )
+
+        with report_tab:
+            if st.session_state.verifiable_metadata and st.session_state.verifiable_metadata.get("verifiable_mode"):
+                display_verifiability_report(
+                    st.session_state.verifiable_metadata,
+                    st.session_state.result.get('output'),
+                    debug_mode=st.session_state.get("debug_mode", False)
+                )
             else:
-                export_data = output_obj
-
-            if isinstance(export_data, dict):
-                if "summary" not in export_data and "class_summary" in export_data:
-                    export_data["summary"] = export_data["class_summary"]
-
-        QuickExportButtons.show_export_buttons(export_data, session_id_for_export)
+                st.info("Run verification to generate the report.")
 
 
 if __name__ == "__main__":

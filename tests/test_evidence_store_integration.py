@@ -100,8 +100,9 @@ class TestEvidenceStoreNotEmpty:
         evidence_store.build_index(embeddings=embeddings)
         
         # Assert: Validation should pass
-        is_valid, error_msg = evidence_store.validate(min_chars=50)
+        is_valid, error_msg, classification = evidence_store.validate(min_chars=50)
         assert is_valid, f"Store should be valid: {error_msg}"
+        assert classification == "OK"
         
 
 class TestVerificationNotAllRejectedWithMatchingEvidence:
@@ -184,11 +185,12 @@ class TestRaisesWhenNoEvidence:
         evidence_store = EvidenceStore(session_id="empty_test")
         
         # Act: Validate
-        is_valid, error_msg = evidence_store.validate(min_chars=100)
+        is_valid, error_msg, classification = evidence_store.validate(min_chars=100)
         
         # Assert: Should fail
         assert not is_valid, "Empty store should fail validation"
         assert error_msg, "Should have error message"
+        assert classification == "NO_EVIDENCE"
         
 
 class TestEvidenceStoreStatistics:

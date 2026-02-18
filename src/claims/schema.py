@@ -24,6 +24,9 @@ class ClaimType(str, Enum):
     EQUATION = "equation"
     EXAMPLE = "example"
     MISCONCEPTION = "misconception"
+    ALGORITHM_STEP = "algorithm_step"
+    COMPLEXITY = "complexity"
+    INVARIANT = "invariant"
 
 
 class VerificationStatus(str, Enum):
@@ -40,6 +43,15 @@ class RejectionReason(str, Enum):
     
     LOW_SIMILARITY = "LOW_SIMILARITY"
     """Best evidence similarity < τ threshold"""
+
+    MISSING_BIGO = "MISSING_BIGO"
+    """Complexity claim lacks Big-O evidence"""
+
+    MISSING_PSEUDOCODE = "MISSING_PSEUDOCODE"
+    """Algorithm-step claim lacks pseudocode-like evidence"""
+
+    DISALLOWED_CLAIM_TYPE = "DISALLOWED_CLAIM_TYPE"
+    """Claim type is not allowed for the current domain"""
     
     INSUFFICIENT_SOURCES = "INSUFFICIENT_SOURCES"
     """Independent sources < k requirement"""
@@ -320,6 +332,7 @@ class LearningClaim(BaseModel):
             "claim_id": self.claim_id,
             "claim_type": self.claim_type.value,
             "claim_text": self.claim_text,
+            "evidence_ids": self.evidence_ids,
             "evidence_count": len(self.evidence_ids),
             "confidence": round(self.confidence, 4),
             "status": self.status.value,

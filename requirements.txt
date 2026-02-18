@@ -12,13 +12,14 @@ librosa>=0.10.0
 soundfile>=0.12.0
 
 # Image OCR & PDF (handwritten notes, blackboard/whiteboard, PDF files)
-easyocr>=1.7.0
+easyocr==1.7.1
+pytesseract>=0.3.10
+bidi>=0.4.2
 Pillow>=10.0.0
 opencv-python-headless>=4.8.0
 PyPDF2>=3.0.0
 PyMuPDF>=1.23.0  # fitz - alternative PDF text extraction
 pdfplumber>=0.10.0  # Alternative PDF extraction with table support
-pdf2image>=1.16.0  # PDF to image conversion for OCR fallback
 python-bidi>=0.4.2  # Required by easyocr for RTL text support
 arabic-reshaper>=0.0.7  # Required by easyocr for Arabic text
 
