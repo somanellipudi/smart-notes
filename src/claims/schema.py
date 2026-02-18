@@ -20,13 +20,19 @@ import uuid
 
 class ClaimType(str, Enum):
     """Types of learning claims that can be generated."""
+    # General types
+    FACT_CLAIM = "fact_claim"  # Verifiable factual assertion (default for backward compat)
+    QUESTION = "question"  # Study question/prompt requiring answer
+    MISCONCEPTION = "misconception"  # False statement to be corrected
+    
+    # Legacy specific types (map to FACT_CLAIM in most cases)
     DEFINITION = "definition"
     EQUATION = "equation"
     EXAMPLE = "example"
-    MISCONCEPTION = "misconception"
     ALGORITHM_STEP = "algorithm_step"
     COMPLEXITY = "complexity"
     INVARIANT = "invariant"
+    
     # CS-specific claim types for specialized verification
     COMPLEXITY_CLAIM = "complexity_claim"  # Asymptotic complexity (O/Θ/Ω analysis)
     CODE_BEHAVIOR_CLAIM = "code_behavior_claim"  # Correctness/behavior of code patterns
@@ -39,6 +45,8 @@ class VerificationStatus(str, Enum):
     VERIFIED = "verified"  # confidence >= t_verify, sufficient evidence
     LOW_CONFIDENCE = "low_confidence"  # t_reject <= confidence < t_verify
     REJECTED = "rejected"  # confidence < t_reject OR no evidence
+    ANSWERED_WITH_CITATIONS = "answered_with_citations"  # Question answered with evidence
+    NEEDS_FRAMING = "needs_framing"  # Misconception needs proper framing
 
 
 class RejectionReason(str, Enum):
@@ -221,6 +229,14 @@ class LearningClaim(BaseModel):
     validated_at: Optional[datetime] = Field(
         None,
         description="When claim was validated"
+    )
+    answer_text: Optional[str] = Field(
+        None,
+        description="Answer with citations for QUESTION type claims"
+    )
+    snippet_id: Optional[str] = Field(
+        None,
+        description="Original snippet/section ID from content segmentation"
     )
     
     @validator('claim_text')

@@ -56,6 +56,13 @@ try:
     from src.reasoning.fallback_handler import FallbackGenerator, PipelineEnhancer
     from src.streamlit_display import StreamlitProgressDisplay, QuickExportButtons
     from src.exporters.report_exporter import export_report_json, export_report_pdf
+    from src.reporting.research_report import (
+        build_report,
+        SessionMetadata,
+        IngestionReport,
+        VerificationSummary,
+        ClaimEntry,
+    )
     from src.schema.output_schema import (
         ClassSessionOutput,
         Topic,
@@ -1031,6 +1038,156 @@ def display_verifiability_report(
         st.json(report)
 
 
+def _display_research_reports(
+    verifiable_metadata: Dict[str, Any],
+    output: Any
+) -> None:
+    """
+    Display research reports in multiple formats (MD, HTML, JSON).
+    
+    Args:
+        verifiable_metadata: Verifiable mode metadata with verification results
+        output: ClassSessionOutput object with session information
+    """
+    try:
+        # Extract session metadata
+        session_id = output.session_id if hasattr(output, "session_id") else "session"
+        
+        session_metadata = SessionMetadata(
+            session_id=session_id,
+            timestamp=datetime.now().isoformat(),
+            version=config.__version__ if hasattr(config, '__version__') else "1.0.0",
+            seed=getattr(config, 'GLOBAL_RANDOM_SEED', 42),
+            language_model=getattr(config, 'LLM_MODEL_NAME', "gpt-4"),
+            embedding_model=getattr(config, 'EMBEDDING_MODEL_NAME', "text-embedding-ada-002"),
+            nli_model=getattr(config, 'NLI_MODEL_NAME', "cross-encoder/qnli"),
+            inputs_used=st.session_state.get("input_sources", []),
+        )
+        
+        # Extract ingestion report
+        ingestion_diagnostics = verifiable_metadata.get("ingestion_diagnostics", {})
+        ingestion_report = IngestionReport(
+            total_pages=ingestion_diagnostics.get("total_pages", 0),
+            pages_ocr=ingestion_diagnostics.get("pages_ocr", 0),
+            headers_removed=ingestion_diagnostics.get("headers_removed", 0),
+            footers_removed=ingestion_diagnostics.get("footers_removed", 0),
+            watermarks_removed=ingestion_diagnostics.get("watermarks_removed", 0),
+            total_chunks=ingestion_diagnostics.get("total_chunks", 0),
+            avg_chunk_size=ingestion_diagnostics.get("avg_chunk_size", 512),
+            extraction_methods=ingestion_diagnostics.get("extraction_methods", []),
+        )
+        
+        # Extract verification summary and metrics
+        metrics = verifiable_metadata.get("metrics", {})
+        claims_data = verifiable_metadata.get("claims", [])
+        
+        verified_count = sum(1 for c in claims_data if c.get("status", "").upper() == "VERIFIED")
+        low_conf_count = sum(1 for c in claims_data if c.get("status", "").upper() == "LOW_CONFIDENCE")
+        rejected_count = sum(1 for c in claims_data if c.get("status", "").upper() == "REJECTED")
+        
+        avg_conf = metrics.get("avg_confidence", 0.0)
+        if not isinstance(avg_conf, (int, float)):
+            avg_conf = 0.0
+        
+        rejection_reasons = metrics.get("rejection_reasons", {})
+        top_reasons = [(reason, count) for reason, count in sorted(
+            rejection_reasons.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )[:5]]  # Top 5 reasons
+        
+        verification_summary = VerificationSummary(
+            total_claims=len(claims_data),
+            verified_count=verified_count,
+            low_confidence_count=low_conf_count,
+            rejected_count=rejected_count,
+            avg_confidence=float(avg_conf),
+            top_rejection_reasons=top_reasons,
+            calibration_metrics=metrics.get("calibration_metrics"),
+        )
+        
+        # Build claims entries
+        claims_entries = []
+        for claim in claims_data:
+            evidence = claim.get("evidence", [])
+            top_evidence = evidence[0].get("snippet", "") if evidence else ""
+            
+            entry = ClaimEntry(
+                claim_text=claim.get("claim_text", ""),
+                status=claim.get("status", "UNKNOWN"),
+                confidence=float(claim.get("confidence", 0)),
+                evidence_count=len(evidence),
+                top_evidence=top_evidence,
+                page_num=claim.get("page_num"),
+                span_id=claim.get("span_id"),
+            )
+            claims_entries.append(entry)
+        
+        # Build the report
+        md_content, html_content, audit_json = build_report(
+            session_metadata,
+            ingestion_report,
+            verification_summary,
+            claims_entries,
+            performance_metrics=metrics.get("performance", {}),
+        )
+        
+        # Display report options
+        st.subheader("📄 Research Reports")
+        st.caption("Download comprehensive session reports in multiple formats")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.download_button(
+                label="⬇️ Markdown",
+                data=md_content,
+                file_name=f"research_report_{session_id}.md",
+                mime="text/markdown",
+                help="Human-readable markdown version"
+            )
+        
+        with col2:
+            st.download_button(
+                label="⬇️ HTML",
+                data=html_content,
+                file_name=f"research_report_{session_id}.html",
+                mime="text/html",
+                help="Styled HTML version for browser viewing"
+            )
+        
+        with col3:
+            import json
+            audit_json_str = json.dumps(audit_json, indent=2)
+            st.download_button(
+                label="⬇️ Audit JSON",
+                data=audit_json_str,
+                file_name=f"research_report_audit_{session_id}.json",
+                mime="application/json",
+                help="Structured audit trail for reproducibility"
+            )
+        
+        # Display preview
+        st.divider()
+        st.subheader("📋 Report Preview")
+        
+        preview_format = st.radio(
+            "View preview in:",
+            ["Markdown", "HTML"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        
+        if preview_format == "Markdown":
+            st.markdown(md_content)
+        else:
+            st.components.v1.html(html_content, height=800, scrolling=True)
+    
+    except Exception as e:
+        st.error(f"Failed to generate research reports: {e}")
+        logger.exception("Error in _display_research_reports")
+
+
 def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] = None):
     """
     Display structured output using new streaming display system.
@@ -1439,6 +1596,34 @@ def main():
         if enable_verifiable_mode and not st.session_state.has_pyarrow and not st.session_state.pyarrow_warned:
             st.warning("pyarrow missing; install with pip install pyarrow. Dataframe rendering may be limited.")
             st.session_state.pyarrow_warned = True
+
+        # Online Authority Verification toggle
+        st.divider()
+        st.subheader("🌐 Online Authority Verification")
+        
+        enable_online_verification = st.checkbox(
+            "Augment with Trusted Online Sources",
+            value=False,
+            help=(
+                "Enable retrieval from authoritative online sources "
+                "(Python docs, RFC, academic sources, etc.) "
+                "to supplement local evidence."
+            )
+        )
+        
+        if enable_online_verification:
+            st.info(
+                "🔒 **Privacy & Security**\n\n"
+                "• Queries redact personally identifiable information (email, phone, SSN)\n"
+                "• Only requests from allowlisted authoritative domains\n"
+                "• Tier 1 (official docs), Tier 2 (academic), Tier 3 (community)\n"
+                "• Cached content is versioned and timestamped\n"
+                "• Local evidence always takes precedence"
+            )
+        
+        # Store in session state for use in processing
+        st.session_state.enable_online_verification = enable_online_verification
+        st.session_state.enable_verifiable_mode = enable_verifiable_mode
 
         st.session_state.debug_mode = st.checkbox(
             "Debug mode",
@@ -2061,6 +2246,10 @@ def main():
                 )
                 actual_verifiable_mode = False
             
+            # Apply online verification setting from session state to config
+            if hasattr(st.session_state, 'enable_online_verification'):
+                config.ENABLE_ONLINE_VERIFICATION = st.session_state.enable_online_verification
+            
             # Show information about what will happen
             if actual_verifiable_mode and len(combined_notes or "") < config.MIN_INPUT_CHARS_FOR_VERIFICATION:
                 st.warning(
@@ -2142,7 +2331,7 @@ def main():
         st.success("✅ Processing complete!")
         st.divider()
 
-        notes_tab, report_tab = st.tabs(["Notes", "Verifiability Report"])
+        notes_tab, report_tab, reports_tab = st.tabs(["Notes", "Verifiability Report", "Reports"])
 
         with notes_tab:
             if st.session_state.verifiable_metadata and st.session_state.verifiable_metadata.get("verification_unavailable"):
@@ -2216,6 +2405,15 @@ def main():
                 )
             else:
                 st.info("Run verification to generate the report.")
+
+        with reports_tab:
+            if st.session_state.verifiable_metadata and st.session_state.verifiable_metadata.get("verifiable_mode"):
+                _display_research_reports(
+                    st.session_state.verifiable_metadata,
+                    st.session_state.result.get('output')
+                )
+            else:
+                st.info("Run verification to generate research reports.")
 
 
 if __name__ == "__main__":

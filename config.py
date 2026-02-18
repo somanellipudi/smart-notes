@@ -233,6 +233,11 @@ EMBEDDING_NORMALIZE = os.getenv("EMBEDDING_NORMALIZE", "true").lower() == "true"
 DENSE_RETRIEVAL_TOP_K = int(os.getenv("DENSE_RETRIEVAL_TOP_K", "20"))
 DENSE_RETRIEVAL_MIN_SIMILARITY = float(os.getenv("DENSE_RETRIEVAL_MIN_SIMILARITY", "0.2"))
 
+# Adaptive evidence sufficiency settings
+MAX_EVIDENCE_PER_CLAIM = int(os.getenv("MAX_EVIDENCE_PER_CLAIM", "6"))
+SUFFICIENCY_TAU = float(os.getenv("SUFFICIENCY_TAU", "0.8"))
+EVIDENCE_DIVERSITY_MIN_SOURCES = int(os.getenv("EVIDENCE_DIVERSITY_MIN_SOURCES", "2"))
+
 # Optional reranker settings
 ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "false").lower() == "true"
 RERANKER_MODEL_NAME = os.getenv(
@@ -341,6 +346,36 @@ REQUIRE_ANCHOR_TERMS_CODE = os.getenv("REQUIRE_ANCHOR_TERMS_CODE", "true").lower
 
 MIN_ANCHOR_SCORE_FOR_EVIDENCE = float(os.getenv("MIN_ANCHOR_SCORE_FOR_EVIDENCE", "0.5"))
 """Minimum anchor term score to accept evidence for CS claims"""
+
+
+# ==================== CONTRADICTION DETECTION ====================
+
+# Enable hard contradiction gate (prevents VERIFIED status when contradiction detected)
+ENABLE_CONTRADICTION_GATE = os.getenv("ENABLE_CONTRADICTION_GATE", "true").lower() == "true"
+"""If enabled, claims with contradiction_prob > threshold cannot be VERIFIED"""
+
+CONTRADICTION_GATE_THRESHOLD = float(os.getenv("CONTRADICTION_GATE_THRESHOLD", "0.6"))
+"""Threshold for contradiction probability to trigger gate (default: 0.6)"""
+
+# Enable CS-specific operation semantics rules (push/pop/enqueue/dequeue)
+ENABLE_CS_OPERATION_RULES = os.getenv("ENABLE_CS_OPERATION_RULES", "false").lower() == "true"
+"""If enabled, applies CS-specific semantic rules for data structure operations"""
+
+CS_OPERATION_RULES = {
+    # Stack operations
+    "push": {"adds": True, "removes": False, "structure": "stack", "end": "top"},
+    "pop": {"adds": False, "removes": True, "structure": "stack", "end": "top"},
+    
+    # Queue operations
+    "enqueue": {"adds": True, "removes": False, "structure": "queue", "end": "rear"},
+    "dequeue": {"adds": False, "removes": True, "structure": "queue", "end": "front"},
+    
+    # Heap operations
+    "insert_heap": {"adds": True, "removes": False, "structure": "heap"},
+    "extract_min": {"adds": False, "removes": True, "structure": "heap"},
+    "extract_max": {"adds": False, "removes": True, "structure": "heap"},
+}
+"""CS operation semantic rules for contradiction detection"""
 
 
 # ==================== CITATION RENDERING & DISPLAY ====================

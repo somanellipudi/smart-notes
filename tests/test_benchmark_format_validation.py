@@ -1,261 +1,299 @@
 """
-Tests for benchmark dataset format validation.
+Test suite for CS Benchmark dataset format validation.
 
-Validates that the CS benchmark dataset conforms to schema and quality standards.
+Validates JSONL schema, required fields, label values, evidence spans,
+and domain coverage for the CSClaimBench v1.0 dataset.
 """
 
-import pytest
 import json
+import pytest
 from pathlib import Path
-from typing import Dict, List
-
-from src.evaluation.cs_benchmark_runner import CSBenchmarkRunner
 
 
-class TestBenchmarkFormatValidation:
-    """Validate benchmark dataset format and schema."""
+# Path to benchmark dataset
+BENCHMARK_PATH = Path(__file__).parent.parent / "evaluation" / "cs_benchmark" / "csclaimbench_v1.jsonl"
+
+# Expected schema
+REQUIRED_FIELDS = {"doc_id", "domain_topic", "source_text", "claim", "gold_label"}
+OPTIONAL_FIELDS = {"evidence_span"}
+VALID_LABELS = {"ENTAIL", "CONTRADICT", "NEUTRAL"}
+VALID_DOMAINS = {"Algorithms", "DataStructures", "OS", "DB", "Distributed", "Networks", "Compilers"}
+
+
+def load_benchmark_dataset():
+    """Load the full benchmark dataset."""
+    with open(BENCHMARK_PATH, "r", encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+@pytest.fixture(scope="module")
+def dataset():
+    """Fixture to load dataset once for all tests."""
+    return load_benchmark_dataset()
+
+
+class TestBenchmarkFormat:
+    """Test JSONL format and schema validation."""
     
-    DATASET_PATH = "evaluation/cs_benchmark/cs_benchmark_dataset.jsonl"
-    REQUIRED_FIELDS = {"doc_id", "domain_topic", "source_text", "generated_claim", 
-                       "gold_label", "evidence_span"}
-    VALID_LABELS = {"VERIFIED", "LOW_CONFIDENCE", "REJECTED"}
-    VALID_DOMAINS = {
-        "algorithms.sorting", "algorithms.search", "algorithms.dynamicprogramming",
-        "datastructures.hashtable", "datastructures.binarytree", "datastructures.graph",
-        "complexity.nphard", "complexity.correlation",
-        "networking.basics", "networking.protocol",
-        "security.encryption", "security.hashing",
-        "databases.indexing", "databases.sqlquery",
-        "machinelearning.optimization", "machinelearning.regression",
-        "compilerscomputing.parsing", "compilerscomputing.optimization"
-    }
+    def test_file_exists(self):
+        """Verify benchmark file exists."""
+        assert BENCHMARK_PATH.exists(), f"Benchmark file not found at {BENCHMARK_PATH}"
     
-    @pytest.fixture
-    def dataset_path(self) -> Path:
-        """Provide path to benchmark dataset."""
-        return Path(self.DATASET_PATH)
+    def test_valid_jsonl(self, dataset):
+        """Verify all lines are valid JSON."""
+        assert len(dataset) > 0, "Dataset should not be empty"
+        assert all(isinstance(item, dict) for item in dataset), "All lines must parse as JSON objects"
     
-    @pytest.fixture
-    def examples(self, dataset_path: Path) -> List[Dict]:
-        """Load benchmark examples."""
-        examples = []
-        with open(dataset_path, 'r') as f:
-            for line in f:
-                if line.strip():
-                    examples.append(json.loads(line))
-        return examples
+    def test_required_fields_present(self, dataset):
+        """Verify all required fields are present in each example."""
+        for idx, item in enumerate(dataset):
+            missing = REQUIRED_FIELDS - set(item.keys())
+            assert not missing, f"Example {idx} ({item.get('doc_id', 'unknown')}) missing fields: {missing}"
     
-    def test_dataset_exists(self, dataset_path: Path):
-        """Test that dataset file exists."""
-        assert dataset_path.exists(), f"Dataset not found at {dataset_path}"
-        assert dataset_path.is_file(), f"Dataset is not a file: {dataset_path}"
+    def test_no_unexpected_fields(self, dataset):
+        """Verify no unexpected fields are present."""
+        allowed_fields = REQUIRED_FIELDS | OPTIONAL_FIELDS
+        for idx, item in enumerate(dataset):
+            unexpected = set(item.keys()) - allowed_fields
+            assert not unexpected, f"Example {idx} ({item.get('doc_id', 'unknown')}) has unexpected fields: {unexpected}"
     
-    def test_dataset_not_empty(self, examples: List[Dict]):
-        """Test that dataset contains examples."""
-        assert len(examples) > 0, "Dataset is empty"
+    def test_field_types(self, dataset):
+        """Verify field types are correct."""
+        for idx, item in enumerate(dataset):
+            assert isinstance(item["doc_id"], str), f"Example {idx}: doc_id must be string"
+            assert isinstance(item["domain_topic"], str), f"Example {idx}: domain_topic must be string"
+            assert isinstance(item["source_text"], str), f"Example {idx}: source_text must be string"
+            assert isinstance(item["claim"], str), f"Example {idx}: claim must be string"
+            assert isinstance(item["gold_label"], str), f"Example {idx}: gold_label must be string"
+            
+            if "evidence_span" in item:
+                assert isinstance(item["evidence_span"], dict), f"Example {idx}: evidence_span must be dict"
+                assert "start" in item["evidence_span"], f"Example {idx}: evidence_span missing 'start'"
+                assert "end" in item["evidence_span"], f"Example {idx}: evidence_span missing 'end'"
+                assert isinstance(item["evidence_span"]["start"], int), f"Example {idx}: evidence_span.start must be int"
+                assert isinstance(item["evidence_span"]["end"], int), f"Example {idx}: evidence_span.end must be int"
+
+
+class TestLabelValidation:
+    """Test gold labels are valid."""
     
-    def test_example_count_reasonable(self, examples: List[Dict]):
-        """Test that dataset size is reasonable."""
-        assert len(examples) >= 10, "Dataset too small (< 10 examples)"
-        assert len(examples) <= 1000, "Dataset too large (> 1000 examples)"
+    def test_valid_labels(self, dataset):
+        """Verify all labels are one of ENTAIL/CONTRADICT/NEUTRAL."""
+        for idx, item in enumerate(dataset):
+            label = item["gold_label"]
+            assert label in VALID_LABELS, \
+                f"Example {idx} ({item['doc_id']}): invalid label '{label}', must be one of {VALID_LABELS}"
     
-    def test_all_examples_have_required_fields(self, examples: List[Dict]):
-        """Test that all examples have required fields."""
-        for i, example in enumerate(examples):
-            missing = self.REQUIRED_FIELDS - set(example.keys())
-            assert not missing, f"Example {i} missing fields: {missing}"
-    
-    def test_doc_ids_unique(self, examples: List[Dict]):
-        """Test that all doc_ids are unique."""
-        doc_ids = [ex["doc_id"] for ex in examples]
-        assert len(doc_ids) == len(set(doc_ids)), "Duplicate doc_ids found"
-    
-    def test_doc_id_format(self, examples: List[Dict]):
-        """Test that doc_ids follow naming convention."""
-        for example in examples:
-            doc_id = example["doc_id"]
-            # Should match pattern: domain_NNN
-            parts = doc_id.split("_")
-            assert len(parts) >= 2, f"Invalid doc_id format: {doc_id}"
-            assert parts[-1].isdigit(), f"doc_id should end with number: {doc_id}"
-    
-    def test_valid_gold_labels(self, examples: List[Dict]):
-        """Test that gold_labels are valid."""
-        for i, example in enumerate(examples):
-            label = example["gold_label"]
-            assert label in self.VALID_LABELS, \
-                f"Example {i}: Invalid label '{label}', must be one of {self.VALID_LABELS}"
-    
-    def test_valid_domain_topics(self, examples: List[Dict]):
-        """Test that domain_topics are valid."""
-        for i, example in enumerate(examples):
-            domain = example["domain_topic"]
-            assert domain in self.VALID_DOMAINS, \
-                f"Example {i}: Invalid domain '{domain}', must be one of {self.VALID_DOMAINS}"
-    
-    def test_text_field_nonempty(self, examples: List[Dict]):
-        """Test that text fields are not empty."""
-        for i, example in enumerate(examples):
-            assert example["source_text"].strip(), \
-                f"Example {i}: source_text is empty"
-            assert example["generated_claim"].strip(), \
-                f"Example {i}: generated_claim is empty"
-    
-    def test_text_field_lengths(self, examples: List[Dict]):
-        """Test text field lengths are reasonable."""
-        MIN_CLAIM = 10
-        MAX_CLAIM = 500
-        MIN_SOURCE = 50
-        MAX_SOURCE = 2000
+    def test_label_distribution(self, dataset):
+        """Verify label distribution is reasonable."""
+        label_counts = {label: 0 for label in VALID_LABELS}
+        for item in dataset:
+            label_counts[item["gold_label"]] += 1
         
-        for i, example in enumerate(examples):
-            claim_len = len(example["generated_claim"])
-            assert MIN_CLAIM <= claim_len <= MAX_CLAIM, \
-                f"Example {i}: claim length {claim_len} outside [{MIN_CLAIM}, {MAX_CLAIM}]"
-            
-            source_len = len(example["source_text"])
-            assert MIN_SOURCE <= source_len <= MAX_SOURCE, \
-                f"Example {i}: source length {source_len} outside [{MIN_SOURCE}, {MAX_SOURCE}]"
+        total = len(dataset)
+        for label, count in label_counts.items():
+            percentage = (count / total) * 100
+            print(f"{label}: {count} ({percentage:.1f}%)")
+        
+        # At least 10 examples of each label
+        for label in VALID_LABELS:
+            assert label_counts[label] >= 10, f"Label {label} has insufficient examples: {label_counts[label]}"
+
+
+class TestDomainCoverage:
+    """Test domain coverage and distribution."""
     
-    def test_evidence_span_consistency(self, examples: List[Dict]):
-        """Test that evidence_span is in source_text (if provided)."""
-        for i, example in enumerate(examples):
-            span = example.get("evidence_span", "")
-            source = example["source_text"]
-            
-            if span:
-                # For VERIFIED claims, span should be in source
-                if example["gold_label"] == "VERIFIED":
-                    assert span in source, \
-                        f"Example {i}: evidence_span not found in source_text"
-            
-            # For REJECTED claims, span should be empty or not present
-            if example["gold_label"] == "REJECTED":
-                assert not span or span == "", \
-                    f"Example {i}: REJECTED claim should have empty evidence_span"
+    def test_valid_domains(self, dataset):
+        """Verify all domain_topic values are valid."""
+        for idx, item in enumerate(dataset):
+            domain = item["domain_topic"]
+            assert domain in VALID_DOMAINS, \
+                f"Example {idx} ({item['doc_id']}): invalid domain '{domain}', must be one of {VALID_DOMAINS}"
     
-    def test_no_duplicate_claims(self, examples: List[Dict]):
-        """Test that generated_claims are unique."""
-        claims = [ex["generated_claim"] for ex in examples]
-        assert len(claims) == len(set(claims)), "Duplicate claims found"
+    def test_domain_distribution(self, dataset):
+        """Verify domain distribution is reasonable."""
+        domain_counts = {domain: 0 for domain in VALID_DOMAINS}
+        for item in dataset:
+            domain_counts[item["domain_topic"]] += 1
+        
+        print("\nDomain distribution:")
+        for domain, count in sorted(domain_counts.items()):
+            print(f"  {domain}: {count} examples")
+        
+        # Each domain should have at least 20 examples
+        for domain in VALID_DOMAINS:
+            assert domain_counts[domain] >= 20, f"Domain {domain} has insufficient examples: {domain_counts[domain]}"
     
-    def test_label_distribution(self, examples: List[Dict]):
-        """Test that label distribution is reasonable (not completely skewed)."""
+    def test_doc_id_matches_domain(self, dataset):
+        """Verify doc_id prefix matches domain_topic."""
+        domain_prefixes = {
+            "Algorithms": "algo_",
+            "DataStructures": "ds_",
+            "OS": "os_",
+            "DB": "db_",
+            "Distributed": "distributed_",
+            "Networks": "networks_",
+            "Compilers": "compilers_"
+        }
+        
+        for idx, item in enumerate(dataset):
+            domain = item["domain_topic"]
+            doc_id = item["doc_id"]
+            expected_prefix = domain_prefixes[domain]
+            assert doc_id.startswith(expected_prefix), \
+                f"Example {idx}: doc_id '{doc_id}' should start with '{expected_prefix}' for domain {domain}"
+
+
+class TestEvidenceSpans:
+    """Test evidence span validity."""
+    
+    def test_evidence_span_validity(self, dataset):
+        """Verify evidence spans are valid character offsets."""
+        for idx, item in enumerate(dataset):
+            if "evidence_span" not in item:
+                continue
+            
+            span = item["evidence_span"]
+            start = span["start"]
+            end = span["end"]
+            source_text = item["source_text"]
+            
+            assert 0 <= start < len(source_text), \
+                f"Example {idx} ({item['doc_id']}): evidence_span.start {start} out of range [0, {len(source_text)})"
+            assert start < end <= len(source_text), \
+                f"Example {idx} ({item['doc_id']}): evidence_span.end {end} must be > start {start} and <= {len(source_text)}"
+            
+            # Extract evidence text to verify it's meaningful
+            evidence_text = source_text[start:end]
+            assert len(evidence_text) > 10, \
+                f"Example {idx} ({item['doc_id']}): evidence span too short ({len(evidence_text)} chars): '{evidence_text}'"
+    
+    def test_evidence_span_label_consistency(self, dataset):
+        """Verify evidence spans are present for ENTAIL/CONTRADICT, optional for NEUTRAL."""
+        entail_with_span = 0
+        entail_without_span = 0
+        contradict_with_span = 0
+        contradict_without_span = 0
+        neutral_with_span = 0
+        
+        for item in dataset:
+            label = item["gold_label"]
+            has_span = "evidence_span" in item
+            
+            if label == "ENTAIL":
+                if has_span:
+                    entail_with_span += 1
+                else:
+                    entail_without_span += 1
+            elif label == "CONTRADICT":
+                if has_span:
+                    contradict_with_span += 1
+                else:
+                    contradict_without_span += 1
+            elif label == "NEUTRAL" and has_span:
+                neutral_with_span += 1
+        
+        print(f"\nEvidence span statistics:")
+        print(f"  ENTAIL with span: {entail_with_span}, without: {entail_without_span}")
+        print(f"  CONTRADICT with span: {contradict_with_span}, without: {contradict_without_span}")
+        print(f"  NEUTRAL with span: {neutral_with_span}")
+        
+        # Most ENTAIL/CONTRADICT should have evidence spans
+        total_entail = entail_with_span + entail_without_span
+        total_contradict = contradict_with_span + contradict_without_span
+        
+        if total_entail > 0:
+            entail_span_rate = entail_with_span / total_entail
+            assert entail_span_rate >= 0.8, \
+                f"Expected >= 80% ENTAIL examples to have evidence spans, got {entail_span_rate*100:.1f}%"
+        
+        if total_contradict > 0:
+            contradict_span_rate = contradict_with_span / total_contradict
+            assert contradict_span_rate >= 0.8, \
+                f"Expected >= 80% CONTRADICT examples to have evidence spans, got {contradict_span_rate*100:.1f}%"
+
+
+class TestContentQuality:
+    """Test content quality and consistency."""
+    
+    def test_source_text_length(self, dataset):
+        """Verify source texts have reasonable length."""
+        for idx, item in enumerate(dataset):
+            source_len = len(item["source_text"])
+            assert source_len >= 50, \
+                f"Example {idx} ({item['doc_id']}): source_text too short ({source_len} chars)"
+            assert source_len <= 1000, \
+                f"Example {idx} ({item['doc_id']}): source_text too long ({source_len} chars)"
+    
+    def test_claim_length(self, dataset):
+        """Verify claims have reasonable length."""
+        for idx, item in enumerate(dataset):
+            claim_len = len(item["claim"])
+            assert claim_len >= 10, \
+                f"Example {idx} ({item['doc_id']}): claim too short ({claim_len} chars)"
+            assert claim_len <= 200, \
+                f"Example {idx} ({item['doc_id']}): claim too long ({claim_len} chars)"
+    
+    def test_unique_doc_ids(self, dataset):
+        """Verify all doc_ids are unique."""
+        doc_ids = [item["doc_id"] for item in dataset]
+        duplicates = set([doc_id for doc_id in doc_ids if doc_ids.count(doc_id) > 1])
+        assert not duplicates, f"Duplicate doc_ids found: {duplicates}"
+    
+    def test_no_empty_strings(self, dataset):
+        """Verify no fields contain empty strings."""
+        for idx, item in enumerate(dataset):
+            assert item["doc_id"].strip(), f"Example {idx}: doc_id is empty"
+            assert item["domain_topic"].strip(), f"Example {idx} ({item['doc_id']}): domain_topic is empty"
+            assert item["source_text"].strip(), f"Example {idx} ({item['doc_id']}): source_text is empty"
+            assert item["claim"].strip(), f"Example {idx} ({item['doc_id']}): claim is empty"
+            assert item["gold_label"].strip(), f"Example {idx} ({item['doc_id']}): gold_label is empty"
+
+
+class TestDatasetSize:
+    """Test overall dataset size and completeness."""
+    
+    def test_minimum_size(self, dataset):
+        """Verify dataset has at least 180 examples."""
+        assert len(dataset) >= 180, f"Dataset should have >= 180 examples, found {len(dataset)}"
+    
+    def test_dataset_summary(self, dataset):
+        """Print comprehensive dataset summary."""
+        print(f"\n{'='*60}")
+        print("CSClaimBench v1.0 Dataset Summary")
+        print(f"{'='*60}")
+        print(f"Total examples: {len(dataset)}")
+        
+        # Label distribution
         label_counts = {}
-        for example in examples:
-            label = example["gold_label"]
+        for item in dataset:
+            label = item["gold_label"]
             label_counts[label] = label_counts.get(label, 0) + 1
         
-        total = len(examples)
+        print(f"\nLabel distribution:")
+        for label in sorted(label_counts.keys()):
+            count = label_counts[label]
+            pct = (count / len(dataset)) * 100
+            print(f"  {label}: {count} ({pct:.1f}%)")
         
-        # Each label should have at least 20% representation (for small dataset)
-        if total >= 10:
-            for label, count in label_counts.items():
-                ratio = count / total
-                assert ratio >= 0.15, \
-                    f"Label {label} underrepresented: {count}/{total} ({ratio:.1%})"
-    
-    def test_domain_distribution(self, examples: List[Dict]):
-        """Test that domains are reasonably distributed."""
+        # Domain distribution
         domain_counts = {}
-        for example in examples:
-            domain = example["domain_topic"]
+        for item in dataset:
+            domain = item["domain_topic"]
             domain_counts[domain] = domain_counts.get(domain, 0) + 1
         
-        # Should have at least 2-3 domains represented
-        assert len(domain_counts) >= 2, \
-            f"Only {len(domain_counts)} domain(s) represented, should be at least 2"
-    
-    def test_no_unicode_errors(self, examples: List[Dict]):
-        """Test that all text is valid Unicode."""
-        for i, example in enumerate(examples):
-            try:
-                for field in ["source_text", "generated_claim", "evidence_span"]:
-                    example[field].encode('utf-8')
-            except (UnicodeDecodeError, UnicodeEncodeError) as e:
-                pytest.fail(f"Example {i}: Unicode error in {field}: {e}")
-    
-    def test_no_extremely_long_texts(self, examples: List[Dict]):
-        """Test that texts aren't pathologically long (encoding issues)."""
-        MAX_SAFE_LENGTH = 10000
+        print(f"\nDomain distribution:")
+        for domain in sorted(domain_counts.keys()):
+            count = domain_counts[domain]
+            pct = (count / len(dataset)) * 100
+            print(f"  {domain}: {count} ({pct:.1f}%)")
         
-        for i, example in enumerate(examples):
-            source_len = len(example["source_text"])
-            claim_len = len(example["generated_claim"])
-            
-            assert source_len < MAX_SAFE_LENGTH, \
-                f"Example {i}: source_text too long ({source_len} chars)"
-            assert claim_len < MAX_SAFE_LENGTH, \
-                f"Example {i}: generated_claim too long ({claim_len} chars)"
-
-
-class TestBenchmarkDatasetLoadable:
-    """Test that benchmark dataset can be loaded by benchmark runner."""
-    
-    def test_runner_can_load_dataset(self):
-        """Test that CSBenchmarkRunner can load dataset."""
-        runner = CSBenchmarkRunner(
-            dataset_path="evaluation/cs_benchmark/cs_benchmark_dataset.jsonl",
-            seed=42,
-            device="cpu"
-        )
-        
-        assert len(runner.dataset) > 0, "Runner loaded empty dataset"
-    
-    def test_runner_dataset_examples_valid(self):
-        """Test that loaded examples have expected structure."""
-        runner = CSBenchmarkRunner(
-            dataset_path="evaluation/cs_benchmark/cs_benchmark_dataset.jsonl",
-            seed=42,
-            device="cpu"
-        )
-        
-        for example in runner.dataset[:5]:
-            assert "doc_id" in example
-            assert "domain_topic" in example
-            assert "source_text" in example
-            assert "generated_claim" in example
-            assert "gold_label" in example
-
-
-class TestBenchmarkDatasetReproducibility:
-    """Test reproducibility properties of benchmark dataset."""
-    
-    def test_deterministic_loading(self):
-        """Test that dataset loads consistently."""
-        runner1 = CSBenchmarkRunner(
-            dataset_path="evaluation/cs_benchmark/cs_benchmark_dataset.jsonl",
-            seed=42,
-            device="cpu"
-        )
-        runner2 = CSBenchmarkRunner(
-            dataset_path="evaluation/cs_benchmark/cs_benchmark_dataset.jsonl",
-            seed=42,
-            device="cpu"
-        )
-        
-        assert len(runner1.dataset) == len(runner2.dataset)
-        for ex1, ex2 in zip(runner1.dataset, runner2.dataset):
-            assert ex1["doc_id"] == ex2["doc_id"]
-            assert ex1["generated_claim"] == ex2["generated_claim"]
-    
-    def test_seed_reproducibility(self):
-        """Test that runner with same seed produces consistent results."""
-        runner1 = CSBenchmarkRunner(
-            dataset_path="evaluation/cs_benchmark/cs_benchmark_dataset.jsonl",
-            seed=42,
-            device="cpu"
-        )
-        
-        runner2 = CSBenchmarkRunner(
-            dataset_path="evaluation/cs_benchmark/cs_benchmark_dataset.jsonl",
-            seed=42,
-            device="cpu"
-        )
-        
-        # Both should load same dataset
-        assert runner1.dataset == runner2.dataset
+        # Evidence span coverage
+        with_span = sum(1 for item in dataset if "evidence_span" in item)
+        span_pct = (with_span / len(dataset)) * 100
+        print(f"\nEvidence spans: {with_span}/{len(dataset)} ({span_pct:.1f}%)")
+        print(f"{'='*60}")
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    pytest.main([__file__, "-v", "-s"])

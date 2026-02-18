@@ -20,6 +20,7 @@ from src.retrieval.artifact_store import (
     compute_source_id, compute_span_id, compute_text_hash,
     create_config_snapshot, get_git_commit
 )
+from src.retrieval.online_evidence_integration import create_integrator
 import config
 
 logger = logging.getLogger(__name__)
@@ -301,6 +302,67 @@ def build_session_evidence_store(
 
     elif urls and not config.ENABLE_URL_SOURCES:
         logger.warning("URLs provided but ENABLE_URL_SOURCES=False, skipping URL ingestion")
+
+    # Integrate online evidence from authoritative sources
+    online_conflicts_summary = None
+    if config.ENABLE_ONLINE_VERIFICATION and input_text:
+        try:
+            logger.info("Retrieving online evidence from authoritative sources")
+            integrator = create_integrator(
+                enable_online=True,
+                enforce_policies=True
+            )
+            
+            # Extract key claims from input text (simple heuristic: sentences with capitalized keywords)
+            import re
+            sentences = re.split(r'[.!?]+', input_text)
+            claims_to_verify = [
+                s.strip() for s in sentences 
+                if s.strip() and len(s.strip()) > 20 and any(
+                    keyword in s.lower() for keyword in ['is', 'are', 'was', 'were', 'define', 'explain']
+                )
+            ][:config.ONLINE_MAX_SOURCES_PER_CLAIM]
+            
+            online_evidence_added = 0
+            for claim in claims_to_verify:
+                try:
+                    online_spans = integrator.retrieve_online_evidence(claim, num_results=3)
+                    
+                    for span in online_spans:
+                        evidence = Evidence(
+                            evidence_id="",
+                            source_id=span.source_id,
+                            source_type="online_authority",
+                            text=span.text,
+                            chunk_index=0,
+                            char_start=0,
+                            char_end=len(span.text),
+                            metadata={
+                                "session_id": session_id,
+                                "online_source": span.source_id,
+                                "authority_tier": str(span.authority_tier),
+                                "authority_weight": float(span.authority_weight),
+                                "access_date": span.access_date,
+                                "from_online_verification": True,
+                                "claim_verified": claim
+                            }
+                        )
+                        store.add_evidence(evidence)
+                        online_evidence_added += 1
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve online evidence for claim: {e}")
+            
+            if online_evidence_added > 0:
+                logger.info(f"Added {online_evidence_added} online evidence chunks to store")
+                stats["online_evidence_chunks"] = online_evidence_added
+            
+            # Get conflict summary for reporting
+            online_conflicts_summary = integrator.get_conflict_summary()
+            stats["online_conflicts"] = online_conflicts_summary
+            
+        except Exception as e:
+            logger.error(f"Online verification failed: {e}")
+            stats["online_verification_error"] = str(e)
 
     if len(store.evidence) == 0:
         raise ValueError(

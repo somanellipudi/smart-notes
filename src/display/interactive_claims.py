@@ -16,7 +16,7 @@ Research-Grade Features:
 import streamlit as st
 from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
-from src.claims.schema import LearningClaim
+from src.claims.schema import LearningClaim, ClaimType, VerificationStatus
 import json
 import csv
 from io import StringIO, BytesIO
@@ -112,8 +112,11 @@ class InteractiveClaimDisplay:
         else:
             confidence_color = "🔴"
         
-        # Determine if verified
+        # Determine if verified or answered
         is_verified = status_value.lower() == "verified"
+        is_answered = status_value.lower() == "answered_with_citations"
+        claim_type_val = getattr(claim.claim_type, "value", str(claim.claim_type))
+        is_question = claim_type_val == "question"
         
         col1, col2, col3 = st.columns([2, 1, 1])
         
@@ -123,14 +126,24 @@ class InteractiveClaimDisplay:
                 claim.claim_text or
                 claim.metadata.get("draft_text", "Claim")
             )
-            st.write(f"**{title[:150]}**")
+            # Add question mark emoji for questions
+            prefix = "❓ " if is_question else ""
+            st.write(f"**{prefix}{title[:150]}**")
         
         with col2:
-            st.metric(
-                "Confidence",
-                f"{claim.confidence:.0%}",
-                delta="Verified" if is_verified else "Pending"
-            )
+            # Show different metrics for questions vs facts
+            if is_question:
+                st.metric(
+                    "Answer Quality",
+                    f"{claim.confidence:.0%}",
+                    delta="Answered" if is_answered else "Pending"
+                )
+            else:
+                st.metric(
+                    "Confidence",
+                    f"{claim.confidence:.0%}",
+                    delta="Verified" if is_verified else "Pending"
+                )
         
         with col3:
             st.metric(
@@ -155,6 +168,11 @@ class InteractiveClaimDisplay:
                         f"• **ID**: {claim.claim_id[:16]}...\n"
                         f"• **Created**: {claim.metadata.get('created_at', 'N/A')[:10]}"
                     )
+                    
+                    # Show answer for questions
+                    if is_question and claim.answer_text:
+                        st.write("**Answer:**")
+                        st.success(claim.answer_text)
                 
                 with col_b:
                     st.write("**Confidence Analysis**")
@@ -247,53 +265,128 @@ class InteractiveClaimDisplay:
                 st.markdown(assessment)
     
     @staticmethod
+    def display_questions_with_answers(
+        questions: List[LearningClaim],
+        show_confidence: bool = True
+    ) -> None:
+        """
+        Display questions separately with their answers and citations.
+        
+        Args:
+            questions: List of question claims (ClaimType.QUESTION)
+            show_confidence: Whether to show answer confidence
+        """
+        if not questions:
+            return
+        
+        st.write("### ❓ Study Questions")
+        st.caption(f"{len(questions)} questions with evidence-based answers")
+        
+        for i, q in enumerate(questions, 1):
+            status = getattr(q.status, "value", str(q.status))
+            
+            # Question display
+            with st.expander(f"**Q{i}:** {q.claim_text}", expanded=False):
+                # Show answer if available
+                if q.answer_text and status == "answered_with_citations":
+                    st.markdown("**Answer:**")
+                    st.info(q.answer_text)
+                    
+                    if show_confidence and q.confidence > 0:
+                        confidence_color = "🟢" if q.confidence > 0.7 else "🟡" if q.confidence > 0.5 else "🟠"
+                        st.caption(f"{confidence_color} Answer confidence: {q.confidence:.0%}")
+                    
+                    # Show sources if available
+                    if q.evidence_objects:
+                        st.write("**Sources:**")
+                        for idx, ev in enumerate(q.evidence_objects[:3], 1):
+                            source = ev.metadata.get("source", "Unknown")
+                            st.caption(f"[{idx}] {source}: {ev.text[:100]}...")
+                else:
+                    st.warning("⚠️ No answer available yet")
+                
+                # Show metadata in collapsed section
+                with st.expander("📊 Question Details", expanded=False):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Status:** {status}")
+                        st.write(f"**Confidence:** {q.confidence:.0%}")
+                    with col2:
+                        st.write(f"**Evidence Count:** {len(q.evidence_ids)}")
+                        st.write(f"**ID:** {q.claim_id[:8]}")
+    
+    @staticmethod
     def display_claims_summary_with_verifiability(
         claims: List[LearningClaim],
-        show_ai_badge: bool = True
+        show_ai_badge: bool = True,
+        separate_questions: bool = True
     ) -> None:
         """
         Display summary of all claims with verifiability indicators.
+        Separates questions from factual claims for clarity.
         
         Args:
             claims: List of claims to display
             show_ai_badge: Whether to show "AI-Generated" badge
+            separate_questions: Whether to show questions in separate section
         """
         if not claims:
             st.info("No claims to display")
             return
         
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
+        # Separate questions from fact claims
+        questions = []
+        fact_claims = []
         
-        verified_count = sum(1 for c in claims if getattr(c.status, "value", "") == "verified")
-        avg_confidence = sum(c.confidence for c in claims) / len(claims) if claims else 0
-        evidence_count = sum(len(c.evidence_ids) for c in claims)
+        for c in claims:
+            claim_type = getattr(c.claim_type, "value", str(c.claim_type))
+            if separate_questions and claim_type == "question":
+                questions.append(c)
+            else:
+                fact_claims.append(c)
         
-        with col1:
-            st.metric("Total Claims", len(claims))
+        # Summary metrics (for fact claims)
+        display_claims = fact_claims if separate_questions else claims
         
-        with col2:
-            st.metric("Verified", verified_count, delta=f"{verified_count/len(claims)*100:.0f}%")
-        
-        with col3:
-            st.metric("Avg Confidence", f"{avg_confidence:.1%}")
-        
-        with col4:
-            st.metric("Total Evidence", evidence_count)
-        
-        st.divider()
-        
-        # Interactive claims list
-        st.write("### 🔬 Verifiable Claims Review")
-        
-        for claim in claims:
-            InteractiveClaimDisplay.display_claim_detail_modal(claim)
+        if display_claims:
+            col1, col2, col3, col4 = st.columns(4)
+            
+            verified_count = sum(1 for c in display_claims if getattr(c.status, "value", "") == "verified")
+            avg_confidence = sum(c.confidence for c in display_claims) / len(display_claims) if display_claims else 0
+            evidence_count = sum(len(c.evidence_ids) for c in display_claims)
+            
+            with col1:
+                st.metric("Fact Claims", len(display_claims))
+            
+            with col2:
+                st.metric("Verified", verified_count, delta=f"{verified_count/len(display_claims)*100:.0f}%" if display_claims else "0%")
+            
+            with col3:
+                st.metric("Avg Confidence", f"{avg_confidence:.1%}")
+            
+            with col4:
+                st.metric("Total Evidence", evidence_count)
+            
             st.divider()
+        
+        # Display questions separately
+        if separate_questions and questions:
+            InteractiveClaimDisplay.display_questions_with_answers(questions)
+            st.divider()
+        
+        # Interactive fact claims list
+        if display_claims:
+            st.write("### 🔬 Verified Facts Review")
+            
+            for claim in display_claims:
+                InteractiveClaimDisplay.display_claim_detail_modal(claim)
+                st.divider()
     
     @staticmethod
     def display_summary_metrics(
         claims: List[LearningClaim],
-        metrics: Optional[Dict[str, Any]] = None
+        metrics: Optional[Dict[str, Any]] = None,
+        show_questions: bool = True
     ) -> None:
         """
         Display research-grade summary metric cards.
@@ -305,38 +398,65 @@ class InteractiveClaimDisplay:
         - Refusal Rate (% rejected)
         - Traceability (% with evidence)
         - Conflict Rate (if applicable)
+        - Questions (if show_questions=True)
         
         Args:
             claims: List of claims to summarize
             metrics: Optional pre-computed metrics (includes conflict_count, etc.)
+            show_questions: Whether to show question count separately
         """
         if not claims:
             st.info("No claims to display")
             return
         
-        verified = sum(1 for c in claims if getattr(c.status, "value", "") == "verified")
-        rejected = sum(1 for c in claims if getattr(c.status, "value", "") == "rejected")
-        low_conf = sum(1 for c in claims if getattr(c.status, "value", "") == "low_confidence")
+        # Separate questions from fact claims
+        questions = [c for c in claims if getattr(c.claim_type, "value", "") == "question"]
+        fact_claims = [c for c in claims if getattr(c.claim_type, "value", "") != "question"]
+        
+        verified = sum(1 for c in fact_claims if getattr(c.status, "value", "") == "verified")
+        rejected = sum(1 for c in fact_claims if getattr(c.status, "value", "") == "rejected")
+        low_conf = sum(1 for c in fact_claims if getattr(c.status, "value", "") == "low_confidence")
+        answered = sum(1 for c in questions if getattr(c.status, "value", "") == "answered_with_citations")
         
         total = len(claims)
-        refusal_rate = rejected / total if total > 0 else 0
+        fact_total = len(fact_claims)
+        refusal_rate = rejected / fact_total if fact_total > 0 else 0
         traceability = sum(1 for c in claims if len(c.evidence_ids) > 0) / total if total > 0 else 0
         conflict_count = metrics.get("graph_metrics", {}).get("conflict_count", 0) if metrics else 0
         
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        
-        with col1:
-            st.metric("📊 Total Claims", total)
-        with col2:
-            st.metric("✅ Verified", verified, delta=f"{verified/total*100:.0f}%")
-        with col3:
-            st.metric("❌ Rejected", rejected, delta=f"{rejected/total*100:.0f}%")
-        with col4:
-            st.metric("⚠️ Low Conf", low_conf, delta=f"{low_conf/total*100:.0f}%")
-        with col5:
-            st.metric("🔗 Traceability", f"{traceability:.0%}")
-        with col6:
-            st.metric("⚡ Conflicts", conflict_count)
+        # Display with or without questions
+        if show_questions and questions:
+            col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+            
+            with col1:
+                st.metric("📊 Total", total)
+            with col2:
+                st.metric("✅ Verified", verified, delta=f"{verified/fact_total*100:.0f}%" if fact_total > 0 else "0%")
+            with col3:
+                st.metric("❓ Questions", len(questions), delta=f"{answered} answered")
+            with col4:
+                st.metric("❌ Rejected", rejected, delta=f"{rejected/fact_total*100:.0f}%" if fact_total > 0 else "0%")
+            with col5:
+                st.metric("⚠️ Low Conf", low_conf)
+            with col6:
+                st.metric("🔗 Evidence", f"{traceability:.0%}")
+            with col7:
+                st.metric("⚡ Conflicts", conflict_count)
+        else:
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            
+            with col1:
+                st.metric("📊 Total Claims", total)
+            with col2:
+                st.metric("✅ Verified", verified, delta=f"{verified/total*100:.0f}%")
+            with col3:
+                st.metric("❌ Rejected", rejected, delta=f"{rejected/total*100:.0f}%")
+            with col4:
+                st.metric("⚠️ Low Conf", low_conf, delta=f"{low_conf/total*100:.0f}%")
+            with col5:
+                st.metric("🔗 Traceability", f"{traceability:.0%}")
+            with col6:
+                st.metric("⚡ Conflicts", conflict_count)
         
         # High rejection warning
         if refusal_rate > 0.7:

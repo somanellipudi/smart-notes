@@ -65,6 +65,11 @@ class ClaimValidator:
         """
         Validate a single claim and determine its status.
         
+        Handles different claim types:
+        - QUESTION: Skips verification, requires answer generation
+        - MISCONCEPTION: Needs proper framing check
+        - FACT_CLAIM and others: Standard verification
+        
         Args:
             claim: LearningClaim to validate
         
@@ -73,6 +78,30 @@ class ClaimValidator:
         """
         self.validation_count += 1
         
+        # Route based on claim type
+        if claim.claim_type == ClaimType.QUESTION:
+            logger.debug(f"Skipping verification for QUESTION: '{claim.claim_text[:50]}...'")
+            # Questions should be handled by QuestionAnswerer, not standard verification
+            # If we reach here without answer, mark as needs processing
+            if not claim.answer_text:
+                claim.status = VerificationStatus.REJECTED
+                claim.rejection_reason = RejectionReason.DISALLOWED_CLAIM_TYPE
+                return VerificationStatus.REJECTED
+            else:
+                # Already answered
+                return VerificationStatus.ANSWERED_WITH_CITATIONS
+        
+        if claim.claim_type == ClaimType.MISCONCEPTION:
+            logger.debug(f"Processing MISCONCEPTION: '{claim.claim_text[:50]}...'")
+            # Check if misconception is properly framed with correction
+            if not self._has_proper_framing(claim):
+                claim.status = VerificationStatus.NEEDS_FRAMING
+                claim.rejection_reason = None
+                return VerificationStatus.NEEDS_FRAMING
+            # If framed properly, verify the correction statement
+            # Fall through to standard verification
+        
+        # Standard verification for FACT_CLAIM and other types
         # Check evidence count
         has_sufficient_evidence = len(claim.evidence_ids) >= self.min_evidence_count
         has_conflicts = bool(claim.metadata.get("evidence_conflicts"))
@@ -132,6 +161,35 @@ class ClaimValidator:
                 f"{claim.claim_text[:50]}..."
             )
             return VerificationStatus.LOW_CONFIDENCE
+    
+    def _has_proper_framing(self, claim: LearningClaim) -> bool:
+        """
+        Check if misconception has proper framing with correction.
+        
+        Args:
+            claim: LearningClaim with type=MISCONCEPTION
+        
+        Returns:
+            True if misconception is properly framed
+        """
+        text = claim.claim_text.lower()
+        
+        # Check for correction indicators (NOT including "misconception" itself)
+        correction_indicators = [
+            "actually", "in reality", "correct",
+            "instead", "rather", "false",
+            "wrong", "incorrect"
+        ]
+        
+        has_correction = any(ind in text for ind in correction_indicators)
+        
+        # Check metadata for explicit framing
+        has_framing_metadata = (
+            claim.metadata.get("has_correction") or
+            claim.metadata.get("correction_statement")
+        )
+        
+        return has_correction or has_framing_metadata
     
     def validate_collection(
         self,

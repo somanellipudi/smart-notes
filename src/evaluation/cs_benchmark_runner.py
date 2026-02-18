@@ -21,8 +21,16 @@ import csv
 from src.claims.nli_verifier import NLIVerifier, EntailmentLabel
 from src.claims.validator import ClaimValidator
 from src.claims.schema import LearningClaim, ClaimType, VerificationStatus, EvidenceItem
+from src.claims.cs_operation_rules import CSOperationRulesChecker
 from src.retrieval.evidence_store import EvidenceStore
 from src.retrieval.embedding_provider import EmbeddingProvider
+from src.evaluation.noise_injection import (
+    inject_headers_footers,
+    inject_ocr_typos,
+    inject_column_shuffle,
+    inject_all_noise
+)
+from src.evaluation.adaptive_evidence import AdaptiveEvidenceRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -50,25 +58,28 @@ class BenchmarkMetrics:
     mce: float  # Maximum Calibration Error
     brier_score: float  # Brier Score (MSE of confidence vs accuracy)
     
-    # Robustness metrics
-    noise_robustness_accuracy: float  # Accuracy with noise injection
+    # Robustness metrics (claim-level)
+    noise_robustness_accuracy: float  # Accuracy with claim-level noise injection
     noise_types_affected: Dict[str, float]  # Noise type -> accuracy drop
     
+    # Robustness metrics (document ingestion-level) - MUST have default since Optional
+    ingestion_noise_results: Optional[Dict[str, Dict]] = None  # Noise type -> metrics
+    
     # Efficiency metrics
-    avg_time_per_claim: float
-    total_time: float
-    median_time_per_claim: float
-    p95_time_per_claim: float
+    avg_time_per_claim: float = 0.0
+    total_time: float = 0.0
+    median_time_per_claim: float = 0.0
+    p95_time_per_claim: float = 0.0
     
     # Coverage metrics
-    total_claims: int
-    claims_with_evidence: int
-    evidence_coverage_rate: float
-    avg_evidence_count: float
+    total_claims: int = 0
+    claims_with_evidence: int = 0
+    evidence_coverage_rate: float = 0.0
+    avg_evidence_count: float = 0.0
     
     # Additional stats
-    confidence_calibration: Dict[str, List[float]]  # Confidence bins -> accuracies
-    label_distribution: Dict[str, int]
+    confidence_calibration: Dict[str, List[float]] = None  # Confidence bins -> accuracies
+    label_distribution: Dict[str, int] = None
     
     def to_dict(self) -> Dict:
         """Convert to dictionary."""
@@ -165,6 +176,22 @@ class CSBenchmarkRunner:
         # Initialize providers
         self.embedding_provider = embedding_provider or EmbeddingProvider(device=device)
         self.nli_verifier = nli_verifier or NLIVerifier(device=device)
+        self.cs_rules_checker = CSOperationRulesChecker(enabled=False)  # Disabled by default
+        
+        # Initialize adaptive evidence retriever
+        from config import (
+            MAX_EVIDENCE_PER_CLAIM,
+            SUFFICIENCY_TAU,
+            EVIDENCE_DIVERSITY_MIN_SOURCES
+        )
+        self.adaptive_retriever = AdaptiveEvidenceRetriever(
+            embedding_provider=self.embedding_provider,
+            nli_verifier=self.nli_verifier,
+            max_evidence=MAX_EVIDENCE_PER_CLAIM,
+            sufficiency_tau=SUFFICIENCY_TAU,
+            min_diversity_sources=EVIDENCE_DIVERSITY_MIN_SOURCES,
+            initial_k=2
+        )
         
         # Load dataset
         self.dataset = self._load_dataset()
@@ -173,6 +200,9 @@ class CSBenchmarkRunner:
         # Cache for repeated runs (e.g., grid search)
         self._evidence_store = None
         self._evidence_store_size = 0
+        
+        # Track adaptive retrieval metrics
+        self.adaptive_metrics_per_claim: Dict[str, Dict] = {}
     
     def _load_dataset(self) -> List[Dict]:
         """Load JSONL dataset."""
@@ -235,8 +265,8 @@ class CSBenchmarkRunner:
             # Create learning claim from example
             claim = self._example_to_claim(example, evidence_store, config)
             
-            # Get prediction
-            pred_label = claim.status.name if claim.status else "UNKNOWN"
+            # Get prediction and map to NLI labels
+            pred_label = self._map_status_to_nli(claim.status) if claim.status else "NEUTRAL"
             pred_confidence = claim.confidence if claim.confidence else 0.0
             
             elapsed = time.time() - start_time
@@ -293,7 +323,10 @@ class CSBenchmarkRunner:
             "use_batch_nli": True,
             "use_online_authority": False,
             "verify_threshold": 0.55,
-            "low_conf_threshold": 0.35
+            "low_conf_threshold": 0.35,
+            "enable_contradiction_gate": True,
+            "contradiction_threshold": 0.6,
+            "enable_cs_operation_rules": False
         }
     
     def _build_evidence_store(self, dataset: List[Dict]) -> EvidenceStore:
@@ -307,9 +340,13 @@ class CSBenchmarkRunner:
         for i, example in enumerate(dataset):
             evidence_id = f"ev_{example['doc_id']}"
             source_text = example["source_text"]
-            span_text = (example.get("evidence_span") or "").strip()
-            if span_text and span_text in source_text:
-                evidence_text = span_text
+            
+            # Extract evidence span if available
+            span_info = example.get("evidence_span")
+            if span_info and isinstance(span_info, dict):
+                start = span_info.get("start", 0)
+                end = span_info.get("end", len(source_text))
+                evidence_text = source_text[start:end]
                 evidence_kind = "span"
             else:
                 evidence_text = source_text
@@ -358,7 +395,7 @@ class CSBenchmarkRunner:
         config: Dict
     ) -> LearningClaim:
         """Convert benchmark example to learning claim with verification."""
-        claim_text = example["generated_claim"]
+        claim_text = example["claim"]
         
         # Create claim object
         claim = LearningClaim(
@@ -370,7 +407,12 @@ class CSBenchmarkRunner:
         
         # Retrieve evidence if configured
         if config.get("use_retrieval", True):
-            claim.evidence_objects = self._retrieve_evidence(claim, evidence_store)
+            use_adaptive = config.get("use_adaptive_evidence", False)
+            claim.evidence_objects = self._retrieve_evidence(
+                claim, evidence_store, 
+                use_adaptive=use_adaptive,
+                config=config
+            )
         
         # Validate claim
         if config.get("use_nli", True):
@@ -390,16 +432,45 @@ class CSBenchmarkRunner:
         self,
         claim: LearningClaim,
         evidence_store: EvidenceStore,
-        top_k: int = 5
+        top_k: int = 5,
+        use_adaptive: bool = False,
+        config: Optional[Dict] = None
     ) -> List[EvidenceItem]:
-        """Retrieve evidence for claim."""
-        # Embed claim (query embedding)
-        claim_embedding = self.embedding_provider.embed_queries([claim.claim_text])[0]
+        """
+        Retrieve evidence for claim.
         
-        # Search evidence store using its cosine similarity logic
+        Args:
+            claim: Claim to retrieve evidence for
+            evidence_store: Evidence store to search
+            top_k: Fixed top-k (used only if use_adaptive=False)
+            use_adaptive: If True, use adaptive sufficiency-based retrieval
+            config: Configuration dict for adaptive retrieval
+        
+        Returns:
+            List of evidence items
+        """
         if not evidence_store.index_built:
             return []
         
+        config = config or {}
+        
+        # Use adaptive retrieval if configured
+        if use_adaptive:
+            evidence, metrics = self.adaptive_retriever.retrieve_adaptive(
+                claim, evidence_store, config
+            )
+            # Store metrics for this claim
+            self.adaptive_metrics_per_claim[claim.claim_id] = metrics
+            logger.debug(
+                f"Adaptive retrieval for {claim.claim_id}: "
+                f"k={metrics['final_k']}, "
+                f"confidence={metrics['max_entailment_confidence']:.3f}, "
+                f"sufficiency_met={metrics['sufficiency_met']}"
+            )
+            return evidence
+        
+        # Standard fixed top-k retrieval
+        claim_embedding = self.embedding_provider.embed_queries([claim.claim_text])[0]
         search_results = evidence_store.search(claim_embedding, top_k=top_k)
         
         evidence_items = []
@@ -418,7 +489,7 @@ class CSBenchmarkRunner:
         return evidence_items
     
     def _validate_claim(self, claim: LearningClaim, config: Dict) -> None:
-        """Validate claim using NLI."""
+        """Validate claim using NLI with contradiction gate and CS operation rules."""
         if not claim.evidence_objects:
             claim.status = VerificationStatus.REJECTED
             claim.confidence = 0.1
@@ -451,12 +522,39 @@ class CSBenchmarkRunner:
         verify_threshold = float(config.get("verify_threshold", 0.55))
         low_conf_threshold = float(config.get("low_conf_threshold", 0.35))
         
-        # Determine status and confidence
-        if max_contra >= 0.6:
+        # === CONTRADICTION GATE ===
+        # Hard gate: if contradiction detected, force REJECTED status
+        contradiction_gate_enabled = config.get("enable_contradiction_gate", True)
+        contradiction_threshold = float(config.get("contradiction_threshold", 0.6))
+        
+        if contradiction_gate_enabled and max_contra >= contradiction_threshold:
             claim.status = VerificationStatus.REJECTED
             claim.confidence = max(0.0, 1.0 - max_contra)
+            logger.debug(
+                f"Contradiction gate triggered: max_contra={max_contra:.3f} >= {contradiction_threshold}"
+            )
             return
         
+        # === CS OPERATION RULES ===
+        # Check CS-specific semantic contradictions
+        cs_rules_enabled = config.get("enable_cs_operation_rules", False)
+        if cs_rules_enabled:
+            self.cs_rules_checker.enabled = True
+            
+            # Check claim against each evidence snippet
+            for evidence in top_evidence:
+                is_inconsistent, reason = self.cs_rules_checker.check_claim_evidence_consistency(
+                    claim=claim.claim_text,
+                    evidence=evidence.snippet
+                )
+                
+                if is_inconsistent:
+                    claim.status = VerificationStatus.REJECTED
+                    claim.confidence = 0.2
+                    logger.debug(f"CS operation rule violation: {reason}")
+                    return
+        
+        # === STANDARD VERIFICATION ===
         if combined_score >= verify_threshold and mean_entail >= 0.4:
             claim.status = VerificationStatus.VERIFIED
         elif combined_score >= low_conf_threshold:
@@ -465,6 +563,15 @@ class CSBenchmarkRunner:
             claim.status = VerificationStatus.REJECTED
         
         claim.confidence = combined_score
+    
+    def _map_status_to_nli(self, status: VerificationStatus) -> str:
+        """Map VerificationStatus to NLI labels."""
+        mapping = {
+            VerificationStatus.VERIFIED: "ENTAIL",
+            VerificationStatus.REJECTED: "CONTRADICT",
+            VerificationStatus.LOW_CONFIDENCE: "NEUTRAL"
+        }
+        return mapping.get(status, "NEUTRAL")
     
     def _compute_metrics(
         self,
@@ -483,7 +590,7 @@ class CSBenchmarkRunner:
         accuracy = np.mean(matches)
         
         # Per-label metrics
-        labels = ["VERIFIED", "REJECTED", "LOW_CONFIDENCE"]
+        labels = ["ENTAIL", "CONTRADICT", "NEUTRAL"]
         label_metrics = {}
         
         for label in labels:
@@ -531,15 +638,15 @@ class CSBenchmarkRunner:
         
         return BenchmarkMetrics(
             accuracy=float(accuracy),
-            precision_verified=float(label_metrics["VERIFIED"]["precision"]),
-            recall_verified=float(label_metrics["VERIFIED"]["recall"]),
-            F1_verified=float(label_metrics["VERIFIED"]["F1"]),
-            precision_rejected=float(label_metrics["REJECTED"]["precision"]),
-            recall_rejected=float(label_metrics["REJECTED"]["recall"]),
-            F1_rejected=float(label_metrics["REJECTED"]["F1"]),
-            precision_low_conf=float(label_metrics["LOW_CONFIDENCE"]["precision"]),
-            recall_low_conf=float(label_metrics["LOW_CONFIDENCE"]["recall"]),
-            F1_low_conf=float(label_metrics["LOW_CONFIDENCE"]["F1"]),
+            precision_verified=float(label_metrics["ENTAIL"]["precision"]),
+            recall_verified=float(label_metrics["ENTAIL"]["recall"]),
+            F1_verified=float(label_metrics["ENTAIL"]["F1"]),
+            precision_rejected=float(label_metrics["CONTRADICT"]["precision"]),
+            recall_rejected=float(label_metrics["CONTRADICT"]["recall"]),
+            F1_rejected=float(label_metrics["CONTRADICT"]["F1"]),
+            precision_low_conf=float(label_metrics["NEUTRAL"]["precision"]),
+            recall_low_conf=float(label_metrics["NEUTRAL"]["recall"]),
+            F1_low_conf=float(label_metrics["NEUTRAL"]["F1"]),
             ece=float(ece),
             mce=float(mce),
             brier_score=float(brier_score),
@@ -627,7 +734,7 @@ class CSBenchmarkRunner:
             noisy_predictions = []
             
             for example in dataset[:5]:  # Sample for efficiency
-                noisy_claim = self._inject_noise(example["generated_claim"], noise_type)
+                noisy_claim = self._inject_noise(example["claim"], noise_type)
                 
                 # Create claim and verify
                 claim = LearningClaim(
@@ -639,7 +746,7 @@ class CSBenchmarkRunner:
                 claim.evidence_objects = self._retrieve_evidence(claim, evidence_store)
                 self._validate_claim(claim, config)
                 
-                pred_label = claim.status.name if claim.status else "UNKNOWN"
+                pred_label = self._map_status_to_nli(claim.status) if claim.status else "NEUTRAL"
                 noisy_predictions.append({
                     "pred_label": pred_label,
                     "gold_label": example["gold_label"],
@@ -685,3 +792,162 @@ class CSBenchmarkRunner:
                 return " ".join(words)
         
         return claim
+    
+    def run_ingestion_robustness_eval(
+        self,
+        config: Optional[Dict] = None,
+        sample_size: Optional[int] = None,
+        noise_types: Optional[List[str]] = None
+    ) -> Dict[str, BenchmarkResult]:
+        """
+        Evaluate robustness to document ingestion noise.
+        
+        Tests how verification performance degrades when source documents
+        have common ingestion issues like headers/footers, OCR errors, and
+        column layout problems.
+        
+        Args:
+            config: Configuration dict for verification pipeline
+            sample_size: If set, use only first N examples
+            noise_types: Types of ingestion noise to test:
+                - "headers_footers": Inject page headers/footers
+                - "ocr_typos": Inject OCR-style character substitutions
+                - "column_shuffle": Simulate two-column layout issues
+                - "all": Apply all noise types together
+        
+        Returns:
+            Dictionary mapping noise type to BenchmarkResult
+            Keys: "clean", "headers_footers", "ocr_typos", "column_shuffle", "all"
+        """
+        config = {**self._default_config(), **(config or {})}
+        noise_types = noise_types or ["headers_footers", "ocr_typos", "column_shuffle", "all"]
+        
+        results = {}
+        
+        # Run on clean dataset first
+        logger.info("Running on clean dataset...")
+        clean_result = self.run(config=config, sample_size=sample_size)
+        results["clean"] = clean_result
+        
+        # Run on each noise type
+        for noise_type in noise_types:
+            logger.info(f"Running on {noise_type} noise variant...")
+            
+            # Create noisy dataset variant
+            noisy_dataset = self._apply_ingestion_noise(
+                self.dataset[:sample_size] if sample_size else self.dataset,
+                noise_type
+            )
+            
+            # Temporarily replace dataset
+            original_dataset = self.dataset
+            self.dataset = noisy_dataset
+            
+            # Clear evidence store cache to rebuild with noisy text
+            self._evidence_store = None
+            self._evidence_store_size = 0
+            
+            # Run evaluation
+            noisy_result = self.run(config=config, sample_size=None)  # Already sampled
+            results[noise_type] = noisy_result
+            
+            # Restore original dataset
+            self.dataset = original_dataset
+        
+        # Compute degradation metrics
+        results = self._compute_ingestion_robustness_metrics(results)
+        
+        return results
+    
+    def _apply_ingestion_noise(
+        self,
+        dataset: List[Dict],
+        noise_type: str
+    ) -> List[Dict]:
+        """Apply ingestion noise to dataset source texts."""
+        noisy_dataset = []
+        
+        for example in dataset:
+            noisy_example = example.copy()
+            source_text = example["source_text"]
+            
+            # Apply noise based on type
+            if noise_type == "headers_footers":
+                noisy_text = inject_headers_footers(
+                    source_text,
+                    header="UNIT 5",
+                    footer="Scanned with CamScanner",
+                    freq=5,  # More frequent for shorter CS texts
+                    seed=42
+                )
+            elif noise_type == "ocr_typos":
+                noisy_text = inject_ocr_typos(
+                    source_text,
+                    rate=0.015,  # 1.5% error rate
+                    seed=42
+                )
+            elif noise_type == "column_shuffle":
+                noisy_text = inject_column_shuffle(
+                    source_text,
+                    seed=42
+                )
+            elif noise_type == "all":
+                noisy_text = inject_all_noise(
+                    source_text,
+                    header="UNIT 5",
+                    footer="Scanned with CamScanner",
+                    header_freq=5,
+                    ocr_rate=0.015,
+                    apply_headers=True,
+                    apply_ocr=True,
+                    apply_shuffle=True,
+                    seed=42
+                )
+            else:
+                noisy_text = source_text
+            
+            noisy_example["source_text"] = noisy_text
+            noisy_dataset.append(noisy_example)
+        
+        return noisy_dataset
+    
+    def _compute_ingestion_robustness_metrics(
+        self,
+        results: Dict[str, BenchmarkResult]
+    ) -> Dict[str, BenchmarkResult]:
+        """Compute degradation metrics relative to clean baseline."""
+        clean_metrics = results["clean"].metrics
+        
+        for noise_type, result in results.items():
+            if noise_type == "clean":
+                continue
+            
+            noisy_metrics = result.metrics
+            
+            # Compute degradation
+            ingestion_noise_results = {
+                "accuracy_drop": clean_metrics.accuracy - noisy_metrics.accuracy,
+                "f1_entail_drop": clean_metrics.F1_verified - noisy_metrics.F1_verified,
+                "f1_contradict_drop": clean_metrics.F1_rejected - noisy_metrics.F1_rejected,
+                "ece_increase": noisy_metrics.ece - clean_metrics.ece,
+                "brier_increase": noisy_metrics.brier_score - clean_metrics.brier_score,
+                "evidence_coverage_drop": (
+                    clean_metrics.evidence_coverage_rate - 
+                    noisy_metrics.evidence_coverage_rate
+                ),
+                "clean_accuracy": clean_metrics.accuracy,
+                "noisy_accuracy": noisy_metrics.accuracy
+            }
+            
+            # Add to metrics
+            noisy_metrics.ingestion_noise_results = {
+                noise_type: ingestion_noise_results
+            }
+            
+            logger.info(
+                f"Ingestion noise '{noise_type}': "
+                f"accuracy {clean_metrics.accuracy:.3f} → {noisy_metrics.accuracy:.3f} "
+                f"(drop: {ingestion_noise_results['accuracy_drop']:.3f})"
+            )
+        
+        return results

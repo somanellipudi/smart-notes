@@ -7,7 +7,7 @@ An educational AI system that generates study notes and verifies claims against 
 [![Status](https://img.shields.io/badge/Status-Production--Ready-green.svg)](#what-works)
 [![Semantic Verification](https://img.shields.io/badge/Verification-Semantic%20%2B%20NLI-orange.svg)](#semantic-verification)
 
-📚 **Research Documentation**: [RESEARCH_FOUNDATION.md](RESEARCH_FOUNDATION.md) | [Technical Docs](docs/)
+📚 **Documentation**: [Technical Docs](docs/) | [Implementation Summary](IMPLEMENTATION_SUMMARY.md)
 
 ---
 
@@ -1580,12 +1580,11 @@ pip install pyarrow>=14.0.0
 }
 ```
 
-**For Research Context**: See [RESEARCH_FOUNDATION.md](RESEARCH_FOUNDATION.md) for:
-- Theoretical foundations and research motivation
-- Detailed architecture and evaluation methodology
-- Comparison to related work (FEVER, SciFact, ExpertQA)
-- Research contributions and novelty claims
-- Experimental results and ablation studies
+**For Technical Details**: See [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) for:
+- System architecture and design decisions
+- Evaluation methodology and benchmarks
+- Implementation details and algorithms
+- API reference and integration guide
 
 ### Related Academic Work
 
@@ -1688,7 +1687,7 @@ MIT License - See [LICENSE](LICENSE) file for details.
 - **Issues**: [GitHub Issues](https://github.com/yourusername/Smart-Notes/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/yourusername/Smart-Notes/discussions)
 - **Documentation**: 
-  - [RESEARCH_FOUNDATION.md](RESEARCH_FOUNDATION.md) - Research perspective, theoretical foundations, contributions
+  - [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) - Technical reference and system architecture
   - [docs/](docs/) - Technical implementation guides
   - [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) - Complete feature summary
 - **Email**: your.email@example.com (for research collaborations)
