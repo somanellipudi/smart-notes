@@ -1,0 +1,85 @@
+%% Smart Notes: IEEE Paper LaTeX Template
+%% Automated Claim Verification for Educational AI
+%% 
+%% Usage: 
+%%   1. Copy entire paper_templates/ieee_latex_skeleton/ directory
+%%   2. Edit sections-00 through 09 with your content
+%%   3. Update references.bib with citations
+%%   4. Compile: pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
+
+\documentclass[10pt,conference,compsocconf]{IEEEtran}
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{array}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{colortbl}
+
+% Better bibliography
+\usepackage[nocompress]{cite}
+
+% Author block spacing
+\usepackage{authblk}
+
+% Define colors for highlighting
+\definecolor{highlight-yellow}{RGB}{255,255,200}
+\definecolor{highlight-pink}{RGB}{255,200,200}
+\definecolor{highlight-blue}{RGB}{200,220,255}
+
+% Macros for consistency
+\newcommand{\smartnotes}{Smart Notes}
+\newcommand{\csclaimbench}{CSClaimBench}
+\newcommand{\accuracy}{81.2\%}
+\newcommand{\baselineaccuracy}{74.4\%}
+
+\title{Smart Notes: Automated Claim Verification with Calibrated Confidence for Educational AI}
+
+\author[1]{First Author}
+\author[1]{Second Author}
+\author[2,3]{Third Author}
+\affil[1]{University of Example, Department of Computer Science}
+\affil[2]{Research Institute}
+\affil[3]{Corporate Lab}
+
+\begin{document}
+
+\maketitle
+
+%\begin{abstract}
+%TODO: Insert 01_abstract.tex
+%\input{sections-01_abstract}
+%\end{abstract}
+
+% Main paper sections
+\input{sections-00_preamble}
+\input{sections-01_abstract}
+\input{sections-02_introduction}
+\input{sections-03_related_work}
+\input{sections-04_methodology}
+\input{sections-05_experiments}
+\input{sections-06_results}
+\input{sections-07_discussion}
+\input{sections-08_limitations_ethics}
+\input{sections-09_conclusion}
+
+\section*{Acknowledgments}
+
+We thank [funding agency/institutions] for support. We acknowledge the CSClaimBench annotation team and beta deployment institutions.
+
+\begin{thebibliography}{99}
+
+% Use bibtex instead:
+\bibliographystyle{IEEEtran}
+%\bibliography{references}
+
+\end{thebibliography}
+
+\end{document}
+

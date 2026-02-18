@@ -1,0 +1,64 @@
+\section{Limitations and Ethical Considerations}
+\label{sec:limitations}
+
+\subsection{Explicit Limitations}
+\label{subsec:explicit_limits}
+
+\smartnotes operates within four key limitations:
+
+\begin{enumerate}
+\item \textbf{Claim Type Coverage}: Reasoning claims achieve 60.3\% accuracy versus 92.1\% for definitions---a 31.8pp gap. This limitation stems from the absence of multi-hop reasoning capabilities. Future versions must address this through graph neural networks or chain-of-thought reasoning. Until then, educational systems should flag reasoning claims for human review or present supporting evidence explicitly.
+
+\item \textbf{Dataset Scope}: CSClaimBench contains 1,045 claims, all in English, across 15 computer science domains. Generalization to other STEM fields (chemistry, physics, biology) or humanities is unknown. Additionally, our evidence sources are limited to Wikipedia, peer-reviewed papers, and Stack Overflow---private/institutional knowledge bases are not represented.
+
+\item \textbf{Evidence Retrieval}: Our experiments assume perfect evidence documents are provided. In production, evidence must be retrieved from noisy web sources, potentially degrading performance. We recommend future work integrate dedicated retrieval components and jointly optimize end-to-end.
+
+\item \textbf{Calibration Assumptions}: Temperature scaling assumes test data distribution matches training data. For out-of-distribution claims (e.g., claims about domains not in CSClaimBench), calibration assumptions may be violated. Continuous monitoring and recalibration are recommended.
+\end{enumerate}
+
+\subsection{Broader Impacts Analysis}
+\label{subsec:broader_impacts}
+
+\subsubsection{Positive Impacts}
+\begin{itemize}
+\item \textbf{Educational Equity}: By enabling scalable, objective claim verification, \smartnotes can democratize high-quality education. Students in resource-constrained institutions gain access to previously unavailable rapid feedback.
+\item \textbf{Research Advancement}: The CSClaimBench dataset and open-source codebase enable future researchers to build on our work, accelerating progress in educational AI.
+\item \textbf{Instructor Empowerment}: Instructors reclaim time spent on routine verification, enabling focus on higher-value pedagogical tasks (synthesis, critique, mentorship).
+\end{itemize}
+
+\subsubsection{Potential Negative Impacts and Mitigation}
+\begin{itemize}
+\item \textbf{Over-Authorization}: Educational institutions might over-rely on \smartnotes, reducing human oversight. \textbf{Mitigation}: We recommend policies requiring human review for all verdicts, with the system explicitly designed as decision-support, not replacement. Confidence scores enable transparent human-AI collaboration.
+
+\item \textbf{Bias and Fairness}: Our L2 English evaluation reveals a 5.3pp accuracy disparity (73.7\% vs. native English 78.7\%). Similar disparities may exist for underrepresented populations in training data. \textbf{Mitigation}: Continuous fairness monitoring, stratified evaluation by demographic attributes, and targeted data augmentation for underrepresented groups.
+
+\item \textbf{Privacy}: Depending on data sources, \smartnotes may inadvertently memorize or expose private information. \textbf{Mitigation}: Our evidence sources are public (Wikipedia, published papers, Stack Overflow). Institutions integrating private corporate/medical content must conduct differential privacy analysis before deployment.
+
+\item \textbf{Academic Integrity}: Overconfident verdicts could enable sophisticated academic misconduct detection evasion. \textbf{Mitigation}: We recommend \smartnotes be positioned as one signal among many (plagiarism detection, peer review, etc.), not a standalone integrity mechanism.
+
+\item \textbf{Accessibility}: System output must be compatible with accessibility tools (screen readers, captions). \textbf{Mitigation}: All visualizations include text descriptions; all confidence scores are verbal (``high confidence'') in addition to numeric; results are exportable as structured JSON for assistive technology integration.
+\end{itemize}
+
+\subsection{Responsible Deployment Recommendations}
+\label{subsec:deployment_recommendations}
+
+For educational institutions considering deployment:
+\begin{enumerate}
+\item \textbf{Start with Pilot}: Deploy in a single course with close monitoring; measure student learning outcomes, not just system accuracy.
+
+\item \textbf{Transparency}: Clearly communicate to students that an AI system provides feedback. Show both verdicts and confidence scores so students understand uncertainty.
+
+\item \textbf{Human Loop}: Route low-confidence predictions to instructors; monitor instructor corrections to continuously improve.
+
+\item \textbf{Fairness Audits}: Evaluate performance stratified by student demographics (if data available); address disparities through dataset augmentation or model retraining.
+
+\item \textbf{Regular Recalibration}: Retrain temperature scaling parameters quarterly as data distributions evolve; monitor for distribution shift.
+
+\item \textbf{Clear Policies}: Establish institutional policies on system usage, human oversight, and appeal processes before deployment.
+\end{enumerate}
+
+\subsection{Conclusion on Ethics}
+\label{subsec:ethics_conclusion}
+
+We believe \smartnotes' benefits (scalable feedback, educational equity, instructor efficiency) outweigh risks, conditional on responsible deployment practices outlined above. The system is explicitly designed as a decision-support tool for instructors, not autonomous grading. Confidence-based selective prediction enables human-in-the-loop workflows where humans retain full authority. With these safeguards, claim verification can enhance educational outcomes while respecting human oversight.
+

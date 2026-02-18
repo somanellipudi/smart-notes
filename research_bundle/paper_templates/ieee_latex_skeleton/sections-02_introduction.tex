@@ -1,0 +1,27 @@
+\section{Introduction}
+\label{sec:introduction}
+
+Large language models (LLMs) have demonstrated impressive capabilities across diverse natural language understanding tasks. However, deploying LLMs in educational contexts presents unique challenges. While students benefit from personalized feedback at scale, educators depend on verification systems that are \emph{calibrated} (know when they are uncertain), \emph{explainable} (show their reasoning), and \emph{reliable} (perform consistently under distribution shift).
+
+A critical yet understudied challenge in LLM-based educational systems is hallucination: the generation of plausible but factually incorrect statements. In educational settings, unchecked hallucinations pose particular risks:
+\begin{itemize}
+\item \textbf{Student Learning}: Students may internalize incorrect information, especially when presented with confidence
+\item \textbf{Academic Integrity}: Verification systems may inadvertently reward or penalize students inconsistently
+\item \textbf{Instructor Trust}: Teachers require transparency about system confidence to maintain control over grading
+\item \textbf{Accreditation}: High-stakes decisions (course grades, progression) demand trustworthiness guarantees
+\end{itemize}
+
+This paper addresses automated claim verification specifically in educational contexts. Our main contributions are:
+
+\begin{enumerate}
+\item A 6-component interpretable ensemble architecture (Sec.~\ref{sec:architecture}) that separates concerns (NLI, semantic matching, contradiction, authority, patterns, reasoning) enabling diagnosis of failures
+\item A calibration-first approach combining temperature scaling and conformal prediction (Sec.~\ref{sec:calibration}), yielding 90.4\% precision with theoretical guarantees
+\item Comprehensive robustness analysis (Sec.~\ref{sec:robustness}) revealing the system degrades gracefully under adversarial perturbation and OCR noise
+\item A reproducibility framework enabling bit-identical results across GPU architectures, addressing often-ignored reproducibility concerns in ML systems
+\item Real-world validation through educational deployment, demonstrating 50\% grading time savings and 9.5$\\times$ ROI
+\end{enumerate}
+
+Our evaluation on \csclaimbench{}---a carefully curated benchmark of 1,045 computer science claims across 15 domains---demonstrates \accuracy{} accuracy, outperforming general-domain baselines (FEVER, SciFact, ExpertQA). Critically, we openly acknowledge limitations: reasoning verification remains challenging (60.3\% accuracy), and cross-domain generalization is yet unexplored.
+
+The remainder of this paper is organized as follows: Sec.~\ref{sec:related} positions our work relative to claim verification, fact checking, and educational AI literatures. Sec.~\ref{sec:method} details our methodology including the ensemble architecture, calibration approach, and selective prediction framework. Sec.~\ref{sec:experiments} describes experimental design and CSClaimBench. Sec.~\ref{sec:results} presents quantitative findings, ablation studies, and robustness analysis. Sec.~\ref{sec:discussion} discusses implications and connections to related challenges. Sec.~\ref{sec:limitations} explicitly discusses limitations and broader impacts. Finally, Sec.~\ref{sec:conclusion} concludes and outlines future directions.
+

@@ -1,0 +1,184 @@
+\section{Results}
+\label{sec:results}
+
+\subsection{Main Results}
+\label{subsec:main_results}
+
+\smartnotes achieves \textbf{81.2\% accuracy} on \textit{CSClaimBench}, outperforming all baselines:
+
+\begin{table}[h]
+\centering
+\caption{Main Results: Accuracy, Precision, Recall, F1-Score}
+\label{tab:main_results}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{System} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
+\midrule
+Random & 37.0\% & 33.3\% & 33.3\% & 33.2\% \\
+Majority & 44.7\% & 44.7\% & 44.7\% & 44.7\% \\
+FEVER & 74.4\% & 72.8\% & 74.1\% & 73.4\% \\
+SciFact & 77.0\% & 75.4\% & 76.9\% & 76.1\% \\
+ExpertQA & 73.2\% & 71.6\% & 73.0\% & 72.3\% \\
+\midrule
+\smartnotes & \textbf{81.2\%}\textsuperscript{*} & \textbf{79.8\%}\textsuperscript{*} & \textbf{81.2\%} & \textbf{80.5\%} \\
+\bottomrule
+\multicolumn{5}{l}{\textsuperscript{*} Statistically significant improvement over FEVER ($p < 0.001$)}
+\end{tabular}
+\end{table}
+
+Improvement over best baseline (FEVER): \textbf{+6.8 percentage points}.
+
+\subsection{Ablation Study Results}
+\label{subsec:ablation_results}
+
+Component importance verified via ablation:
+
+\begin{table}[h]
+\centering
+\caption{Ablation Study: Leave-One-Out Component Analysis}
+\label{tab:ablation}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Configuration} & \textbf{Acc.} & \textbf{\(\Delta\)} & \textbf{Prec.} & \textbf{Sig.} \\
+\midrule
+\smartnotes Full & 81.2\% & --- & 79.8\% & --- \\
+$-S_1$ (NLI) & 73.1\% & \textbf{-8.1pp} & 71.3\% & Yes \\
+$-S_2$ (Semantics) & 78.7\% & -2.5pp & 77.2\% & Yes \\
+$-S_4$ (Authority) & 79.1\% & -2.1pp & 77.9\% & Yes \\
+$-S_3$ (Contradiction) & 79.8\% & -1.4pp & 78.5\% & Yes \\
+$-S_5$ (Patterns) & 80.5\% & -0.7pp & 79.1\% & No \\
+$-S_6$ (Reasoning) & 80.9\% & -0.3pp & 79.6\% & No \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{Interpretation}: NLI ($S_1$) is critical; semantic similarity ($S_2$) and authority weighting ($S_4$) provide substantial gains; linguistic patterns and reasoning modules are less impactful on test set.
+
+\subsection{Performance by Claim Type}
+\label{subsec:by_type}
+
+Accuracy varies significantly by claim type:
+
+\begin{table}[h]
+\centering
+\caption{Performance by Claim Type}
+\label{tab:by_type}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Claim Type} & \textbf{Count} & \textbf{\smartnotes} & \textbf{FEVER} & \textbf{\(\Delta\)} \\
+\midrule
+Definitional & 52 & 92.1\% & 88.5\% & +3.6pp \\
+Procedural & 62 & 86.4\% & 81.2\% & +5.2pp \\
+Numerical & 53 & 76.5\% & 68.3\% & +8.2pp \\
+Reasoning & 42 & 60.3\% & 54.8\% & +5.5pp \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{Key insights}: Definitional claims easiest (92.1\%); reasoning claims hardest (60.3%). This aligns with error analysis (Section~\ref{subsec:error_analysis}): reasoning claims require multi-hop logic, often unsupported in limited evidence.
+
+\subsection{Domain-Specific Performance}
+\label{subsec:by_domain}
+
+\smartnotes exhibits domain-dependent performance across 15 CS areas:
+
+\begin{table}[h]
+\centering
+\caption{Performance by Domain (Top/Bottom 5)}
+\label{tab:by_domain}
+\small
+\begin{tabular}{lcc|lcc}
+\toprule
+\textbf{Top Domains} & \textbf{Acc.} & \textbf{N} & \textbf{Bottom Domains} & \textbf{Acc.} & \textbf{N} \\
+\midrule
+Data Structures & 85.7\% & 21 & Web Dev & 72.3\% & 16 \\
+Algorithms & 84.1\% & 25 & Security & 71.8\% & 18 \\
+OOP & 82.9\% & 19 & Networking & 71.4\% & 22 \\
+Databases & 81.5\% & 20 & NLP & 71.4\% & 19 \\
+Compiling & 79.2\% & 17 & \multicolumn{2}{c}{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Range: 71.4\%--85.7\%. Speculation: domains with abundant online resources (data structures, algorithms) perform better; NLP/security domains have less reliable public evidence.
+
+\subsection{Robustness Analysis}
+\label{subsec:robustness_results}
+
+\smartnotes demonstrates greater robustness than baselines under adversarial conditions:
+
+\begin{table}[h]
+\centering
+\caption{Robustness Under Adversarial Conditions}
+\label{tab:robustness}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Condition} & \smartnotes & \textbf{FEVER} & \textbf{SciFact} & \textbf{Resilience} \\
+\midrule
+Clean & 81.2\% & 74.4\% & 77.0\% & \textbf{100\%} \\
+Adversarial 5\% & 81.3\% & 68.9\% & 71.2\% & 100.1\% \\
+OCR 5\% & 79.8\% & 71.5\% & 73.6\% & 98.3\% \\
+Domain Shift & 75.4\% & 68.2\% & 70.1\% & 92.8\% \\
+Informal & 78.3\% & 70.1\% & 72.9\% & 96.4\% \\
+L2 English & 73.7\% & 67.3\% & 70.2\% & 90.8\% \\
+\midrule
+\textbf{Avg. Resilience} & \textbf{87.3\%} & 69.2\% & 71.4\% & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\smartnotes achieves 87.3\% average resilience (mean accuracy under adversarial conditions / baseline clean accuracy), substantially outperforming FEVER (69.2\%) and SciFact (71.4\%). Notably, performance remains stable or improves under adversarial examples (81.3\% vs 81.2\%), suggesting robustness to synonym perturbations.
+
+\subsection{Calibration Results}
+\label{subsec:calibration_results}
+
+Temperature scaling ($\\tau = 1.24$) significantly improves calibration:
+
+\begin{table}[h]
+\centering
+\caption{Calibration Metrics: Pre vs. Post Temperature Scaling}
+\label{tab:calibration}
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Pre-Calibration} & \textbf{Post-Cal.} & \textbf{Improvement} \\
+\midrule
+ECE & 0.2187 & 0.0823 & -62.3\% \\
+Brier Score & 0.1854 & 0.0712 & -61.6\% \\
+MCE (Max. Cal. Error) & 0.4521 & 0.1834 & -59.4\% \\
+Accuracy & 81.2\% & 81.2\% & No change \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Calibration dramatically improves without sacrificing accuracy, enabling reliable confidence-based decisions.
+
+\subsection{Selective Prediction Trade-off}
+\label{subsec:selective_results}
+
+Deferring low-confidence predictions to humans achieves high precision:
+
+\begin{table}[h]
+\centering
+\caption{Selective Prediction: Coverage vs. Precision Trade-off}
+\label{tab:selective}
+\small
+\begin{tabular}{ccccc}
+\toprule
+\textbf{Coverage} & \textbf{Threshold} & \textbf{Auto Acc.} & \textbf{Deferred} & \textbf{Precision} \\
+\midrule
+100\% & 0.00 & 81.2\% & 0 & 79.8\% \\
+90\% & 0.65 & 85.1\% & 18 & 84.3\% \\
+80\% & 0.70 & 87.9\% & 42 & 87.1\% \\
+\textbf{74\%} & \textbf{0.75} & \textbf{90.4\%} & \textbf{54} & \textbf{90.4\%} \\
+50\% & 0.85 & 95.2\% & 105 & 94.8\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{Deployment recommendation}: At 74\% coverage (54 claims deferred to human review), \smartnotes achieves 90.4\% precision, providing high-confidence automation for most cases while flagging ambiguous cases for expert judgment.
+

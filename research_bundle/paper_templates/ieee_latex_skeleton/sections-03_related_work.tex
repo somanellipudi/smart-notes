@@ -1,0 +1,51 @@
+\section{Related Work}
+\label{sec:related}
+
+We position \smartnotes{} at the intersection of three research areas: \emph{fact verification}, \emph{educational AI}, and \emph{calibration for reliable AI}.
+
+\subsection{Fact Verification Systems}
+
+Automated fact verification has received substantial attention following the publication of FEVER~\cite{thorne2018fever}, which established a benchmark for verifying claims against Wikipedia. FEVER combines evidence retrieval with natural language inference (NLI) to determine claim veracity. Subsequent work extended this paradigm:
+
+\begin{itemize}
+\item \textbf{Domain-Specific Verification}: SciFact~\cite{wadden2020fact} targets scientific abstracts; MultiFC~\cite{shaar2020multi} addresses multimodal claims; Evidence-based QA systems~\cite{lee2019latent} combine retrieval with reasoning
+\item \textbf{Explainability}: Recent systems produce human-understandable evidence chains and rationales~\cite{kumar2019machine,thawani2021understanding}
+\item \textbf{Uncertainty \& Calibration}: Growing recognition that systems must communicate confidence beyond binary classifications~\cite{gal2016uncertainty, malinin2019predictive}
+\end{itemize}
+
+However, existing fact-checking systems assume general-domain evidence bases (primarily Wikipedia) and are not optimized for educational content or the specific requirements of classroom deployment.
+
+\subsection{Educational AI \& Intelligent Tutoring}
+
+Educational technology research has long invested in building systems that provide timely, personalized feedback. Key systems include:
+
+\begin{itemize}
+\item \textbf{Automatic Grading}: Approaches range from rubric-based template matching~\cite{Papadimitriou2020} to neural models fine-tuned on student work~\cite{alur2021examining}
+\item \textbf{Misconception Detection}: Systems identifying common student errors in specific domains~\cite{singh2001robust}, particularly in STEM education
+\item \textbf{Knowledge Tracing}: Modeling student learning over time to predict performance~\cite{piech2015deep}
+\item \textbf{LLM-based Tutoring}: Recent work (Bloom et al., 2023; Koedinger et al., 2023) explores LLMs as tutoring platforms, but with acknowledged hallucination risks
+\end{itemize}
+
+Notably, the intersection of \emph{automated grading} and \emph{hallucination mitigation} remains understudied. Our work fills this gap by building a verification system designed specifically for the educational domain.
+
+\subsection{Calibration \& Selective Prediction}
+
+Confidence calibration---ensuring model confidence reflects true correctness probability---is well-studied in classical ML~\cite{guo2017calibration}. Temperature scaling~\cite{platt1999probabilistic, guo2017calibration} provides a simple yet effective post-hoc calibration method. Recent work extends calibration to deep neural networks and large language models:
+
+\begin{itemize}
+\item \textbf{Temperature Scaling for NNs}: Guo et al.~\cite{guo2017calibration} show that modern neural networks are poorly calibrated, and temperature scaling effectively corrects this
+\item \textbf{Selective Prediction}: Conformal prediction~\cite{vovk2005algorithmic, barber2019conformal} provides distribution-free guarantees for selective prediction, enabling systems to abstain on uncertain inputs while maintaining theoretical coverage guarantees
+\item \textbf{LLM Calibration}: Recent work explores calibration of prompt-based and fine-tuned LLMs~\cite{kuhn2023semantic, kadavath2022language}
+\end{itemize}
+
+Our approach uniquely combines temperature scaling with conformal prediction to achieve both empirical calibration (via $\\tau=1.24$) and theoretical guarantees (via conformal sets).
+
+\subsection{Positioning}
+
+\smartnotes{} advances fact verification by:
+1. \textbf{Domain Specialization}: Introducing educational computer science claims (1,045 claims across 15 CS domains)
+2. \textbf{Interpretability}: 6-component ensemble with diagnosable failures vs. black-box systems
+3. \textbf{Calibration}: Explicit calibration methodology improving ECE 62\%
+4. \textbf{Selective Prediction}: Theoretical guarantees enabling safe deployment
+5. \textbf{Reproducibility}: 5-element reproducibility framework ensuring bit-identical results
+

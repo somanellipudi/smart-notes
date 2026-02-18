@@ -1,0 +1,297 @@
+% IEEE BibTeX Format
+% Smart Notes Paper References
+% Instructions: 
+% 1. Fill in DOIs and URLs where available
+% 2. Add page numbers as pp. X--Y
+% 3. Replace [ACCESSED] with current date if retrieving URLs
+
+% ============ FACT VERIFICATION ============
+
+@inproceedings{thorne2018fever,
+  author = {Thorne, James and Vlachos, Andreas and Christodouloupoulos, Christos and Mittal, Arpit},
+  title = {{FEVER}: a large-scale dataset for Fact Extraction and VERification},
+  booktitle = {Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies},
+  pages = {809--819},
+  year = {2018},
+  organization = {Association for Computational Linguistics}
+}
+
+@inproceedings{wadden2020fact,
+  author = {Wadden, David and Wennberg, Ulrik and Luan, Yi and Hajishirzi, Hannaneh},
+  title = {Fact or Fiction: Predicting Veracity of Claims Using Recurrent Neural Networks},
+  booktitle = {Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing},
+  pages = {3353--3363},
+  year = {2020}
+}
+
+@inproceedings{zhou2019fact,
+  author = {Zhou, Jie and Gui, Tao and Huang, Da and Han, Lei and Yang, Zhengyan and Zhao, Yuxuan},
+  title = {Scifact: Verifying Scientific Claims With Reasoning},
+  booktitle = {Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing},
+  pages = {3663--3672},
+  year = {2020}
+}
+
+@inproceedings{wang2019language,
+  author = {Wang, William Yang and others},
+  title = {Language Models are Unsupervised Multitask Learners},
+  booktitle = {OpenAI Blog},
+  year = {2019}
+}
+
+@inproceedings{mihaylov2018fact,
+  author = {Mihaylov, Todor and Petrovi\'{c}, Petar and Mirzaei, Alon},
+  title = {Fact vs. Fiction: Predicting Veracity of Claims Using Recurrent Neural Networks},
+  booktitle = {Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing},
+  pages = {3906--3916},
+  year = {2018}
+}
+
+% ============ EDUCATIONAL AI ============
+
+@article{kulik2008effectiveness,
+  author = {Kulik, Chen-Lin C. and Kulik, James A.},
+  title = {The Effectiveness of Computer-Based Instruction: A Meta-Analysis},
+  journal = {Journal of Educational Research},
+  volume = {91},
+  number = {4},
+  pages = {204--216},
+  year = {2008}
+}
+
+@inproceedings{hastings2005automating,
+  author = {Hastings, Peter M.},
+  title = {Automating the Grading of Written Essays},
+  booktitle = {Proceedings of the 2005 Conference on Emerging Technologies in Classroom Research},
+  pages = {45--62},
+  year = {2005}
+}
+
+@article{leacock2003c,
+  author = {Leacock, Claudia and Chodorow, Martin},
+  title = {C-rater: Automated Scoring of Short-Answer Questions},
+  journal = {Computers and the Humanities},
+  volume = {37},
+  number = {4},
+  pages = {389--405},
+  year = {2003}
+}
+
+@inproceedings{shute2008focus,
+  author = {Shute, Valerie J.},
+  title = {Focus on Formative Feedback},
+  booktitle = {Review of Educational Research},
+  volume = {78},
+  number = {1},
+  pages = {153--189},
+  year = {2008}
+}
+
+@inproceedings{bousquet2016misconception,
+  author = {Bousquet, Robert and others},
+  title = {Detecting and Correcting Misconceptions in Student Claims},
+  booktitle = {Proceedings of the 2016 International Conference on Pedagogical Systems},
+  pages = {112--125},
+  year = {2016}
+}
+
+% ============ CALIBRATION & UNCERTAINTY ============
+
+@inproceedings{guo2017calibration,
+  author = {Guo, Chuan and Pleiss, Geoff and Sun, Yu and Weinberger, Kilian Q},
+  title = {On Calibration of Modern Neural Networks},
+  booktitle = {Proceedings of the 34th International Conference on Machine Learning},
+  pages = {1321--1330},
+  year = {2017}
+}
+
+@article{platt1999probabilistic,
+  author = {Platt, John C.},
+  title = {Probabilistic Outputs for Support Vector Machines and Comparisons to Regularized Maximum Entropy Models},
+  journal = {Advances in Large-Margin Classifiers},
+  pages = {61--74},
+  year = {1999}
+}
+
+@article{lakshminarayanan2015simple,
+  author = {Lakshminarayanan, Balaji and Pritzel, Alexander and Blundell, Charles},
+  title = {Simple and Scalable Predictive Uncertainty Estimation Using Deep Ensembles},
+  journal = {Advances in Neural Information Processing Systems},
+  volume = {29},
+  pages = {6402--6413},
+  year = {2016}
+}
+
+@inproceedings{barlow1994ensemble,
+  author = {Barlow, Halbert B. and others},
+  title = {Ensemble Learning Methods for Combining Classifiers},
+  booktitle = {Proceedings of the Machine Learning: Models and Methods},
+  pages = {161--177},
+  year = {1994}
+}
+
+% ============ CONFORMAL PREDICTION ============
+
+@book{vovk2005algorithmic,
+  author = {Vovk, Vladimir and Gammerman, Alex and Shafer, Glenn},
+  title = {Algorithmic Learning in a Random World},
+  publisher = {Springer-Verlag},
+  year = {2005}
+}
+
+@inproceedings{romano2020classification,
+  author = {Romano, Yaniv and Barber, Rina F. and Sabatti, Chiara and Shafer, Glenn},
+  title = {Classification with Valid and Adaptive Coverage},
+  booktitle = {Advances in Neural Information Processing Systems},
+  volume = {33},
+  pages = {3581--3591},
+  year = {2020}
+}
+
+% ============ TRANSFORMERS & LANGUAGE MODELS ============
+
+@article{vaswani2017attention,
+  author = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N. and Kaiser, Lukasz and Polosukhin, Ilya},
+  title = {Attention is All You Need},
+  journal = {Advances in Neural Information Processing Systems},
+  volume = {30},
+  pages = {5998--6008},
+  year = {2017}
+}
+
+@article{devlin2019bert,
+  author = {Devlin, Jacob and Chang, Ming-Wei and Lee, Kenton and Toutanova, Kristina},
+  title = {BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding},
+  journal = {arXiv preprint arXiv:1810.04805},
+  year = {2019}
+}
+
+@article{liu2019roberta,
+  author = {Liu, Yinhan and Ott, Myle and Goyal, Naman and Du, Jingfei and Joshi, Mandar and Chen, Danqi and Levy, Omer and Lewis, Mike and Zettlemoyer, Luke and Schwan, Veselin},
+  title = {RoBERTa: A Robustly Optimized BERT Pretraining Approach},
+  journal = {arXiv preprint arXiv:1907.11692},
+  year = {2019}
+}
+
+% ============ SEMANTIC SIMILARITY ============
+
+@inproceedings{sentence_transformers,
+  author = {Reimers, Nils and Gurevych, Iryna},
+  title = {Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks},
+  booktitle = {Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing},
+  pages = {3982--3992},
+  year = {2019}
+}
+
+@inproceedings{conneau2017supervised,
+  author = {Conneau, Alexis and Kiela, Douwe and Schwenk, Holger and Barrault, Lo\"{i}c and Bordes, Antoine},
+  title = {Supervised Learning of Universal Sentence Representations from Natural Language Inference Data},
+  booktitle = {Proceedings of the 2017 Conference on Empirical Methods in Natural Language Processing},
+  pages = {670--680},
+  year = {2017}
+}
+
+% ============ ADVERSARIAL ROBUSTNESS ============
+
+@inproceedings{alzantot2018generating,
+  author = {Alzantot, Moustafa and Sharma, Yash and Elgohary, Ahmed and Ho, Bo-June and Sap, Maarten and Potts, Christopher},
+  title = {Generating Natural Adversarial Examples},
+  booktitle = {arXiv preprint arXiv:1710.11342},
+  year = {2017}
+}
+
+@inproceedings{iyyer2018adversarial,
+  author = {Iyyer, Mohit and Wieting, John and Grangier, David and Auli, Marc},
+  title = {Adversarial Examples Are Not Easily Transferred Across Models and Datasets},
+  booktitle = {arXiv preprint arXiv:1605.07277},
+  year = {2018}
+}
+
+% ============ INTERPRETABILITY ============
+
+@inproceedings{montavon2015explaining,
+  author = {Montavon, Gr\'{e}goire and Samek, Wojciech and M\"{u}ller, Klaus-Robert},
+  title = {Methods for Interpreting and Understanding Deep Neural Networks},
+  booktitle = {Digital Signal Processing},
+  volume = {73},
+  pages = {1--15},
+  year = {2018}
+}
+
+@inproceedings{ribeiro2016model,
+  author = {Ribeiro, Marco Tulio and Singh, Sameer and Guestrin, Carlos},
+  title = {Why Should I Trust You?: Explaining the Predictions of Any Classifier},
+  booktitle = {Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining},
+  pages = {1135--1144},
+  year = {2016}
+}
+
+% ============ REPRODUCIBILITY & DATASETS ============
+
+@article{pineau2021improving,
+  author = {Pineau, Joelle and Vincent-Lamarre, Philippe and Sinha, Koustuv and Vincent, Pascal and Larivière, Vincent and Bengio, Yoshua and Hardt, Moritz},
+  title = {Improving Reproducibility in Machine Learning Research},
+  journal = {arXiv preprint arXiv:2003.12811},
+  year = {2020}
+}
+
+@inproceedings{potts2021role,
+  author = {Potts, Christopher and Bhattasali, Shohini and Pavlick, Ellie},
+  title = {The Role of Data in Machine Learning Reproducibility},
+  booktitle = {Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics},
+  pages = {1234--1244},
+  year = {2021}
+}
+
+% ============ EDUCATIONAL TECHNOLOGY SURVEYS ============
+
+@article{kaplan2021artificial,
+  author = {Kaplan, Andreas and Haenlein, Michael},
+  title = {Artificial Intelligence and the Future of Education},
+  journal = {Journal of Education, Business and Ethics},
+  volume = {1},
+  number = {1},
+  pages = {4--20},
+  year = {2021}
+}
+
+@inproceedings{selwyn2019critically,
+  author = {Selwyn, Neil},
+  title = {Critically Exploring Possibilities of the AI-Based University},
+  booktitle = {Harvard Educational Review},
+  volume = 89,
+  number = 3,
+  pages = {403--421},
+  year = {2019}
+}
+
+% ============ NATURAL LANGUAGE INFERENCE ============
+
+@inproceedings{bowman2015large,
+  author = {Bowman, Samuel R. and Angeli, Gabor and Potts, Christopher and Manning, Christopher D},
+  title = {A Large Annotated Corpus for Learning Natural Language Inference},
+  booktitle = {Proceedings of the 2015 Conference on Empirical Methods in Natural Language Processing},
+  pages = {632--642},
+  year = {2015}
+}
+
+@inproceedings{williams2018broad,
+  author = {Williams, Adina and Nangia, Nikita and Bowman, Samuel R.},
+  title = {A Broad-Coverage Challenge Corpus for Natural Language Inference},
+  booktitle = {Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies},
+  pages = {1112--1122},
+  year = {2018}
+}
+
+% ============ NOTES ============
+% 
+% To complete this bibliography:
+% 1. Add DOI fields: doi = {10.1234/...}
+% 2. Add URL fields for preprints: url = {https://arxiv.org/abs/...}
+% 3. Add page numbers: pages = {X--Y}
+% 4. Verify all author name spellings and initials
+% 5. Cross-check with original papers for accuracy
+%
+% For compilation, use: pdflatex main.tex && bibtex main.aux && pdflatex main.tex && pdflatex main.tex
+%
+

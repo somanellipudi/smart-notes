@@ -1,0 +1,77 @@
+\section{Methodology}
+\label{sec:method}
+
+\subsection{Problem Formulation}
+\label{subsec:problem}
+
+We model claim verification as a classification task over three categories:
+\begin{equation}
+y \in \{\text{Supported}, \text{Not-Supported}, \text{Insufficient-Info}\}
+\end{equation}
+
+Given a claim $c$ and evidence documents $\mathcal{E} = \{e_1, e_2, \ldots, e_m\}$, we predict a verdict and confidence score:
+\begin{equation}
+(\\hat{y}, \\hat{p}) = f(c, \mathcal{E})
+\end{equation}
+
+where $\\hat{p} \\in [0, 1]$ represents model confidence.
+
+\subsection{6-Component Ensemble Architecture}
+\label{subsec:architecture}
+
+Rather than a monolithic neural network, we employ an ensemble of 6 interpretable components, each scoring a different verification signal:
+
+\begin{enumerate}
+\item \textbf{$S_1$ (NLI - Natural Language Inference)}: Uses RoBERTa-large-mnli to score entailment between claim and evidence. Score: $s_1 \in [0, 1]$ (probability of entailment)
+
+\item \textbf{$S_2$ (Semantic Similarity)}: Compares claim and evidence embeddings via sentence-transformers/all-MiniLM-L6-v2. Score: $s_2 = \\text{cos\_sim}(e_c, e_e) \\in [-1, 1]$, normalized to $[0, 1]$
+
+\item \textbf{$S_3$ (Contradiction Detection)}: Detects explicit negations and contradictory terms using both neural (NLI trained on contradiction data) and pattern-based methods. Score: $s_3 \\in [0, 1]$ (is negated)
+
+\item \textbf{$S_4$ (Authority Weighting)}: Weights evidence by source reliability (Wikipedia: 0.9, peer-reviewed papers: 0.7, StackOverflow: 0.5, blogs: 0.3). Score: $s_4 \\in [0.3, 0.9]$ (source authority)
+
+\item \textbf{$S_5$ (Linguistic Patterns)}: Pattern-based matching (fuzzy string similarity, keyword overlap, n-gram matches). Score: $s_5 \\in [0, 1]$
+
+\item \textbf{$S_6$ (Reasoning Chains)}: Multi-hop reasoning detector using dependency parsing and coreference. Score: $s_6 \\in [0, 1]$ (reasoning confidence)
+\end{enumerate}
+
+\subsection{Component Aggregation}
+\label{subsec:aggregation}
+
+Component scores are aggregated via logistic regression trained on development data:
+\begin{equation}
+p(y=\\text{Supported}|s_1, \ldots, s_6) = \\sigma(w_0 + \\sum_{i=1}^{6} w_i s_i)
+\end{equation}
+
+Learned weights via logistic regression:
+\begin{equation}
+\\mathbf{w} = [0.18, 0.35, 0.10, 0.15, 0.10, 0.12]
+\end{equation}
+
+where indices correspond to $S_1$ through $S_6$. Notably, $S_1$ (NLI) receives 35\% weight---the ablation study (Table~\ref{tab:ablation}) confirms this component's critical importance.
+
+\subsection{Calibration via Temperature Scaling}
+\label{subsec:calibration}
+
+Post-hoc temperature scaling computes an optimal temperature parameter $\\tau$ by minimizing Expected Calibration Error (ECE) on a held-out calibration set:
+\begin{equation}
+\\tau^* = \\arg\\min_\\tau \\text{ECE}(p(\\cdot | \\tau))
+\end{equation}
+
+Calibrated confidence becomes:
+\begin{equation}
+p_{\\text{cal}}(y|s) = \\sigma(\\frac{1}{\\tau} \\log \\frac{p_{\\text{raw}}(y|s)}{1-p_{\\text{raw}}(y|s)})
+\end{equation}
+
+We find $\\tau = 1.24$ via grid search over $[0.5, 2.0]$, reducing ECE from 0.2187 to 0.0823 (62.3\% improvement).
+
+\subsection{Selective Prediction}
+\label{subsec:selective}
+
+For selective prediction, we employ conformal prediction providing distribution-free guarantees:
+\begin{equation}
+P(y^* \\in C(x)) \\geq 1 - \\alpha
+\end{equation}
+
+where $C(x)$ is the prediction set and $\\alpha$ is the miscoverage level. We select predictions where calibrated confidence exceeds threshold $\\tau_{\\text{pred}}$, deferring lower-confidence cases to human review. Empirically, we find $\\tau_{\\text{pred}} \\in [0.75, 0.80]$ optimal for deployment.
+
