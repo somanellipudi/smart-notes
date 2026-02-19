@@ -1,0 +1,163 @@
+{
+  "per_domain": {
+    "algorithms.dynamicprogramming": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 2,
+      "n_correct": 2,
+      "failures": 0
+    },
+    "algorithms.sorting": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 3,
+      "n_correct": 3,
+      "failures": 0
+    },
+    "compilerscomputing.optimization": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "compilerscomputing.parsing": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "complexity.correlation": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "complexity.nphard": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "databases.indexing": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "databases.sqlquery": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "datastructures.binarytree": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "datastructures.graph": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 2,
+      "n_correct": 2,
+      "failures": 0
+    },
+    "datastructures.hashtable": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "machinelearning.optimization": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "machinelearning.regression": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "networking.basics": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "networking.protocol": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "security.encryption": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_claims": 1,
+      "n_correct": 1,
+      "failures": 0
+    },
+    "security.hashing": {
+      "accuracy": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_claims": 1,
+      "n_correct": 0,
+      "failures": 1
+    }
+  },
+  "summary": {
+    "total_claims": 21,
+    "overall_accuracy": 0.9523809523809523,
+    "number_of_domains": 17,
+    "accuracy_std_dev": 0.23529411764705885
+  }
+}

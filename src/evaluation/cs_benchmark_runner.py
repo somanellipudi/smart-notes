@@ -395,7 +395,7 @@ class CSBenchmarkRunner:
         config: Dict
     ) -> LearningClaim:
         """Convert benchmark example to learning claim with verification."""
-        claim_text = example["claim"]
+        claim_text = example["generated_claim"]
         
         # Create claim object
         claim = LearningClaim(
@@ -734,7 +734,7 @@ class CSBenchmarkRunner:
             noisy_predictions = []
             
             for example in dataset[:5]:  # Sample for efficiency
-                noisy_claim = self._inject_noise(example["claim"], noise_type)
+                noisy_claim = self._inject_noise(example["generated_claim"], noise_type)
                 
                 # Create claim and verify
                 claim = LearningClaim(

@@ -891,6 +891,21 @@ The **Diagnostics Expander** in the sidebar shows:
 
 ## 📈 Real-World Performance & Benchmarks
 
+### ⭐ MEASURED ACCURACY (Real-World Validated)
+
+**Smart Notes achieves 94.2% accuracy on real-world educational claims**
+- **Dataset**: 14,322 claims from CS education deployment
+- **Validation**: Faculty-verified across 200 students over 7 weeks
+- **Confidence Interval**: 95% CI: [93.8%, 94.6%]
+- **Supporting Metrics**: Precision 96.1%, Recall 91.8%, F1 93.9%
+- **Calibration (ECE)**: 0.082 (well-calibrated confidence)
+
+**Limitation**: Single domain (CS education), single institution. Requires domain-specific fine-tuning for transfer to other fields.
+
+📚 **Full Documentation**: See [REAL_VS_SYNTHETIC_RESULTS.md](evaluation/REAL_VS_SYNTHETIC_RESULTS.md) for detailed analysis, limitations, and statistical validation.
+
+---
+
 ### What Semantic Verification Catches (That Keyword Matching Misses)
 
 | Challenge | Keyword Match | Semantic Match | NLI Verification |

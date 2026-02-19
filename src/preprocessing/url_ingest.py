@@ -2,7 +2,7 @@
 URL ingestion for YouTube transcripts and article text extraction.
 
 This module provides intelligent ingestion of URLs:
-- YouTube: Fetch transcript via youtube-transcript-api
+- YouTube: Fetch transcript via youtube_ingest module (with fallback handling)
 - Articles: Extract main content via trafilatura or readability-lxml
 """
 
@@ -11,34 +11,18 @@ import re
 from typing import Tuple, Dict, Any
 from urllib.parse import urlparse, parse_qs
 
+from src.retrieval.youtube_ingest import (
+    is_youtube_url,
+    extract_video_id,
+    fetch_transcript_text,
+    get_fallback_message,
+)
+
 logger = logging.getLogger(__name__)
 
 # Standard user agent to avoid blocking
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 REQUEST_TIMEOUT = 10
-
-
-def _extract_youtube_video_id(url: str) -> str:
-    """Extract video ID from YouTube URL."""
-    patterns = [
-        r'(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})',
-        r'youtube\.com\/embed\/([A-Za-z0-9_-]{11})',
-        r'youtube\.com\/v\/([A-Za-z0-9_-]{11})',
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    
-    return ""
-
-
-def _is_youtube_url(url: str) -> bool:
-    """Check if URL is a YouTube URL."""
-    youtube_domains = ['youtube.com', 'youtu.be', 'youtube-nocookie.com']
-    parsed = urlparse(url)
-    return any(domain in parsed.netloc for domain in youtube_domains)
 
 
 def fetch_url_text(url: str) -> Tuple[str, Dict[str, Any]]:
@@ -74,7 +58,7 @@ def fetch_url_text(url: str) -> Tuple[str, Dict[str, Any]]:
     logger.info(f"Fetching URL: {url}")
     
     try:
-        if _is_youtube_url(url):
+        if is_youtube_url(url):
             text, meta = _fetch_youtube_transcript(url)
             metadata.update(meta)
             metadata["source_type"] = "youtube"
@@ -102,7 +86,7 @@ def fetch_url_text(url: str) -> Tuple[str, Dict[str, Any]]:
 
 def _fetch_youtube_transcript(url: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Fetch YouTube video transcript.
+    Fetch YouTube video transcript using dedicated youtube_ingest module.
     
     Returns:
         Tuple of (transcript_text, metadata_dict)
@@ -114,45 +98,25 @@ def _fetch_youtube_transcript(url: str) -> Tuple[str, Dict[str, Any]]:
         "extraction_method": None
     }
     
-    try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-    except ImportError:
-        logger.warning("youtube-transcript-api not installed")
-        return "", {**metadata, "extraction_method": "error", "error": "youtube-transcript-api not installed"}
-    
     # Extract video ID
-    video_id = _extract_youtube_video_id(url)
+    video_id = extract_video_id(url)
     if not video_id:
         return "", {**metadata, "extraction_method": "error", "error": "Could not extract video ID from URL"}
     
     metadata["video_id"] = video_id
     
-    try:
-        # Try to fetch transcript (prefer English)
-        try:
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-            metadata["language"] = "en"
-        except Exception:
-            # If English not available, get first available language
-            logger.warning("English transcript not available, trying other languages...")
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'es', 'fr', 'de', 'zh'])
-            if transcript_list:
-                metadata["language"] = "unknown"
-        
-        # Combine transcript entries
-        transcript_text = " ".join(entry['text'] for entry in transcript_list)
-        metadata["extraction_method"] = "youtube_api"
-        
-        return transcript_text, metadata
+    # Use dedicated youtube_ingest module for transcript fetching
+    result = fetch_transcript_text(video_id, languages=['en', 'en-US'])
     
-    except Exception as e:
-        error_msg = str(e)
-        if "disabled" in error_msg.lower():
-            error_msg = "Captions disabled on this video"
-        elif "not available" in error_msg.lower():
-            error_msg = "Transcript not available for this video"
-        
-        logger.warning(f"Failed to fetch YouTube transcript: {error_msg}")
+    if result.success:
+        metadata["language"] = result.language
+        metadata["extraction_method"] = "youtube_api"
+        logger.info(f"✓ YouTube transcript fetched: {len(result.text)} chars (language: {result.language})")
+        return result.text, metadata
+    else:
+        # Provide user-friendly error message
+        error_msg = result.error or "Failed to fetch transcript"
+        logger.warning(f"✗ YouTube transcript fetch failed: {error_msg}")
         return "", {**metadata, "extraction_method": "error", "error": error_msg}
 
 

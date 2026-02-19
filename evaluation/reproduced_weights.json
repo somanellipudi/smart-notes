@@ -1,0 +1,26 @@
+{
+  "weights": {
+    "similarity": 0.0,
+    "entailment": 0.4666666666666666,
+    "diversity": 0.03333333333333333,
+    "count": 0.25,
+    "contradiction": 0.125,
+    "authority": 0.125
+  },
+  "weight_std_dev": {
+    "similarity": 0.0,
+    "entailment": 0.04714045207910316,
+    "diversity": 0.047140452079103175,
+    "count": 0.04082482904638629,
+    "contradiction": 0.020412414523193145,
+    "authority": 0.020412414523193145
+  },
+  "metadata": {
+    "optimization_method": "grid_search_cv",
+    "cv_folds": 3,
+    "random_seed": 42,
+    "dataset_size": 1000,
+    "domain": "Computer Science (CS domain)",
+    "note": "Simulated component scores; production uses real system outputs"
+  }
+}

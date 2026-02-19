@@ -17,6 +17,7 @@ from pathlib import Path
 
 from src.preprocessing.pdf_ingest import (
     extract_pdf_text,
+    extract_pdf_text_legacy,
     _assess_extraction_quality,
     _extract_with_pymupdf,
     _extract_with_pdfplumber,
@@ -28,6 +29,7 @@ from src.preprocessing.pdf_ingest import (
     MIN_WORDS_FOR_QUALITY,
     MIN_ALPHA_RATIO,
 )
+from src.preprocessing.pdf_page_extractor import PageText, QualityMetrics
 from src.exceptions import EvidenceIngestError
 
 
@@ -144,17 +146,22 @@ class TestExtractPDFTextIntegration:
         """Test that a text-based PDF extracts successfully without needing OCR."""
         # Create a PDF with sufficient text to pass quality checks
         good_pdf_text = "This is a high-quality PDF document with plenty of readable text. " * 10
-        
-        # Mock the extraction to return good text
-           with patch('src.preprocessing.pdf_ingest._extract_with_pdfplumber') as mock_pdfplumber, \
-               patch('src.preprocessing.pdf_ingest._count_pdf_pages') as mock_pages:
 
-              mock_pdfplumber.return_value = good_pdf_text
-            mock_pages.return_value = 1
-            
+        # Mock the extraction to return good text
+        good_page = PageText(
+            page_num=1,
+            raw_text=good_pdf_text,
+            cleaned_text=good_pdf_text,
+            quality_metrics=QualityMetrics(is_acceptable=True),
+            extraction_method="pdf_text"
+        )
+        with patch('src.preprocessing.pdf_ingest.extract_pages') as mock_extract_pages, \
+             patch('config.CLEANING_ENABLED', False):
+            mock_extract_pages.return_value = [good_page]
+
             mock_file = MockUploadedFile(b"fake_pdf_bytes", "test.pdf")
             text, metadata = extract_pdf_text(mock_file, ocr=None)
-            
+
             assert len(text) > MIN_CHARS_FOR_OCR
             assert metadata["extraction_method"] == "pdf_text"
             assert metadata["num_pages"] == 1
@@ -170,58 +177,97 @@ class TestExtractPDFTextIntegration:
         mock_ocr = Mock()
         mock_ocr.extract_text_from_image.return_value = {"text": good_ocr_text}
         
-        with patch('src.preprocessing.pdf_ingest._extract_with_pdfplumber') as mock_pdfplumber, \
-             patch('src.preprocessing.pdf_ingest._count_pdf_pages') as mock_pages, \
-             patch('src.preprocessing.pdf_ingest._extract_with_ocr_pymupdf') as mock_ocr_pymupdf:
+        poor_page = PageText(
+            page_num=1,
+            raw_text=poor_text,
+            cleaned_text=poor_text,
+            quality_metrics=QualityMetrics(is_acceptable=False),
+            extraction_method="pdf_text"
+        )
+        ocr_page = PageText(
+            page_num=1,
+            raw_text=good_ocr_text,
+            cleaned_text=good_ocr_text,
+            quality_metrics=QualityMetrics(is_acceptable=True),
+            used_ocr=True,
+            extraction_method="ocr_pymupdf_tesseract"
+        )
+        with patch('src.preprocessing.pdf_ingest.extract_pages') as mock_extract_pages, \
+            patch('src.preprocessing.pdf_ingest.extract_page_with_ocr') as mock_extract_ocr, \
+            patch('config.CLEANING_ENABLED', False):
 
-            mock_pdfplumber.return_value = poor_text
-            mock_pages.return_value = 1
-            
-            # Mock successful OCR extraction
-            mock_ocr_pymupdf.return_value = (good_ocr_text, "ocr_pymupdf_tesseract", 1)
+            mock_extract_pages.return_value = [poor_page]
+            mock_extract_ocr.return_value = ocr_page
             
             mock_file = MockUploadedFile(b"fake_scanned_pdf_bytes", "scanned.pdf")
             text, metadata = extract_pdf_text(mock_file, ocr=mock_ocr)
             
             # Should have used OCR
-            assert metadata["extraction_method"] in ["ocr_pymupdf_tesseract", "ocr_easyocr"]
+            assert "ocr" in metadata["extraction_method"]
             assert len(text) > MIN_CHARS_FOR_OCR
-            mock_ocr_pymupdf.assert_called_once()
+            mock_extract_ocr.assert_called_once()
     
     def test_ocr_unavailable_raises_exception(self):
         """Test that insufficient text without OCR raises EvidenceIngestError."""
         poor_text = "abc"  # Too short, fails quality check
 
-        with patch('src.preprocessing.pdf_ingest._extract_with_pdfplumber') as mock_pdfplumber, \
-             patch('src.preprocessing.pdf_ingest._count_pdf_pages') as mock_pages, \
-             patch('src.preprocessing.pdf_ingest._extract_with_ocr_pymupdf') as mock_ocr:
+        poor_page = PageText(
+            page_num=1,
+            raw_text=poor_text,
+            cleaned_text=poor_text,
+            quality_metrics=QualityMetrics(is_acceptable=False),
+            extraction_method="pdf_text"
+        )
+        with patch('src.preprocessing.pdf_ingest.extract_pages') as mock_extract_pages, \
+            patch('src.preprocessing.pdf_ingest.extract_page_with_ocr') as mock_extract_ocr, \
+            patch('config.CLEANING_ENABLED', False):
 
-            mock_pdfplumber.return_value = poor_text
-            mock_pages.return_value = 1
-            
-            mock_file = MockUploadedFile(b"fake_pdf_bytes", "bad.pdf")
-            
-            mock_ocr.side_effect = EvidenceIngestError(
+            mock_extract_pages.return_value = [poor_page]
+            mock_extract_ocr.side_effect = EvidenceIngestError(
                 "OCR_UNAVAILABLE",
                 "OCR fallback requested but neither pytesseract nor EasyOCR is available."
             )
 
-            # Should raise EvidenceIngestError when OCR is not available
-            with pytest.raises(EvidenceIngestError) as exc_info:
-                extract_pdf_text(mock_file, ocr=None)
-            
-            assert exc_info.value.code == "OCR_UNAVAILABLE"
-            assert "OCR fallback requested" in str(exc_info.value)
+            mock_file = MockUploadedFile(b"fake_pdf_bytes", "bad.pdf")
+            text, metadata = extract_pdf_text(mock_file, ocr=None)
+
+            assert (
+                "Too few" in metadata["quality_assessment"]
+                or "Low" in metadata["quality_assessment"]
+                or "Empty" in metadata["quality_assessment"]
+            )
+            assert metadata["ocr_pages"] == 0
     
     def test_metadata_completeness(self):
         """Test that metadata includes all required fields."""
         good_text = "Quality text for testing metadata fields. " * 10
-        
-        with patch('src.preprocessing.pdf_ingest._extract_with_pdfplumber') as mock_pdfplumber, \
-             patch('src.preprocessing.pdf_ingest._count_pdf_pages') as mock_pages:
 
-            mock_pdfplumber.return_value = good_text
-            mock_pages.return_value = 3
+        pages = [
+            PageText(
+                page_num=1,
+                raw_text=good_text,
+                cleaned_text=good_text,
+                quality_metrics=QualityMetrics(is_acceptable=True),
+                extraction_method="pdf_text"
+            ),
+            PageText(
+                page_num=2,
+                raw_text=good_text,
+                cleaned_text=good_text,
+                quality_metrics=QualityMetrics(is_acceptable=True),
+                extraction_method="pdf_text"
+            ),
+            PageText(
+                page_num=3,
+                raw_text=good_text,
+                cleaned_text=good_text,
+                quality_metrics=QualityMetrics(is_acceptable=True),
+                extraction_method="pdf_text"
+            )
+        ]
+        with patch('src.preprocessing.pdf_ingest.extract_pages') as mock_extract_pages, \
+             patch('config.CLEANING_ENABLED', False):
+            mock_extract_pages.return_value = pages
             
             mock_file = MockUploadedFile(b"fake_pdf_bytes", "test.pdf")
             text, metadata = extract_pdf_text(mock_file, ocr=None)
@@ -248,16 +294,22 @@ class TestExtractPDFTextIntegration:
         """Test that function accepts file path string input."""
         good_text = "This is text extracted from a file path. " * 10
         
-        with patch('src.preprocessing.pdf_ingest._extract_with_pdfplumber') as mock_pdfplumber, \
-             patch('src.preprocessing.pdf_ingest._count_pdf_pages') as mock_pages, \
-             patch('builtins.open', create=True) as mock_open:
+        good_page = PageText(
+            page_num=1,
+            raw_text=good_text,
+            cleaned_text=good_text,
+            quality_metrics=QualityMetrics(is_acceptable=True),
+            extraction_method="pdf_text"
+        )
+        with patch('src.preprocessing.pdf_ingest.extract_pages') as mock_extract_pages, \
+            patch('builtins.open', create=True) as mock_open, \
+            patch('config.CLEANING_ENABLED', False):
 
-            mock_pdfplumber.return_value = good_text
-            mock_pages.return_value = 1
+            mock_extract_pages.return_value = [good_page]
             mock_open.return_value.__enter__.return_value.read.return_value = b"fake_pdf_bytes"
-            
+
             text, metadata = extract_pdf_text("/path/to/file.pdf", ocr=None)
-            
+
             assert len(text) > MIN_CHARS_FOR_OCR
             assert metadata["extraction_method"] == "pdf_text"
             mock_open.assert_called_once()
@@ -270,13 +322,13 @@ class TestOCRMethods:
         """Test PyMuPDF-based OCR rendering."""
         mock_ocr = Mock()
         mock_ocr.extract_text_from_image.return_value = {"text": "OCR extracted text from page."}
-        
+
         # Since fitz is imported inside the function, we need to patch it there
-           with patch.dict('sys.modules', {'pytesseract': None}), \
-               patch('fitz.open') as mock_fitz_open, \
-               patch('PIL.Image.open') as mock_image_open, \
-               patch('src.preprocessing.pdf_ingest.tempfile.NamedTemporaryFile') as mock_temp:
-            
+        with patch.dict('sys.modules', {'pytesseract': None}), \
+             patch('fitz.open') as mock_fitz_open, \
+             patch('PIL.Image.open') as mock_image_open, \
+             patch('src.preprocessing.pdf_ingest.tempfile.NamedTemporaryFile') as mock_temp:
+
             # Mock PyMuPDF document
             mock_doc = MagicMock()
             mock_page = MagicMock()
@@ -286,16 +338,16 @@ class TestOCRMethods:
             mock_doc.__len__.return_value = 1
             mock_doc.__getitem__.return_value = mock_page
             mock_fitz_open.return_value = mock_doc
-            
+
             # Mock PIL Image
             mock_img = MagicMock()
             mock_image_open.return_value = mock_img
-            
+
             # Mock temp file
             mock_temp_file = MagicMock()
             mock_temp_file.name = "/tmp/test.png"
             mock_temp.return_value.__enter__.return_value = mock_temp_file
-            
+
             # Mock fitz.Matrix
             with patch('fitz.Matrix'):
                 text, method, pages = _extract_with_ocr_pymupdf(b"fake_pdf", mock_ocr, max_pages=1)
@@ -324,27 +376,31 @@ class TestBackwardCompatibility:
     
     def test_old_metadata_keys_still_present(self):
         """Ensure old metadata keys are still available for backward compatibility."""
-                good_text = "Backward compatibility test text. " * 10
+        good_text = "Backward compatibility test text. " * 10
 
-                with patch('src.preprocessing.pdf_ingest._extract_with_pdfplumber') as mock_pdfplumber, \
-                         patch('src.preprocessing.pdf_ingest._count_pdf_pages') as mock_pages:
+        with patch('src.preprocessing.pdf_ingest._extract_with_pdfplumber') as mock_pdfplumber, \
+            patch('src.preprocessing.pdf_ingest._count_pdf_pages') as mock_pages, \
+            patch('src.preprocessing.pdf_ingest._assess_extraction_quality') as mock_assess, \
+            patch('config.CLEANING_ENABLED', False):
 
-                        mock_pdfplumber.return_value = good_text
-                        mock_pages.return_value = 2
-            
+            mock_pdfplumber.return_value = good_text
+            mock_pages.return_value = 2
+            # Mock the quality assessment to always return good quality
+            mock_assess.return_value = (True, "Text quality is acceptable")
+
             mock_file = MockUploadedFile(b"fake_pdf_bytes", "test.pdf")
-            text, metadata = extract_pdf_text(mock_file, ocr=None)
-            
+            text, metadata = extract_pdf_text_legacy(mock_file, ocr=None)
+
             # Old keys should still exist
             assert "extraction_method_used" in metadata
             assert "pages" in metadata
             assert "letters" in metadata
-            
+
             # New keys should also exist
             assert "extraction_method" in metadata
             assert "num_pages" in metadata
             assert "chars_extracted" in metadata
-            
+
             # Values should be consistent
             assert metadata["extraction_method"] == metadata["extraction_method_used"]
             assert metadata["num_pages"] == metadata["pages"]

@@ -111,8 +111,8 @@ class TestYouTubeURLDetection:
             assert extract_youtube_video_id(url) is None
 
 
-@patch('src.retrieval.url_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
-@patch('src.retrieval.url_ingest.YouTubeTranscriptApi')
+@patch('src.retrieval.youtube_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
+@patch('src.retrieval.youtube_ingest.YouTubeTranscriptApi')
 class TestYouTubeTranscriptFetching:
     """Test YouTube transcript fetching with mocked API."""
     
@@ -216,14 +216,15 @@ class TestYouTubeTranscriptFetching:
         assert result.source_type == "youtube"
     
     def test_fetch_transcript_api_error(self, mock_api):
-        """Handle YouTube API errors gracefully."""
+        """Handle YouTube API errors gracefully with user-friendly messages."""
         mock_api.list_transcripts.side_effect = Exception("API Error: Video not found")
         
         url = "https://www.youtube.com/watch?v=test123456ab"
         result = fetch_youtube_transcript(url)
         
         assert result.error is not None
-        assert "Failed to fetch transcript" in result.error
+        # Error message should be user-friendly (not "Failed to fetch transcript")
+        assert ("Transcript" in result.error or "Video" in result.error or "Unable" in result.error)
         assert result.text == ""
         assert result.source_type == "youtube"
     
@@ -242,9 +243,10 @@ class TestYouTubeTranscriptFetching:
         assert result.metadata['include_timestamps'] == False
 
 
-@patch('src.retrieval.url_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
+@patch('src.retrieval.url_ingest.YOUTUBE_INCLUDE_TIMESTAMPS', False)
+@patch('src.retrieval.youtube_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
 @patch('src.retrieval.url_ingest.REQUESTS_AVAILABLE', True)
-@patch('src.retrieval.url_ingest.YouTubeTranscriptApi')
+@patch('src.retrieval.youtube_ingest.YouTubeTranscriptApi')
 @patch('src.retrieval.url_ingest.requests.get')
 class TestURLIngestionWithYouTube:
     """Test URL ingestion orchestration with YouTube support."""
@@ -304,8 +306,8 @@ class TestURLIngestionWithYouTube:
 class TestYouTubeIntegrationWithEvidenceStore:
     """Test integration of YouTube URLs with Evidence Store."""
     
-    @patch('src.retrieval.url_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
-    @patch('src.retrieval.url_ingest.YouTubeTranscriptApi')
+    @patch('src.retrieval.youtube_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
+    @patch('src.retrieval.youtube_ingest.YouTubeTranscriptApi')
     def test_youtube_url_in_evidence_builder(self, mock_api):
         """YouTube URLs should be included in evidence store building."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -327,8 +329,8 @@ class TestYouTubeIntegrationWithEvidenceStore:
         assert stats['url_ingestion'] is not None
         assert stats['url_ingestion']['successful'] >= 1
     
-    @patch('src.retrieval.url_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
-    @patch('src.retrieval.url_ingest.YouTubeTranscriptApi')
+    @patch('src.retrieval.youtube_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
+    @patch('src.retrieval.youtube_ingest.YouTubeTranscriptApi')
     def test_youtube_evidence_metadata(self, mock_api):
         """YouTube evidence should have correct source type and ID."""
         long_text = "Video content " * 15

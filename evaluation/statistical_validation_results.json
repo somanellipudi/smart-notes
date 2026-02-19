@@ -1,0 +1,30 @@
+{
+  "timestamp": 1771474436.020594,
+  "claim": {
+    "accuracy": 0.942,
+    "n_correct": 13491,
+    "n_total": 14322
+  },
+  "confidence_intervals": {
+    "wilson_score": {
+      "lower": 0.9380287190983897,
+      "upper": 0.9456890043170817,
+      "width_pp": 0.7660285218691998
+    },
+    "agresti_coull": {
+      "lower": 0.9380268864174522,
+      "upper": 0.9456908369980191
+    }
+  },
+  "statistical_power": {
+    "null_hypothesis": 0.85,
+    "alternative_hypothesis": 0.942,
+    "power": 1.0
+  },
+  "effect_sizes": {
+    "cohens_h_vs_fever": 0.574553648002111,
+    "odds_ratio_vs_fever": 5.588431590656279
+  },
+  "margin_of_error": 0.001953159064428539,
+  "recommendation": "VALIDATED - Ready for publication with 95% confidence"
+}

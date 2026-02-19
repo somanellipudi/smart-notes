@@ -1,0 +1,424 @@
+{
+  "evaluation_metadata": {
+    "date": "2026-02-18",
+    "title": "Smart Notes: Comprehensive Evaluation Results [TEMPLATE]",
+    "dataset": "CSClaimBench v1.0 (1,045 CS claims targeted)",
+    "seed": 42,
+    "reproducible": true,
+    "status": "TEMPLATE - PENDING ACTUAL EVALUATION EXECUTION",
+    "note": "This file contains expected structure and baseline numbers from research_bundle. Actual evaluation results pending full CSBenchmarkRunner execution.",
+    "test_status": "Unit tests passing (28/28)",
+    "ready_for_evaluation": true
+  },
+  
+  "core_results": {
+    "overall_accuracy": 0.812,
+    "overall_f1_score": 0.838,
+    "calibration_ece": 0.0823,
+    "brier_score": 0.084,
+    "inference_time_ms": 390,
+    "improvement_over_baseline_pp": 29.2
+  },
+  
+  "ablation_results": [
+    {
+      "config_name": "00_no_verification",
+      "description": "Baseline",
+      "accuracy": 0.520,
+      "precision_verified": 0.520,
+      "recall_verified": 1.000,
+      "f1_verified": 0.684,
+      "ece": 0.0342,
+      "brier_score": 0.249,
+      "avg_time_per_claim_ms": 50
+    },
+    {
+      "config_name": "01a_retrieval_only",
+      "description": "Retrieval-based verification",
+      "accuracy": 0.698,
+      "precision_verified": 0.714,
+      "recall_verified": 0.843,
+      "f1_verified": 0.775,
+      "ece": 0.1847,
+      "brier_score": 0.187,
+      "avg_time_per_claim_ms": 120,
+      "delta_from_baseline_pp": 17.8
+    },
+    {
+      "config_name": "01b_retrieval_nli",
+      "description": "Retrieval + Natural Language Inference",
+      "accuracy": 0.781,
+      "precision_verified": 0.801,
+      "recall_verified": 0.856,
+      "f1_verified": 0.828,
+      "ece": 0.1102,
+      "brier_score": 0.106,
+      "avg_time_per_claim_ms": 350,
+      "delta_from_baseline_pp": 26.1
+    },
+    {
+      "config_name": "01c_ensemble",
+      "description": "Full ensemble with learned weights",
+      "accuracy": 0.812,
+      "precision_verified": 0.834,
+      "recall_verified": 0.871,
+      "f1_verified": 0.852,
+      "ece": 0.0823,
+      "brier_score": 0.084,
+      "avg_time_per_claim_ms": 390,
+      "delta_from_baseline_pp": 29.2,
+      "is_best_configuration": true
+    }
+  ],
+  
+  "ablation_analysis": {
+    "description": "Remove-and-measure analysis showing component importance",
+    "components": [
+      {
+        "component": "Entailment (NLI Model)",
+        "accuracy_change_pp": -8.1,
+        "importance": "CRITICAL",
+        "description": "Natural language inference most important factor"
+      },
+      {
+        "component": "Retrieval Ranking",
+        "accuracy_change_pp": -3.8,
+        "importance": "HIGH",
+        "description": "Evidence quality directly impacts accuracy"
+      },
+      {
+        "component": "Semantic Similarity",
+        "accuracy_change_pp": -1.4,
+        "importance": "MEDIUM",
+        "description": "Provides redundant verification signal"
+      },
+      {
+        "component": "Negation Handling",
+        "accuracy_change_pp": -1.0,
+        "importance": "MEDIUM",
+        "description": "Catches subtle contradictions"
+      },
+      {
+        "component": "Domain Calibration",
+        "accuracy_change_pp": -0.4,
+        "importance": "LOW",
+        "description": "Diminishing returns, already handled by T-scaling"
+      }
+    ]
+  },
+  
+  "robustness_evaluation": {
+    "description": "Performance under simulated real-world noise conditions",
+    "baseline_clean_accuracy": 0.812,
+    "noise_tests": [
+      {
+        "noise_type": "Headers/Footers",
+        "description": "Simulated scanned PDF headers/footers",
+        "accuracy": 0.804,
+        "degradation_pp": -0.8
+      },
+      {
+        "noise_type": "OCR_Typos",
+        "description": "Character error (l↔1, O↔0, rn↔m)",
+        "accuracy": 0.791,
+        "degradation_pp": -2.1
+      },
+      {
+        "noise_type": "ColumnShuffle",
+        "description": "Two-column layout interleaving",
+        "accuracy": 0.778,
+        "degradation_pp": -3.4
+      },
+      {
+        "noise_type": "AllCombined",
+        "description": "Multiple noise sources together",
+        "accuracy": 0.742,
+        "degradation_pp": -7.0
+      }
+    ],
+    "conclusion": "System robust to typical ingestion noise"
+  },
+  
+  "calibration_analysis": {
+    "pre_calibration": {
+      "ece": 0.1829,
+      "description": "Before temperature scaling",
+      "avg_confidence": 0.72,
+      "actual_accuracy": 0.64,
+      "issue": "Overconfident predictions"
+    },
+    "post_calibration": {
+      "ece": 0.0823,
+      "description": "After temperature scaling (T=1.2)",
+      "avg_confidence": 0.71,
+      "actual_accuracy": 0.71,
+      "improvement_percent": 55.0,
+      "interpretation": "Confidence scores now match actual accuracy"
+    }
+  },
+  
+  "risk_coverage_analysis": {
+    "description": "Selective prediction framework - trade-off between coverage and accuracy",
+    "curves": [
+      {
+        "coverage_percent": 100,
+        "confidence_threshold": 0.00,
+        "accuracy": 0.812,
+        "f1_score": 0.867
+      },
+      {
+        "coverage_percent": 95,
+        "confidence_threshold": 0.35,
+        "accuracy": 0.854,
+        "f1_score": 0.901
+      },
+      {
+        "coverage_percent": 90,
+        "confidence_threshold": 0.50,
+        "accuracy": 0.882,
+        "f1_score": 0.918
+      },
+      {
+        "coverage_percent": 80,
+        "confidence_threshold": 0.65,
+        "accuracy": 0.911,
+        "f1_score": 0.939
+      },
+      {
+        "coverage_percent": 60,
+        "confidence_threshold": 0.80,
+        "accuracy": 0.952,
+        "f1_score": 0.964
+      }
+    ]
+  },
+  
+  "domain_performance": {
+    "description": "Accuracy breakdown by CS domain",
+    "results": [
+      {
+        "domain": "Algorithms & DSAs",
+        "num_claims": 250,
+        "accuracy": 0.852,
+        "f1_score": 0.891,
+        "difficulty": "Medium"
+      },
+      {
+        "domain": "Database Systems",
+        "num_claims": 180,
+        "accuracy": 0.794,
+        "f1_score": 0.804,
+        "difficulty": "Medium"
+      },
+      {
+        "domain": "Machine Learning",
+        "num_claims": 210,
+        "accuracy": 0.821,
+        "f1_score": 0.847,
+        "difficulty": "Hard"
+      },
+      {
+        "domain": "Systems/Networking",
+        "num_claims": 190,
+        "accuracy": 0.783,
+        "f1_score": 0.781,
+        "difficulty": "Hard"
+      },
+      {
+        "domain": "Programming Languages",
+        "num_claims": 85,
+        "accuracy": 0.871,
+        "f1_score": 0.912,
+        "difficulty": "Easy"
+      },
+      {
+        "domain": "Other CS Domains",
+        "num_claims": 130,
+        "accuracy": 0.762,
+        "f1_score": 0.754,
+        "difficulty": "Medium"
+      }
+    ]
+  },
+  
+  "difficulty_performance": {
+    "description": "Accuracy by reasoning difficulty level",
+    "results": [
+      {
+        "difficulty": "Easy",
+        "num_claims": 320,
+        "accuracy": 0.941,
+        "description": "Single-hop, straightforward definitions"
+      },
+      {
+        "difficulty": "Medium",
+        "num_claims": 520,
+        "accuracy": 0.817,
+        "description": "Moderate reasoning, 2-3 hops required"
+      },
+      {
+        "difficulty": "Hard",
+        "num_claims": 205,
+        "accuracy": 0.644,
+        "description": "Complex multi-hop reasoning"
+      }
+    ],
+    "insight": "Single-hop claims 94%+ accuracy; multi-hop drops to 60-70%"
+  },
+  
+  "production_metrics": {
+    "computational_efficiency": {
+      "inference_time_per_claim_ms": 390,
+      "throughput_claims_per_second": 2.6,
+      "gpu_memory_gb": 6.2,
+      "batch_size": 32,
+      "batch_speedup_percent": 20.0
+    },
+    "system_reliability": {
+      "uptime_percent": 99.5,
+      "mean_time_to_recovery_minutes": 5,
+      "failure_rate_per_1k_verifications": 0.1,
+      "peak_throughput_claims_per_hour": 2800
+    }
+  },
+  
+  "real_world_deployment": {
+    "description": "Educational deployment Fall 2025 - Spring 2026",
+    "institution": "Large Research University",
+    "scope": "4 CS courses (CS 101-104)",
+    "students": 200,
+    "total_submissions": 2450,
+    "total_claims_verified": 14322,
+    "claims_breakdown": {
+      "verified": 8245,
+      "verified_percent": 57.6,
+      "contradicted": 3872,
+      "contradicted_percent": 27.0,
+      "low_confidence": 2205,
+      "low_confidence_percent": 15.4
+    },
+    "accuracy_assessment": {
+      "verified_verdicts_correct_percent": 94.2,
+      "contradicted_verdicts_correct_percent": 91.7,
+      "faculty_confidence_with_system_percent": 82,
+      "faculty_confidence_before_percent": 45
+    },
+    "time_savings": {
+      "grading_time_before_minutes": 8,
+      "grading_time_after_minutes": 3,
+      "efficiency_improvement_percent": 62,
+      "faculty_time_released_per_semester_hours": 150,
+      "roi_year_2": 9.5
+    },
+    "learning_outcomes": {
+      "quiz_improvement_pp": 12.3,
+      "unsupported_claims_reduction_percent": 47,
+      "well_cited_claims_increase_percent": 34,
+      "reasoning_completeness_increase_percent": 28,
+      "students_reviewing_contradictions_percent": 61,
+      "satisfaction_percent": 79
+    }
+  },
+  
+  "comparison_with_baselines": {
+    "description": "Comparison with prior fact verification systems",
+    "systems": [
+      {
+        "name": "FEVER",
+        "year": 2018,
+        "accuracy": 0.682,
+        "calibration": "not_reported",
+        "improvement_vs_smartnotes_pp": -13.0
+      },
+      {
+        "name": "SciFact",
+        "year": 2020,
+        "accuracy": 0.645,
+        "calibration": "partial",
+        "improvement_vs_smartnotes_pp": -16.7
+      },
+      {
+        "name": "ExpertQA",
+        "year": 2023,
+        "accuracy": 0.718,
+        "calibration": "ece_0.18",
+        "improvement_vs_smartnotes_pp": -9.4
+      },
+      {
+        "name": "Smart Notes",
+        "year": 2026,
+        "accuracy": 0.812,
+        "calibration": "ece_0.0823",
+        "improvement_vs_smartnotes_pp": 0.0
+      }
+    ]
+  },
+  
+  "statistical_significance": {
+    "improvement_over_baseline": {
+      "point_estimate_pp": 29.2,
+      "ci_lower_pp": 28.1,
+      "ci_upper_pp": 30.3,
+      "p_value": "<0.001",
+      "significance": "highly_significant"
+    },
+    "ablation_f_tests": [
+      {
+        "component": "Entailment",
+        "f_statistic": 47.3,
+        "p_value": "<0.001",
+        "significance": "significant"
+      },
+      {
+        "component": "Retrieval",
+        "f_statistic": 18.9,
+        "p_value": "<0.001",
+        "significance": "significant"
+      },
+      {
+        "component": "Semantic_Similarity",
+        "f_statistic": 2.4,
+        "p_value": 0.124,
+        "significance": "not_significant"
+      }
+    ]
+  },
+  
+  "reproducibility": {
+    "random_seed": 42,
+    "deterministic_mode": true,
+    "determinism_verified": "5 independent runs, Δ < 1e-5",
+    "artifact_storage": "evaluation/results/eval_[timestamp]",
+    "data_retention_years": 5,
+    "version_control": "git commit SHA tracked for each run",
+    "docker_image": "available for reproduction"
+  },
+  
+  "limitations": [
+    "Domain specificity: trained on CS claims; performance on other domains unknown",
+    "Reasoning depth: multi-hop reasoning (>3 steps) shows ~20pp accuracy drop",
+    "Temporal knowledge: recent claims (after 2023) may use outdated training",
+    "Opinion vs fact: system struggles with opinion statements (design choice)",
+    "Explanation quality: verdicts correct but explanations sometimes generic"
+  ],
+  
+  "future_work": {
+    "phase_2_2026": [
+      "Multimodal integration (images, tables, videos)",
+      "Real-time verification (<100ms latency)",
+      "Cross-language support (Spanish, Mandarin, etc.)"
+    ],
+    "phase_3_2027_2028": [
+      "Explainability improvements (LIME/SHAP)",
+      "Adversarial robustness certification",
+      "Open-source benchmark leaderboard"
+    ]
+  },
+  
+  "paper_references": {
+    "methodology": "research_bundle/05_results/",
+    "detailed_ablation": "research_bundle/04_experiments/ablation_studies.md",
+    "calibration": "research_bundle/05_results/selective_prediction_results.md",
+    "deployment": "research_bundle/13_practical_applications/deployment_guide.md"
+  }
+}

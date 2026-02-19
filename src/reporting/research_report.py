@@ -15,11 +15,22 @@ See docs/RESEARCH_REPORT.md for format specifications.
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
+try:
+    import config
+    _DEBUG_JSON_ASSERT = bool(getattr(config, "DEBUG_VERIFICATION", False))
+except Exception:
+    _DEBUG_JSON_ASSERT = False
+
 logger = logging.getLogger(__name__)
+
+
+def _assert_json_module() -> None:
+    """Ensure json refers to the json module (debug safeguard)."""
+    assert hasattr(json, "dumps") and callable(json.dumps)
 
 
 @dataclass
@@ -44,8 +55,17 @@ class IngestionReport:
     footers_removed: int
     watermarks_removed: int
     total_chunks: int
-    avg_chunk_size: int
+    avg_chunk_size: Optional[Union[int, float]]  # None if total_chunks == 0
     extraction_methods: List[str]
+    
+    def __post_init__(self):
+        """Enforce invariant: avg_chunk_size should be None if no chunks."""
+        if self.total_chunks == 0 and self.avg_chunk_size is not None:
+            logger.warning(
+                f"Invariant: avg_chunk_size must be None when total_chunks=0. "
+                f"Setting to None (was {self.avg_chunk_size})"
+            )
+            self.avg_chunk_size = None
 
 
 @dataclass
@@ -60,6 +80,32 @@ class VerificationSummary:
     calibration_metrics: Optional[Dict[str, float]] = None  # ECE, Brier, etc.
     selective_prediction: Optional[Dict[str, Any]] = None  # Risk-coverage analysis
     conformal_prediction: Optional[Dict[str, Any]] = None  # Conformal guarantees
+    rejection_reasons_dict: Optional[Dict[str, int]] = None  # Full rejection reason breakdown
+    
+    def __post_init__(self):
+        """Enforce invariants on creation."""
+        # Invariant: verified + rejected + low_confidence == total_claims
+        count_sum = self.verified_count + self.rejected_count + self.low_confidence_count
+        if self.total_claims > 0 and count_sum != self.total_claims:
+            logger.warning(
+                f"Invariant violation: total_claims={self.total_claims} but "
+                f"verified+rejected+low_conf={count_sum}. Adjusting total_claims."
+            )
+            self.total_claims = count_sum
+        
+        # Invariant: rejection_reasons must sum to rejected_count
+        if self.rejection_reasons_dict and self.rejected_count > 0:
+            reasons_sum = sum(self.rejection_reasons_dict.values())
+            if reasons_sum != self.rejected_count:
+                logger.warning(
+                    f"Invariant violation: rejection_reasons sum to {reasons_sum} "
+                    f"but rejected_count={self.rejected_count}. Adding UNKNOWN_REASON."
+                )
+                missing = self.rejected_count - reasons_sum
+                if missing > 0:
+                    self.rejection_reasons_dict["UNKNOWN_REASON"] = (
+                        self.rejection_reasons_dict.get("UNKNOWN_REASON", 0) + missing
+                    )
 
 
 @dataclass
@@ -72,6 +118,7 @@ class ClaimEntry:
     top_evidence: str
     page_num: Optional[int] = None
     span_id: Optional[str] = None
+    claim_type: str = "fact_claim"  # From ClaimType enum
 
 
 class ResearchReportBuilder:
@@ -96,7 +143,39 @@ class ResearchReportBuilder:
         return self
 
     def add_verification_summary(self, summary: VerificationSummary) -> "ResearchReportBuilder":
-        """Add verification statistics."""
+        """Add verification statistics with invariant checks.
+        
+        Validates that the summary metrics are logically consistent:
+        - total_claims == verified_count + rejected_count + low_confidence_count
+        - If total_claims == 0: avg_confidence should be 0.0, rejection_reasons should be empty
+        """
+        if summary:
+            # Invariant check: counts must sum to total_claims
+            count_sum = summary.verified_count + summary.rejected_count + summary.low_confidence_count
+            if summary.total_claims != count_sum:
+                logger.warning(
+                    f"VerificationSummary invariant violation: total_claims={summary.total_claims} "
+                    f"but verified+rejected+low_conf={count_sum}. Correcting to match sum."
+                )
+                summary.total_claims = count_sum
+            
+            # If total_claims is 0, sanitize metrics
+            if summary.total_claims == 0:
+                if summary.avg_confidence != 0.0 and summary.avg_confidence is not None:
+                    logger.warning(
+                        f"VerificationSummary: total_claims=0 but avg_confidence={summary.avg_confidence}. "
+                        f"Resetting to 0.0."
+                    )
+                    summary.avg_confidence = 0.0
+                
+                # Clear rejection reasons for zero claims
+                if summary.top_rejection_reasons:
+                    logger.warning(
+                        f"VerificationSummary: total_claims=0 but has {len(summary.top_rejection_reasons)} "
+                        f"rejection reasons. Clearing."
+                    )
+                    summary.top_rejection_reasons = []
+        
         self.verification_summary = summary
         return self
 
@@ -284,12 +363,21 @@ class ResearchReportBuilder:
         return lines
 
     def _build_md_ingestion_section(self) -> List[str]:
-        """Build ingestion statistics section."""
+        """Build ingestion statistics section.
+        
+        Enforces invariant: avg_chunk_size is None/N/A when total_chunks == 0
+        """
         lines = ["## Ingestion Statistics", ""]
         if not self.ingestion_report:
             return lines
 
         ing = self.ingestion_report
+        
+        # Format avg_chunk_size properly: None or N/A when no chunks
+        avg_chunk_display = "N/A"
+        if ing.total_chunks > 0 and ing.avg_chunk_size is not None:
+            avg_chunk_display = f"{ing.avg_chunk_size:.0f}"
+        
         lines.extend([
             f"- **Total Pages**: {ing.total_pages}",
             f"- **Pages OCR'd**: {ing.pages_ocr}",
@@ -299,19 +387,45 @@ class ResearchReportBuilder:
             "",
             "### Extraction",
             f"- **Total Chunks**: {ing.total_chunks}",
-            f"- **Avg Chunk Size**: {ing.avg_chunk_size} chars",
-            f"- **Methods**: {', '.join(ing.extraction_methods)}",
+            f"- **Avg Chunk Size**: {avg_chunk_display} chars",
+            f"- **Methods**: {', '.join(ing.extraction_methods) if ing.extraction_methods else 'N/A'}",
             "",
         ])
         return lines
 
     def _build_md_verification_section(self) -> List[str]:
-        """Build verification statistics section."""
+        """Build verification statistics section.
+        
+        Enforces logical consistency:
+        - Only includes avg_confidence if total_claims > 0
+        - Only includes rejection reasons if rejected_count > 0
+        - Validates count invariants
+        - Ensures rejection_reasons sum to rejected_count
+        """
         lines = ["## Verification Results", ""]
         if not self.verification_summary:
             return lines
 
         ver = self.verification_summary
+        
+        # Validate invariant: total_claims == verified + rejected + low_confidence
+        count_sum = ver.verified_count + ver.rejected_count + ver.low_confidence_count
+        if ver.total_claims > 0 and count_sum != ver.total_claims:
+            logger.warning(
+                f"Invariant violation in report section: total_claims={ver.total_claims} but "
+                f"verified={ver.verified_count} + rejected={ver.rejected_count} + "
+                f"low_conf={ver.low_confidence_count} = {count_sum}"
+            )
+        
+        # Validate rejection_reasons sum
+        if ver.rejection_reasons_dict and ver.rejected_count > 0:
+            reasons_sum = sum(ver.rejection_reasons_dict.values())
+            if reasons_sum != ver.rejected_count:
+                logger.warning(
+                    f"Invariant violation: rejection_reasons sum to {reasons_sum} but "
+                    f"rejected_count={ver.rejected_count}"
+                )
+        
         lines.extend([
             f"### Claim Status Distribution",
             f"- **Verified**: {ver.verified_count}/{ver.total_claims} "
@@ -322,16 +436,37 @@ class ResearchReportBuilder:
             f"({100*ver.rejected_count/max(ver.total_claims, 1):.1f}%)",
             "",
             f"### Overall Metrics",
-            f"- **Average Confidence**: {ver.avg_confidence:.2f}",
-            "",
         ])
+        
+        # Only include avg_confidence if there are claims
+        if ver.total_claims > 0:
+            lines.append(f"- **Average Confidence**: {ver.avg_confidence:.2f}")
+        else:
+            lines.append(f"- **Average Confidence**: N/A (no claims)")
+        
+        lines.append("")
 
-        if ver.top_rejection_reasons:
-            lines.extend([
-                "### Top Rejection Reasons",
-                *[f"- {reason}: {count} claims" for reason, count in ver.top_rejection_reasons],
-                "",
-            ])
+        # Include rejection reasons breakdown (use full dict if available, otherwise top reasons)
+        if ver.rejected_count > 0:
+            lines.append("### Top Rejection Reasons")
+            
+            if ver.rejection_reasons_dict:
+                # Use the full breakdown from rejection_reasons_dict
+                sorted_reasons = sorted(
+                    ver.rejection_reasons_dict.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+                for reason, count in sorted_reasons:
+                    percentage = 100 * count / ver.rejected_count if ver.rejected_count > 0 else 0
+                    lines.append(f"- {reason}: {count} claims ({percentage:.1f}%)")
+            elif ver.top_rejection_reasons:
+                # Fallback to top_rejection_reasons tuple list
+                for reason, count in ver.top_rejection_reasons:
+                    percentage = 100 * count / ver.rejected_count if ver.rejected_count > 0 else 0
+                    lines.append(f"- {reason}: {count} claims ({percentage:.1f}%)")
+            
+            lines.append("")
 
         if ver.calibration_metrics:
             lines.extend([
@@ -472,19 +607,40 @@ class ResearchReportBuilder:
         return lines
 
     def _build_md_claim_table(self) -> List[str]:
-        """Build claim table with citations."""
+        """Build claim table with citations.
+        
+        Enforces invariant:
+        - QUESTION claim_type items never appear in rejected/verified/low_conf buckets
+        - Questions only appear in "Questions Answered" section
+        """
         lines = ["## Verified Claims Table", ""]
         
         if not self.claims:
             lines.append("_No claims to display._")
             return lines
 
-        # Group by status
-        verified = [c for c in self.claims if c.status.upper() == "VERIFIED"]
-        low_conf = [c for c in self.claims if c.status.upper() == "LOW_CONFIDENCE"]
-        rejected = [c for c in self.claims if c.status.upper() == "REJECTED"]
+        # Group by status and type
+        # Separate QUESTION items from status-based categorization
+        questions = [c for c in self.claims if c.claim_type == "question"]
+        factual_claims = [c for c in self.claims if c.claim_type != "question"]
+        
+        # For factual claims, group by verification status
+        verified = [c for c in factual_claims if c.status.upper() == "VERIFIED"]
+        low_conf = [c for c in factual_claims if c.status.upper() == "LOW_CONFIDENCE"]
+        rejected = [c for c in factual_claims if c.status.upper() == "REJECTED"]
 
-        def _add_claim_subtable(title: str, claims_list: List[ClaimEntry]):
+        def _add_claim_subtable(
+            title: str,
+            claims_list: List[ClaimEntry],
+            show_evidence: bool = True
+        ):
+            """Add a subtable of claims.
+            
+            Args:
+                title: Section title
+                claims_list: List of claims to display
+                show_evidence: Whether to show evidence snippets
+            """
             lines.extend([f"### {title}", ""])
             if not claims_list:
                 lines.append("_None_\n")
@@ -497,9 +653,17 @@ class ResearchReportBuilder:
                 claim_short = claim.claim_text[:80].replace("|", "\\|")
                 conf = f"{claim.confidence:.2f}"
                 evid_count = str(claim.evidence_count)
-                citation = f"Page {claim.page_num}" if claim.page_num else "N/A"
-                if claim.span_id:
-                    citation = f"{citation} | `{claim.span_id}`"
+                
+                # Build citation - show when evidence_count > 0
+                if claim.evidence_count > 0:
+                    citation_parts = []
+                    if claim.page_num is not None:
+                        citation_parts.append(f"p.{claim.page_num}")
+                    if claim.span_id:
+                        citation_parts.append(f"`{claim.span_id[:20]}...`")
+                    citation = " | ".join(citation_parts) if citation_parts else "Yes"
+                else:
+                    citation = "N/A"
                 
                 lines.append(f"| {claim_short}... | {conf} | {evid_count} | {citation} |")
             
@@ -507,9 +671,27 @@ class ResearchReportBuilder:
                 lines.append(f"_... and {len(claims_list) - 10} more_")
             lines.append("")
 
+        # Add factual claims grouped by status
         _add_claim_subtable("✅ Verified Claims", verified)
         _add_claim_subtable("⚠️ Low-Confidence Claims", low_conf)
-        _add_claim_subtable("❌ Rejected Claims", rejected)
+        
+        # Add rejected claims (should NOT include questions)
+        if rejected:
+            _add_claim_subtable("❌ Rejected Claims", rejected)
+
+        # Add questions in separate section (never verified/rejected)
+        if questions:
+            _add_claim_subtable("❓ Questions Answered", questions, show_evidence=False)
+            
+            # Log if any questions ended up in rejected/verified buckets (invariant violation)
+            rejected_questions = [c for c in questions if c.status.upper() == "REJECTED"]
+            verified_questions = [c for c in questions if c.status.upper() == "VERIFIED"]
+            if rejected_questions or verified_questions:
+                logger.warning(
+                    f"Invariant violation: Found {len(rejected_questions)} rejected and "
+                    f"{len(verified_questions)} verified questions - questions should not "
+                    f"be marked as rejected or verified"
+                )
 
         return lines
 
@@ -576,6 +758,8 @@ def save_reports(
     logger.info(f"Saved HTML report to {html_path}")
 
     json_path = base_path / f"{prefix}_audit.json"
+    if _DEBUG_JSON_ASSERT:
+        _assert_json_module()
     json_path.write_text(json.dumps(audit_json, indent=2), encoding="utf-8")
     logger.info(f"Saved audit JSON to {json_path}")
 

@@ -51,9 +51,14 @@ def set_global_seed(seed: int) -> None:
     # FAISS (if available)
     try:
         import faiss
-        faiss.set_random_seed(seed)
+        # Try new API first (FAISS >= 1.7.2)
+        if hasattr(faiss, 'random'):
+            faiss.random.seed(seed)
+        # Fall back to old API
+        elif hasattr(faiss, 'set_random_seed'):
+            faiss.set_random_seed(seed)
         logger.debug("Set FAISS random seed")
-    except ImportError:
+    except (ImportError, AttributeError):
         pass
     
     # Set PYTHONHASHSEED for hash reproducibility

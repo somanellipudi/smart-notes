@@ -94,15 +94,24 @@ class TestBenchmarkMetrics:
             accuracy=0.8,
             precision_verified=0.75,
             recall_verified=0.85,
-            f1_verified=0.80,
+            F1_verified=0.80,
+            precision_rejected=0.75,
+            recall_rejected=0.85,
+            F1_rejected=0.80,
+            precision_low_conf=0.70,
+            recall_low_conf=0.80,
+            F1_low_conf=0.75,
             ece=0.1,
-            brier_score=0.05
+            mce=0.2,
+            brier_score=0.05,
+            noise_robustness_accuracy=0.78,
+            noise_types_affected={}
         )
 
     def test_metrics_instantiation(self, simple_metrics):
         """Test BenchmarkMetrics dataclass creation."""
         assert simple_metrics.accuracy == 0.8
-        assert simple_metrics.f1_verified == 0.80
+        assert simple_metrics.F1_verified == 0.80
         assert simple_metrics.ece == 0.1
 
     def test_metrics_serializable(self, simple_metrics):
@@ -115,11 +124,16 @@ class TestBenchmarkMetrics:
         """Test BenchmarkResult creation."""
         result = BenchmarkResult(
             run_id="test_001",
+            timestamp="2026-02-17T00:00:00",
+            dataset_path="evaluation/cs_benchmark/cs_benchmark_dataset.jsonl",
             config={},
             metrics=simple_metrics,
-            timestamp="2026-02-17T00:00:00"
+            predictions=[
+                {"claim_id": "c1", "pred_label": "VERIFIED", "pred_confidence": 0.9, 
+                 "gold_label": "VERIFIED", "match": True}
+            ]
         )
-        assert result.config == {}
+        assert result.run_id == "test_001"
         assert result.metrics.accuracy == 0.8
 
 
@@ -128,13 +142,18 @@ class TestConfigurationVariations:
 
     @pytest.fixture
     def runner(self):
-        return CSBenchmarkRunner(device="cpu", batch_size=8)
+        dataset_path = Path("evaluation/cs_benchmark/cs_benchmark_dataset.jsonl")
+        if not dataset_path.exists():
+            pytest.skip(f"Dataset not found at {dataset_path}")
+        return CSBenchmarkRunner(dataset_path=str(dataset_path), device="cpu", batch_size=8)
 
     def test_runner_initialization(self, runner):
         """Test CSBenchmarkRunner can be initialized."""
         assert runner is not None
         assert runner.device == "cpu"
         assert runner.batch_size == 8
+        assert runner.dataset is not None
+        assert len(runner.dataset) > 0
 
     def test_get_ablation_configs(self):
         """Test ablation configuration generation."""
@@ -144,8 +163,11 @@ class TestConfigurationVariations:
         configs = ablation_runner.get_ablation_configs()
         
         assert len(configs) > 0, "No ablation configs generated"
-        assert all("name" in config for config in configs), "Missing config names"
-        assert all("config" in config for config in configs), "Missing config dicts"
+        assert isinstance(configs, dict), "Config should be a dictionary"
+        assert all(isinstance(k, str) for k in configs.keys()), "All config names should be strings"
+        assert all(isinstance(v, dict) for v in configs.values()), "All config values should be dicts"
+        assert "00_no_verification" in configs, "Baseline config missing"
+        assert "01c_ensemble" in configs, "Ensemble config missing"
 
     def test_baseline_config(self):
         """Test baseline configuration (no verification)."""
@@ -173,12 +195,17 @@ class TestReproducibility:
 
     def test_seed_determinism(self):
         """Test that same seed produces same results."""
-        runner1 = CSBenchmarkRunner(device="cpu")
-        runner2 = CSBenchmarkRunner(device="cpu")
+        dataset_path = Path("evaluation/cs_benchmark/cs_benchmark_dataset.jsonl")
+        if not dataset_path.exists():
+            pytest.skip(f"Dataset not found at {dataset_path}")
+        
+        runner1 = CSBenchmarkRunner(dataset_path=str(dataset_path), device="cpu", seed=42)
+        runner2 = CSBenchmarkRunner(dataset_path=str(dataset_path), device="cpu", seed=42)
         
         # Both runners should be configured identically
         assert runner1.batch_size == runner2.batch_size
         assert runner1.device == runner2.device
+        assert runner1.seed == runner2.seed
 
     def test_nli_deterministic(self):
         """Test NLI verifier produces deterministic results."""
@@ -200,28 +227,39 @@ class TestScalability:
     @pytest.mark.slow
     def test_small_sample_execution(self):
         """Test benchmark on very small sample (smoke test)."""
-        runner = CSBenchmarkRunner(device="cpu", batch_size=2)
+        dataset_path = Path("evaluation/cs_benchmark/cs_benchmark_easy.jsonl")
+        if not dataset_path.exists():
+            pytest.skip(f"Dataset not found at {dataset_path}")
+        
+        runner = CSBenchmarkRunner(dataset_path=str(dataset_path), device="cpu", batch_size=2)
         
         # Load small dataset
-        dataset_path = Path("evaluation/cs_benchmark/cs_benchmark_easy.jsonl")
         examples = [json.loads(line) for line in open(dataset_path)][:3]
         
         assert len(examples) == 3, "Test dataset loading failed"
+        assert runner.dataset is not None
 
     @pytest.mark.slow
     def test_medium_sample_execution(self):
         """Test benchmark on medium sample."""
-        runner = CSBenchmarkRunner(device="cpu", batch_size=4)
-        
         dataset_path = Path("evaluation/cs_benchmark/cs_benchmark_dataset.jsonl")
-        if dataset_path.exists():
-            examples = [json.loads(line) for line in open(dataset_path)]
-            assert len(examples) > 5, "Dataset too small for medium test"
+        if not dataset_path.exists():
+            pytest.skip(f"Dataset not found at {dataset_path}")
+        
+        runner = CSBenchmarkRunner(dataset_path=str(dataset_path), device="cpu", batch_size=4)
+        
+        examples = [json.loads(line) for line in open(dataset_path)]
+        assert len(examples) > 5, "Dataset too small for medium test"
+        assert runner.dataset is not None
 
     def test_batch_size_variations(self):
         """Test different batch sizes don't break code."""
+        dataset_path = Path("evaluation/cs_benchmark/cs_benchmark_dataset.jsonl")
+        if not dataset_path.exists():
+            pytest.skip(f"Dataset not found at {dataset_path}")
+        
         for batch_size in [1, 2, 4, 8, 16]:
-            runner = CSBenchmarkRunner(device="cpu", batch_size=batch_size)
+            runner = CSBenchmarkRunner(dataset_path=str(dataset_path), device="cpu", batch_size=batch_size)
             assert runner.batch_size == batch_size
 
 

@@ -136,6 +136,22 @@ def _assess_extraction_quality(text: str) -> Tuple[bool, str]:
     return True, "Good quality"
 
 
+def _get_pdf_bytes(uploaded_file: Any) -> bytes:
+    """Return raw PDF bytes from various input types."""
+    if isinstance(uploaded_file, (bytes, bytearray)):
+        return bytes(uploaded_file)
+
+    if hasattr(uploaded_file, "getvalue"):
+        return uploaded_file.getvalue()
+
+    if hasattr(uploaded_file, "read"):
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        return uploaded_file.read()
+
+    raise ValueError("Unsupported PDF input type")
+
+
 def extract_pdf_text(uploaded_file, ocr: Optional[Any] = None) -> Tuple[str, Dict[str, Any]]:
     """
     Extract text from PDF using page-level processing with selective OCR fallback.
@@ -162,12 +178,7 @@ def extract_pdf_text(uploaded_file, ocr: Optional[Any] = None) -> Tuple[str, Dic
     # Get file bytes
     if hasattr(uploaded_file, 'name'):
         file_path = uploaded_file.name
-        if hasattr(uploaded_file, 'getvalue'):
-            file_bytes = uploaded_file.getvalue()
-        else:
-            if hasattr(uploaded_file, 'seek'):
-                uploaded_file.seek(0)
-            file_bytes = uploaded_file.read()
+        file_bytes = _get_pdf_bytes(uploaded_file)
     else:
         file_path = str(uploaded_file)
         with open(file_path, 'rb') as f:
@@ -267,6 +278,7 @@ def extract_pdf_text(uploaded_file, ocr: Optional[Any] = None) -> Tuple[str, Dic
     metadata: Dict[str, Any] = {
         "extraction_method": primary_method,
         "method": primary_method,
+        "extraction_method_used": primary_method,  # backward compat
         "num_pages": len(pages),
         "pages": len(pages),
         "ocr_pages": pages_ocr,
@@ -344,12 +356,7 @@ def extract_pdf_text_legacy(uploaded_file, ocr: Optional[Any] = None) -> Tuple[s
     # Get file bytes
     if hasattr(uploaded_file, 'name'):
         file_path = uploaded_file.name
-        if hasattr(uploaded_file, 'getvalue'):
-            file_bytes = uploaded_file.getvalue()
-        else:
-            if hasattr(uploaded_file, 'seek'):
-                uploaded_file.seek(0)
-            file_bytes = uploaded_file.read()
+        file_bytes = _get_pdf_bytes(uploaded_file)
     else:
         file_path = str(uploaded_file)
         with open(file_path, 'rb') as f:
@@ -508,6 +515,21 @@ def _extract_with_pdfplumber(file_bytes: bytes) -> str:
     except Exception as e:
         logger.debug(f"pdfplumber extraction error: {e}")
         return ""
+
+
+def _extract_with_ocr(
+    file_bytes: bytes,
+    ocr,
+    max_pages: int = None,
+    dpi: int = 200
+) -> Tuple[str, str, int]:
+    """Backward-compatible OCR extraction wrapper."""
+    return _extract_with_ocr_pymupdf(
+        file_bytes=file_bytes,
+        ocr=ocr,
+        max_pages=max_pages,
+        dpi=dpi
+    )
 
 
 def _extract_with_ocr_pymupdf(

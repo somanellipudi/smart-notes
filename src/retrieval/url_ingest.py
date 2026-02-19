@@ -2,7 +2,7 @@
 URL ingestion module for Smart Notes.
 
 Supports fetching content from:
-- YouTube videos (via transcripts)
+- YouTube videos (via transcripts - delegated to youtube_ingest module)
 - Web articles (via HTML parsing)
 """
 
@@ -14,6 +14,11 @@ from typing import Literal, List, Optional, Dict, Any
 from urllib.parse import urlparse
 
 from src.preprocessing.text_cleaner import clean_extracted_text
+from src.retrieval.youtube_ingest import (
+    extract_video_id as extract_youtube_video_id,
+    is_youtube_url,
+    fetch_transcript_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +43,6 @@ try:
 except ImportError:
     BS4_AVAILABLE = False
     logger.warning("beautifulsoup4 not available, article parsing will be limited")
-
-try:
-    from youtube_transcript_api import YouTubeTranscriptApi
-    YOUTUBE_TRANSCRIPT_AVAILABLE = True
-except ImportError:
-    YOUTUBE_TRANSCRIPT_AVAILABLE = False
-    logger.warning("youtube-transcript-api not available, YouTube ingestion will be limited")
 
 
 # Configuration
@@ -79,9 +77,9 @@ def detect_source_type(url: str) -> Literal["youtube", "article", "unknown"]:
     """
     try:
         parsed = urlparse(url.lower())
-        hostname = parsed.hostname or ""
         
-        if "youtube.com" in hostname or "youtu.be" in hostname:
+        # Use youtube_ingest module for YouTube detection
+        if is_youtube_url(url):
             return "youtube"
         elif parsed.scheme in ("http", "https"):
             return "article"
@@ -92,37 +90,16 @@ def detect_source_type(url: str) -> Literal["youtube", "article", "unknown"]:
         return "unknown"
 
 
-def extract_youtube_video_id(url: str) -> Optional[str]:
-    """
-    Extract YouTube video ID from URL.
-    
-    Supports formats:
-    - https://www.youtube.com/watch?v=VIDEO_ID
-    - https://youtu.be/VIDEO_ID
-    - https://www.youtube.com/embed/VIDEO_ID
-    
-    Args:
-        url: YouTube URL
-    
-    Returns:
-        Video ID or None if not found
-    """
-    patterns = [
-        r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})',
-        r'youtube\.com\/v\/([a-zA-Z0-9_-]{11})',
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    
-    return None
+# Note: extract_youtube_video_id is now imported from youtube_ingest module for better separation of concerns
+# Backward compatibility is maintained through the import alias above
 
 
 def fetch_youtube_transcript(url: str, include_timestamps: bool = None) -> UrlSource:
     """
     Fetch YouTube video transcript.
+    
+    Delegates to youtube_ingest.fetch_transcript_text for improved error handling
+    and user-friendly error messages.
     
     Args:
         url: YouTube video URL
@@ -136,6 +113,7 @@ def fetch_youtube_transcript(url: str, include_timestamps: bool = None) -> UrlSo
     if include_timestamps is None:
         include_timestamps = YOUTUBE_INCLUDE_TIMESTAMPS
     
+    # Extract video ID
     video_id = extract_youtube_video_id(url)
     
     if not video_id:
@@ -148,99 +126,28 @@ def fetch_youtube_transcript(url: str, include_timestamps: bool = None) -> UrlSo
             error="Could not extract video ID from URL"
         )
     
-    if not YOUTUBE_TRANSCRIPT_AVAILABLE:
-        return UrlSource(
-            url=url,
-            source_type="youtube",
-            title=None,
-            fetched_at=datetime.utcnow().isoformat(),
-            text="",
-            error="youtube-transcript-api not installed. Install with: pip install youtube-transcript-api"
-        )
+    # Use dedicated youtube_ingest module for transcript fetching
+    result = fetch_transcript_text(
+        video_id,
+        languages=["en", "en-US"],
+        include_timestamps=include_timestamps
+    )
     
-    try:
-        # Try to fetch transcript in English first, then fallback to available
-        transcript_list = None
-        transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        # Try to get English transcript
-        try:
-            transcript_list = transcripts.find_transcript(['en', 'en-US'])
-            logger.info(f"Using English transcript for video {video_id}")
-        except Exception:
-            # Fallback to first available transcript
-            try:
-                transcript_list = transcripts.find_manually_created_transcript(
-                    language_codes=['en', 'en-US']
-                )
-                logger.info(f"Using manual English transcript for video {video_id}")
-            except Exception:
-                # Get any available transcript
-                available = transcripts.get_available_transcripts()
-                if available:
-                    transcript_list = available[0]
-                    logger.info(
-                        f"Using {transcript_list.language} transcript (English unavailable) for video {video_id}"
-                    )
-                else:
-                    raise ValueError("No transcripts available for this video")
-        
-        # Fetch the actual transcript
-        transcript = transcript_list.fetch()
-        
-        # Format transcript text
-        if include_timestamps:
-            # Include timestamps: [HH:MM:SS] Text
-            text_parts = []
-            for entry in transcript:
-                # Convert seconds to HH:MM:SS format
-                start_time = entry.get('start', 0)
-                hours = int(start_time // 3600)
-                minutes = int((start_time % 3600) // 60)
-                seconds = int(start_time % 60)
-                timestamp = f"[{hours:02d}:{minutes:02d}:{seconds:02d}]"
-                
-                text = entry.get('text', '').strip()
-                if text:
-                    text_parts.append(f"{timestamp} {text}")
-            
-            text = "\n".join(text_parts)
-        else:
-            # Concatenate text without timestamps
-            text = " ".join(entry['text'] for entry in transcript if entry.get('text'))
-        
-        # Basic cleanup
-        text, _ = clean_extracted_text(text)
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        logger.info(
-            f"Fetched YouTube transcript: {len(text)} chars from video {video_id} "
-            f"(timestamps: {'yes' if include_timestamps else 'no'})"
-        )
-        
-        return UrlSource(
-            url=url,
-            source_type="youtube",
-            title=f"YouTube Video {video_id}",
-            fetched_at=datetime.utcnow().isoformat(),
-            text=text,
-            metadata={
-                "video_id": video_id,
-                "include_timestamps": include_timestamps,
-                "language": transcript_list.language if transcript_list else None
-            }
-        )
-    
-    except Exception as e:
-        logger.warning(f"Failed to fetch YouTube transcript for {video_id}: {e}")
-        return UrlSource(
-            url=url,
-            source_type="youtube",
-            title=None,
-            fetched_at=datetime.utcnow().isoformat(),
-            text="",
-            error=f"Failed to fetch transcript: {str(e)}"
-        )
+    # Convert TranscriptResult to UrlSource for backward compatibility
+    return UrlSource(
+        url=url,
+        source_type="youtube",
+        title=f"YouTube Video {video_id}",
+        fetched_at=result.fetched_at or datetime.utcnow().isoformat(),
+        text=result.text,
+        error=result.error,
+        metadata={
+            "video_id": result.video_id,
+            "language": result.language,
+            "include_timestamps": include_timestamps,
+            **(result.metadata or {})
+        }
+    )
 
 
 def fetch_article_content(url: str) -> UrlSource:

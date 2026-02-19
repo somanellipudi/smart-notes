@@ -15,7 +15,7 @@ from datetime import datetime
 import tempfile
 import hashlib
 import textwrap
-from typing import Tuple, Optional, Dict, Any, Callable
+from typing import Tuple, Optional, Dict, Any, Callable, List
 import requests
 
 # Suppress warnings
@@ -55,14 +55,27 @@ try:
     from src.output_formatter import StreamingOutputDisplay
     from src.reasoning.fallback_handler import FallbackGenerator, PipelineEnhancer
     from src.streamlit_display import StreamlitProgressDisplay, QuickExportButtons
+    from src.ui.input_validation import (
+        has_any_input,
+        get_input_status_message,
+        validate_urls_for_processing,
+        is_youtube_url,
+    )
     from src.exporters.report_exporter import export_report_json, export_report_pdf
     from src.reporting.research_report import (
         build_report,
+        save_reports,
         SessionMetadata,
         IngestionReport,
         VerificationSummary,
         ClaimEntry,
     )
+    from src.persistence.run_history import (
+        load_run_history,
+        append_run,
+        save_run_history,
+    )
+    from src.retrieval.artifact_store import generate_run_id
     from src.schema.output_schema import (
         ClassSessionOutput,
         Topic,
@@ -392,7 +405,8 @@ def process_session(
     domain_profile: str = "algorithms",
     llm_provider_type: str = "openai",
     progress_callback: Optional[Callable[[str, str], None]] = None,
-    debug_mode: bool = False
+    debug_mode: bool = False,
+    urls: Optional[List[str]] = None
 ) -> Tuple[dict, Optional[dict]]:
     """
     Process classroom session through the complete pipeline.
@@ -408,6 +422,7 @@ def process_session(
         llm_provider_type: LLM provider to use
         progress_callback: Optional progress callback for verifiable stages
         debug_mode: Whether to show debug details
+        urls: List of URLs to fetch as evidence sources (optional)
     
     Returns:
         Tuple of (result_dict, verifiable_metadata)
@@ -432,6 +447,34 @@ def process_session(
         transcript = transcription["transcript"]
         if transcript:
             st.success(f"✓ Transcription complete: {len(transcript)} characters")
+    
+    # Step 1.5: URL Content Extraction
+    url_extracted_text = ""
+    if urls:
+        with st.spinner("🌐 Fetching URL content..."):
+            try:
+                for url in urls:
+                    try:
+                        content, metadata = fetch_url_text(url)
+                        if content:
+                            source_type = metadata.get("source_type", "unknown")
+                            st.success(f"✓ {source_type.title()}: {metadata.get('words', 0)} words extracted from {url[:50]}...")
+                            url_extracted_text += content + "\n\n"
+                        else:
+                            error_msg = metadata.get("error", "No content extracted")
+                            st.warning(f"⚠️ Could not extract content from {url}: {error_msg}")
+                    except Exception as e:
+                        st.warning(f"⚠️ Error fetching {url}: {str(e)}")
+            except Exception as e:
+                st.error(f"❌ Error during URL ingestion: {str(e)}")
+                logger.error(f"URL ingestion error: {e}")
+    
+    # Combine notes with URL-extracted content
+    if url_extracted_text:
+        if notes_text:
+            notes_text = notes_text + "\n\n---\n\nContent from URLs:\n\n" + url_extracted_text
+        else:
+            notes_text = url_extracted_text
     
     # Step 2: Preprocessing
     with st.spinner("🔄 Preprocessing content..."):
@@ -866,6 +909,175 @@ def _build_verifiability_report(verifiable_metadata: Dict[str, Any], session_id:
     return report
 
 
+def _extract_claims_for_research_report(verifiable_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract claim dicts for reporting from verifiable metadata.
+    
+    Ensures evidence includes:
+    - source_id: which input provided the evidence
+    - source_type: pdf, audio, text, url, etc.
+    - page_num: page number if from PDF
+    - span_id: unique identifier for location
+    - snippet: text content
+    """
+    claims_data = verifiable_metadata.get("claims") or []
+    if claims_data:
+        return claims_data
+
+    claim_collection = verifiable_metadata.get("claim_collection")
+    if not claim_collection:
+        return []
+
+    report_claims = []
+    for claim in claim_collection.claims:
+        status_value = getattr(claim.status, "value", str(claim.status))
+        display_text = (
+            claim.metadata.get("ui_display", "") or
+            claim.claim_text or
+            claim.metadata.get("draft_text", "")
+        )
+        
+        # Extract claim_type from claim object
+        claim_type = getattr(claim, "claim_type", None)
+        if claim_type:
+            claim_type = claim_type.value if hasattr(claim_type, "value") else str(claim_type)
+        else:
+            claim_type = "fact_claim"
+
+        # Extract page_num and span_id from first evidence for report metadata
+        page_num = None
+        span_id = None
+        
+        evidence_items = []
+        for ev in getattr(claim, "evidence_objects", []) or []:
+            span_meta = getattr(ev, "span_metadata", {}) or {}
+            
+            # Extract page number if available
+            page = span_meta.get("page") or span_meta.get("page_num")
+            if page and page_num is None:
+                page_num = page
+            
+            # Extract span_id from evidence
+            ev_span_id = getattr(ev, "span_id", None)
+            if ev_span_id and span_id is None:
+                span_id = ev_span_id
+            
+            location = span_meta.get("location") or span_meta.get("line") or page
+            
+            evidence_items.append({
+                "source_id": getattr(ev, "source_id", ""),
+                "source_type": getattr(ev, "source_type", ""),
+                "page_num": page,
+                "snippet": (getattr(ev, "snippet", "") or getattr(ev, "text", ""))[:500],
+                "similarity": getattr(ev, "similarity", None),
+                "location": location,
+                "span_id": ev_span_id,
+            })
+
+        report_claims.append({
+            "claim_text": claim.claim_text or display_text,
+            "status": status_value,
+            "confidence": claim.confidence,
+            "evidence": evidence_items,
+            "page_num": page_num,
+            "span_id": span_id,
+            "claim_type": claim_type,
+            "rejection_reason": getattr(claim, "rejection_reason", None),
+        })
+
+    return report_claims
+
+
+def _compute_verification_stats(
+    claims_data: List[Dict[str, Any]],
+    metrics: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Compute verification stats strictly from claim data.
+    
+    Returns:
+        Dict with:
+        - total_claims: Total number of claims
+        - verified: Number verified
+        - rejected: Number rejected
+        - low_conf: Number low confidence
+        - avg_conf: Average confidence across all claims
+        - rejection_reasons: Dict[reason_str, count] for rejected claims
+    """
+    total_claims = len(claims_data)
+    verified_count = sum(1 for c in claims_data if str(c.get("status", "")).upper() == "VERIFIED")
+    low_conf_count = sum(1 for c in claims_data if str(c.get("status", "")).upper() == "LOW_CONFIDENCE")
+    rejected_count = sum(1 for c in claims_data if str(c.get("status", "")).upper() == "REJECTED")
+
+    avg_conf = None
+    if total_claims > 0:
+        avg_conf = metrics.get("avg_confidence")
+        if not isinstance(avg_conf, (int, float)):
+            confidences = [c.get("confidence", 0.0) for c in claims_data]
+            avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
+
+    # Compute rejection_reasons from rejected claims
+    rejection_reasons = {}
+    for c in claims_data:
+        if str(c.get("status", "")).upper() == "REJECTED":
+            reason = c.get("rejection_reason", "UNKNOWN_REASON") or "UNKNOWN_REASON"
+            reason_str = reason if isinstance(reason, str) else str(reason)
+            rejection_reasons[reason_str] = rejection_reasons.get(reason_str, 0) + 1
+
+    return {
+        "total_claims": total_claims,
+        "verified": verified_count,
+        "rejected": rejected_count,
+        "low_conf": low_conf_count,
+        "avg_conf": avg_conf,
+        "rejection_reasons": rejection_reasons if rejection_reasons else None,
+    }
+
+
+def _summarize_ingestion_pages(ingestion_diagnostics: Dict[str, Any]) -> Dict[str, int]:
+    """Summarize page counts from ingestion diagnostics."""
+    pdf_files = ingestion_diagnostics.get("pdf_files", []) if ingestion_diagnostics else []
+    pages = 0
+    ocr_pages = 0
+    for pdf in pdf_files:
+        pages += int(pdf.get("pages_total") or 0)
+        ocr_pages += int(pdf.get("ocr_pages") or 0)
+
+    return {
+        "pages": pages,
+        "ocr_pages": ocr_pages,
+    }
+
+
+def _resolve_inputs_used(
+    ingestion_payload: Optional[Dict[str, Any]],
+    ingestion_diagnostics: Dict[str, Any]
+) -> List[str]:
+    """Resolve input types used for a run."""
+    present = set()
+    if ingestion_payload:
+        if ingestion_payload.get("notes_text"):
+            present.add("text")
+        if ingestion_payload.get("urls_text"):
+            present.add("urls")
+        if ingestion_payload.get("audio_present"):
+            present.add("audio")
+
+    if ingestion_diagnostics and ingestion_diagnostics.get("pdf_files"):
+        present.add("pdf")
+
+    order = ["pdf", "audio", "text", "urls"]
+    return [item for item in order if item in present]
+
+
+def _load_artifact_text(path_value: Optional[str]) -> Optional[str]:
+    """Load a text artifact from disk if available."""
+    if not path_value:
+        return None
+    path = Path(path_value)
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
 def _build_verifiability_report_pdf(report: Dict[str, Any]) -> bytes:
     try:
         import fitz  # PyMuPDF
@@ -1064,11 +1276,16 @@ def _display_research_reports(
             inputs_used=st.session_state.get("input_sources", []),
         )
         
-        # Extract ingestion report
-        ingestion_diagnostics = verifiable_metadata.get("ingestion_diagnostics", {})
+        # Extract ingestion report from actual ingestion diagnostics
+        ingestion_diagnostics = {}
+        if hasattr(st.session_state, "ingestion_diagnostics") and st.session_state.ingestion_diagnostics:
+            ingestion_diagnostics = st.session_state.ingestion_diagnostics
+        else:
+            ingestion_diagnostics = verifiable_metadata.get("ingestion_diagnostics", {})
+        ingestion_pages = _summarize_ingestion_pages(ingestion_diagnostics)
         ingestion_report = IngestionReport(
-            total_pages=ingestion_diagnostics.get("total_pages", 0),
-            pages_ocr=ingestion_diagnostics.get("pages_ocr", 0),
+            total_pages=ingestion_diagnostics.get("total_pages", ingestion_pages["pages"]),
+            pages_ocr=ingestion_diagnostics.get("pages_ocr", ingestion_pages["ocr_pages"]),
             headers_removed=ingestion_diagnostics.get("headers_removed", 0),
             footers_removed=ingestion_diagnostics.get("footers_removed", 0),
             watermarks_removed=ingestion_diagnostics.get("watermarks_removed", 0),
@@ -1077,32 +1294,50 @@ def _display_research_reports(
             extraction_methods=ingestion_diagnostics.get("extraction_methods", []),
         )
         
-        # Extract verification summary and metrics
+        # Extract verification summary and metrics from actual results
         metrics = verifiable_metadata.get("metrics", {})
-        claims_data = verifiable_metadata.get("claims", [])
+        claims_data = _extract_claims_for_research_report(verifiable_metadata)
+
+        stats = _compute_verification_stats(claims_data, metrics)
+        total_claims = stats["total_claims"]
+        verified_count = stats["verified"]
+        low_conf_count = stats["low_conf"]
+        rejected_count = stats["rejected"]
         
-        verified_count = sum(1 for c in claims_data if c.get("status", "").upper() == "VERIFIED")
-        low_conf_count = sum(1 for c in claims_data if c.get("status", "").upper() == "LOW_CONFIDENCE")
-        rejected_count = sum(1 for c in claims_data if c.get("status", "").upper() == "REJECTED")
+        # Invariant check: all claims must be accounted for
+        count_sum = verified_count + low_conf_count + rejected_count
+        if total_claims > 0 and count_sum != total_claims:
+            logger.warning(
+                f"Claim count mismatch: total={total_claims}, "
+                f"verified={verified_count}, low_conf={low_conf_count}, rejected={rejected_count} "
+                f"(sum={count_sum})"
+            )
         
-        avg_conf = metrics.get("avg_confidence", 0.0)
-        if not isinstance(avg_conf, (int, float)):
+        # Only compute avg_confidence if there are claims
+        if total_claims > 0:
+            avg_conf = stats["avg_conf"]
+        else:
             avg_conf = 0.0
         
-        rejection_reasons = metrics.get("rejection_reasons", {})
-        top_reasons = [(reason, count) for reason, count in sorted(
-            rejection_reasons.items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )[:5]]  # Top 5 reasons
+        # Only include rejection reasons if there are actually rejected claims
+        rejection_reasons = stats.get("rejection_reasons", {})
+        if total_claims > 0 and rejected_count > 0:
+            top_reasons = [(reason, count) for reason, count in sorted(
+                rejection_reasons.items(), 
+                key=lambda x: x[1], 
+                reverse=True
+            )[:5]]  # Top 5 reasons
+        else:
+            top_reasons = []  # No reasons if zero claims or zero rejected
         
         verification_summary = VerificationSummary(
-            total_claims=len(claims_data),
+            total_claims=total_claims,
             verified_count=verified_count,
             low_confidence_count=low_conf_count,
             rejected_count=rejected_count,
             avg_confidence=float(avg_conf),
             top_rejection_reasons=top_reasons,
+            rejection_reasons_dict=rejection_reasons if rejection_reasons else None,
             calibration_metrics=metrics.get("calibration_metrics"),
         )
         
@@ -1111,7 +1346,7 @@ def _display_research_reports(
         for claim in claims_data:
             evidence = claim.get("evidence", [])
             top_evidence = evidence[0].get("snippet", "") if evidence else ""
-            
+
             entry = ClaimEntry(
                 claim_text=claim.get("claim_text", ""),
                 status=claim.get("status", "UNKNOWN"),
@@ -1120,6 +1355,7 @@ def _display_research_reports(
                 top_evidence=top_evidence,
                 page_num=claim.get("page_num"),
                 span_id=claim.get("span_id"),
+                claim_type=claim.get("claim_type", "fact_claim"),
             )
             claims_entries.append(entry)
         
@@ -1131,6 +1367,76 @@ def _display_research_reports(
             claims_entries,
             performance_metrics=metrics.get("performance", {}),
         )
+
+        # Persist report artifacts and run history
+        evidence_stats = verifiable_metadata.get("evidence_stats", {})
+        run_id = st.session_state.get("current_run_id")
+        if not run_id:
+            run_id = evidence_stats.get("artifact_run_id") or generate_run_id(session_id)
+            st.session_state.current_run_id = run_id
+
+        run_dir = config.ARTIFACTS_DIR / session_id / run_id
+        report_md_path, report_html_path, audit_json_path = save_reports(
+            run_dir,
+            md_content,
+            html_content,
+            audit_json,
+            prefix="research_report",
+        )
+
+        metrics_path = run_dir / "metrics.json"
+        metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+
+        graphml_path = None
+        claim_graph = verifiable_metadata.get("claim_graph")
+        if claim_graph and hasattr(claim_graph, "export_graphml"):
+            candidate_path = run_dir / "claim_graph.graphml"
+            if claim_graph.export_graphml(str(candidate_path)):
+                graphml_path = candidate_path
+
+        ingestion_pages = _summarize_ingestion_pages(ingestion_diagnostics)
+        inputs_used = _resolve_inputs_used(
+            st.session_state.get("ingestion_payload"),
+            ingestion_diagnostics,
+        )
+
+        run_summary = {
+            "run_id": run_id,
+            "session_id": session_id,
+            "timestamp": datetime.now().isoformat(),
+            "domain_profile": verifiable_metadata.get("domain_profile_display")
+            or verifiable_metadata.get("domain_profile")
+            or "unknown",
+            "llm_model": getattr(config, "LLM_MODEL", "unknown"),
+            "embedding_model": getattr(config, "EMBEDDING_MODEL_NAME", "unknown"),
+            "nli_model": getattr(config, "NLI_MODEL_NAME", "unknown"),
+            "inputs_used": inputs_used,
+            "ingestion_stats": ingestion_pages,
+            "verification_stats": {
+                "total_claims": stats["total_claims"],
+                "verified": stats["verified"],
+                "rejected": stats["rejected"],
+                "low_conf": stats["low_conf"],
+                "avg_conf": stats["avg_conf"],
+            },
+            "artifact_paths": {
+                "report_md": str(report_md_path),
+                "report_html": str(report_html_path),
+                "audit_json": str(audit_json_path),
+                "metrics_json": str(metrics_path),
+                "graphml": str(graphml_path) if graphml_path else None,
+            },
+        }
+
+        global_index = config.ARTIFACTS_DIR / "run_history.json"
+        session_index = config.ARTIFACTS_DIR / session_id / "run_history.json"
+
+        for index_path in (global_index, session_index):
+            history = load_run_history(index_path)
+            history = append_run(history, run_summary, max_runs=3)
+            save_run_history(index_path, history)
+
+        st.session_state.latest_run_summary = run_summary
         
         # Display report options
         st.subheader("📄 Research Reports")
@@ -1157,7 +1463,6 @@ def _display_research_reports(
             )
         
         with col3:
-            import json
             audit_json_str = json.dumps(audit_json, indent=2)
             st.download_button(
                 label="⬇️ Audit JSON",
@@ -1495,6 +1800,16 @@ def main():
         st.session_state.ingestion_ready = False
     if 'ingestion_payload' not in st.session_state:
         st.session_state.ingestion_payload = None
+    if 'current_run_id' not in st.session_state:
+        st.session_state.current_run_id = None
+    if 'latest_run_summary' not in st.session_state:
+        st.session_state.latest_run_summary = None
+    if 'loaded_run' not in st.session_state:
+        st.session_state.loaded_run = None
+    if 'loaded_run_artifacts' not in st.session_state:
+        st.session_state.loaded_run_artifacts = None
+    if 'show_loaded_run' not in st.session_state:
+        st.session_state.show_loaded_run = False
     if 'notes_char_count' not in st.session_state:
         st.session_state.notes_char_count = 0
     if 'extraction_methods' not in st.session_state:
@@ -1768,6 +2083,103 @@ def main():
             st.caption("💡 Switch to '🔧 Custom' to manually adjust sections")
         
         st.caption("✓ Verifiability report includes claim summaries and evidence highlights")
+
+        st.divider()
+        st.subheader("Recent Runs (last 3)")
+
+        run_history_path = config.ARTIFACTS_DIR / "run_history.json"
+        run_history = load_run_history(run_history_path)
+
+        if not run_history:
+            st.caption("No recent runs yet.")
+        else:
+            for run in reversed(run_history):
+                run_id = run.get("run_id", "unknown")
+                timestamp = run.get("timestamp", "")
+                header = f"{run_id}"
+                if timestamp:
+                    header = f"{run_id} • {timestamp[:19]}"
+
+                with st.expander(header, expanded=False):
+                    st.write(f"Session: {run.get('session_id', 'unknown')}")
+                    st.write(f"Domain: {run.get('domain_profile', 'unknown')}")
+                    inputs_used = run.get("inputs_used", [])
+                    if inputs_used:
+                        st.write(f"Inputs: {', '.join(inputs_used)}")
+
+                    ver_stats = run.get("verification_stats", {})
+                    avg_conf = ver_stats.get("avg_conf")
+                    avg_conf_display = f"{avg_conf:.2f}" if isinstance(avg_conf, (int, float)) else "N/A"
+                    st.write(
+                        "Claims: "
+                        f"total={ver_stats.get('total_claims', 0)}, "
+                        f"verified={ver_stats.get('verified', 0)}, "
+                        f"rejected={ver_stats.get('rejected', 0)}, "
+                        f"low_conf={ver_stats.get('low_conf', 0)}, "
+                        f"avg_conf={avg_conf_display}"
+                    )
+
+                    paths = run.get("artifact_paths", {})
+                    report_md = _load_artifact_text(paths.get("report_md"))
+                    report_html = _load_artifact_text(paths.get("report_html"))
+                    audit_json = _load_artifact_text(paths.get("audit_json"))
+                    metrics_json = _load_artifact_text(paths.get("metrics_json"))
+                    graphml_text = _load_artifact_text(paths.get("graphml"))
+
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if report_md:
+                            st.download_button(
+                                label="Download report.md",
+                                data=report_md,
+                                file_name=f"report_{run_id}.md",
+                                mime="text/markdown",
+                                key=f"dl_md_{run_id}"
+                            )
+                        if audit_json:
+                            st.download_button(
+                                label="Download audit.json",
+                                data=audit_json,
+                                file_name=f"audit_{run_id}.json",
+                                mime="application/json",
+                                key=f"dl_audit_{run_id}"
+                            )
+                        if graphml_text:
+                            st.download_button(
+                                label="Download graph.graphml",
+                                data=graphml_text,
+                                file_name=f"graph_{run_id}.graphml",
+                                mime="application/xml",
+                                key=f"dl_graph_{run_id}"
+                            )
+                    with col_b:
+                        if report_html:
+                            st.download_button(
+                                label="Download report.html",
+                                data=report_html,
+                                file_name=f"report_{run_id}.html",
+                                mime="text/html",
+                                key=f"dl_html_{run_id}"
+                            )
+                        if metrics_json:
+                            st.download_button(
+                                label="Download metrics.json",
+                                data=metrics_json,
+                                file_name=f"metrics_{run_id}.json",
+                                mime="application/json",
+                                key=f"dl_metrics_{run_id}"
+                            )
+
+                    if st.button("Load this run", key=f"load_run_{run_id}"):
+                        st.session_state.loaded_run = run
+                        st.session_state.loaded_run_artifacts = {
+                            "report_md": report_md,
+                            "report_html": report_html,
+                            "audit_json": audit_json,
+                            "metrics_json": metrics_json,
+                            "graphml": graphml_text,
+                        }
+                        st.session_state.show_loaded_run = True
         
         if st.session_state.debug_mode:
             # Debug: Show current filter state
@@ -1942,20 +2354,28 @@ def main():
 
     st.divider()
 
-    has_input_now = bool(
-        (notes_text and notes_text.strip())
-        or (notes_images and len(notes_images) > 0)
-        or audio_file
+    has_input_now = has_any_input(
+        notes_text=notes_text,
+        notes_images=notes_images,
+        audio_file=audio_file,
+        urls_text=urls_text,
+        min_text_chars=1
     )
     if has_input_now and not st.session_state.ingestion_error:
         st.session_state.ingestion_ready = True
 
     notes_text_len = len(notes_text.strip()) if notes_text else 0
     files_present = bool(notes_images and len(notes_images) > 0)
+    
+    # Check for valid URLs
+    valid_urls, url_error = validate_urls_for_processing(urls_text)
+    has_valid_urls = len(valid_urls) > 0
+    
     notes_ready_for_verification = (
         (notes_text_len >= config.MIN_INPUT_CHARS_FOR_VERIFICATION)
         or files_present
         or bool(audio_file)
+        or has_valid_urls  # URLs count as valid input for verification
     )
 
     # Primary + secondary actions
@@ -1990,12 +2410,19 @@ def main():
         if not enable_verifiable_mode:
             st.caption("Enable Verifiable Mode in Settings to run the report.")
         elif not has_input_now:
-            st.caption("Upload a file or paste text first.")
-        elif notes_text_len and notes_text_len < config.MIN_INPUT_CHARS_FOR_VERIFICATION and not files_present:
+            status_msg = get_input_status_message(
+                notes_text=notes_text,
+                notes_images=notes_images,
+                audio_file=audio_file,
+                urls_text=urls_text,
+                min_text_chars=1
+            )
+            st.caption(status_msg)
+        elif notes_text_len and notes_text_len < config.MIN_INPUT_CHARS_FOR_VERIFICATION and not files_present and not has_valid_urls:
             st.caption(
                 f"Need at least {config.MIN_INPUT_CHARS_FOR_VERIFICATION} characters before verification."
             )
-        elif files_present and notes_text_len < config.MIN_INPUT_CHARS_FOR_VERIFICATION:
+        elif files_present and notes_text_len < config.MIN_INPUT_CHARS_FOR_VERIFICATION and not has_valid_urls:
             st.caption("Text will be extracted during verification.")
 
         if st.session_state.get("debug_mode"):
@@ -2018,6 +2445,8 @@ def main():
     # Process when either button clicked
     if generate_button:
         st.session_state.ingestion_ready = False
+        st.session_state.current_run_id = None
+        st.session_state.latest_run_summary = None
         # Initialize OCR for PDF processing
         ocr_instance = initialize_ocr()
         
@@ -2217,11 +2646,18 @@ def main():
         st.session_state.extraction_methods = extraction_methods
         st.session_state.ingestion_diagnostics = ingestion_diagnostics
         
+        # Parse and validate URLs
+        valid_urls, url_validation_error = validate_urls_for_processing(urls_text)
+        
         # Validation - check if we have any input at all
-        has_input = combined_notes or audio_file or (notes_images and len(notes_images) > 0)
+        # Include valid_urls in input check
+        has_input = combined_notes or audio_file or (notes_images and len(notes_images) > 0) or len(valid_urls) > 0
         
         if not has_input:
-            st.error("Please provide notes, images, or audio.")
+            st.error("Please provide notes, images, audio, or URL sources.")
+        # Check if there's a URL validation error
+        elif url_validation_error:
+            st.error(f"⚠️ {url_validation_error}")
         # Check if ingestion failed (don't proceed with verification)
         elif st.session_state.ingestion_error:
             st.error(
@@ -2288,7 +2724,8 @@ def main():
                 domain_profile=domain_profile if actual_verifiable_mode else "algorithms",
                 llm_provider_type=llm_type,
                 progress_callback=progress_callback,
-                debug_mode=st.session_state.debug_mode
+                debug_mode=st.session_state.debug_mode,
+                urls=valid_urls if valid_urls else None
             )
             
             # Store results in session state
@@ -2301,7 +2738,8 @@ def main():
                 "equations": equations,
                 "external_context": external_context,
                 "session_id": session_id,
-                "urls_text": urls_text if 'urls_text' in locals() else ""
+                "urls_text": urls_text if 'urls_text' in locals() else "",
+                "audio_present": audio_file is not None
             }
     
     # ========================================================================
@@ -2407,6 +2845,59 @@ def main():
                 st.info("Run verification to generate the report.")
 
         with reports_tab:
+            if st.session_state.show_loaded_run and st.session_state.loaded_run_artifacts:
+                loaded_run = st.session_state.loaded_run or {}
+                st.subheader("Loaded Run (cached)")
+                st.caption(
+                    f"Run ID: {loaded_run.get('run_id', 'unknown')} · "
+                    f"Session: {loaded_run.get('session_id', 'unknown')}"
+                )
+
+                cached = st.session_state.loaded_run_artifacts
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if cached.get("report_md"):
+                        st.download_button(
+                            label="Download Markdown",
+                            data=cached["report_md"],
+                            file_name=f"research_report_{loaded_run.get('run_id', 'run')}.md",
+                            mime="text/markdown",
+                            help="Cached markdown report"
+                        )
+                with col2:
+                    if cached.get("report_html"):
+                        st.download_button(
+                            label="Download HTML",
+                            data=cached["report_html"],
+                            file_name=f"research_report_{loaded_run.get('run_id', 'run')}.html",
+                            mime="text/html",
+                            help="Cached HTML report"
+                        )
+                with col3:
+                    if cached.get("audit_json"):
+                        st.download_button(
+                            label="Download Audit JSON",
+                            data=cached["audit_json"],
+                            file_name=f"research_report_audit_{loaded_run.get('run_id', 'run')}.json",
+                            mime="application/json",
+                            help="Cached audit JSON"
+                        )
+
+                st.divider()
+                preview_format = st.radio(
+                    "View cached report in:",
+                    ["Markdown", "HTML"],
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="cached_report_preview"
+                )
+                if preview_format == "Markdown" and cached.get("report_md"):
+                    st.markdown(cached["report_md"])
+                elif preview_format == "HTML" and cached.get("report_html"):
+                    st.components.v1.html(cached["report_html"], height=800, scrolling=True)
+                else:
+                    st.info("Cached report preview unavailable.")
+
             if st.session_state.verifiable_metadata and st.session_state.verifiable_metadata.get("verifiable_mode"):
                 _display_research_reports(
                     st.session_state.verifiable_metadata,

@@ -589,7 +589,7 @@ warnings: List[str]
 
 **Mitigation**:
 - Use flat indexes for reproducibility
-- Set FAISS seed: `faiss.set_random_seed(42)` (if using approximate indexes)
+- Set FAISS seed: `faiss.random.seed(42)` (newer API) or `faiss.set_random_seed(42)` (legacy)
 - Sort results by (similarity, evidence_id) for tie-breaking
 
 ---
