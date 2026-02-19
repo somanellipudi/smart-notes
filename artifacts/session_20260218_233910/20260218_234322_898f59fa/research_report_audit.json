@@ -1,0 +1,310 @@
+{
+  "report_type": "audit",
+  "generated_at": "2026-02-18T23:43:22.633436",
+  "session": {
+    "session_id": "session_20260218_233910",
+    "timestamp": "2026-02-18T23:43:22.620788",
+    "version": "1.0.0",
+    "seed": 42,
+    "language_model": "gpt-4",
+    "embedding_model": "intfloat/e5-base-v2",
+    "nli_model": "cross-encoder/qnli",
+    "inputs_used": []
+  },
+  "ingestion": {
+    "total_pages": 0,
+    "pages_ocr": 0,
+    "headers_removed": 0,
+    "footers_removed": 0,
+    "watermarks_removed": 0,
+    "total_chunks": 0,
+    "avg_chunk_size": null,
+    "extraction_methods": []
+  },
+  "verification": {
+    "total_claims": 25,
+    "verified_count": 13,
+    "low_confidence_count": 0,
+    "rejected_count": 12,
+    "avg_confidence": 0.4357,
+    "top_rejection_reasons": [
+      [
+        "DISALLOWED_CLAIM_TYPE",
+        12
+      ]
+    ],
+    "calibration_metrics": null,
+    "selective_prediction": null,
+    "conformal_prediction": null,
+    "rejection_reasons_dict": {
+      "DISALLOWED_CLAIM_TYPE": 12
+    }
+  },
+  "claims": [
+    {
+      "claim_text": "A stack is a type of data structure that operates on the principle of Last In, First Out (LIFO). It stores data items with two main operations: push (adding an item) and pop (removing an item). This makes it useful for tasks where you need to keep track of things in the reverse order they were added.",
+      "status": "verified",
+      "confidence": 0.8877562880516052,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "definition"
+    },
+    {
+      "claim_text": "The Principle of Last In - First Out (LIFO) is a rule for managing data structures called stacks. It means that the last item added to a stack is the first one to be removed, like items in a tray where you can only take from the top. This principle is crucial as it allows operations such as 'push' and 'pop'.",
+      "status": "verified",
+      "confidence": 0.8587667942047119,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "definition"
+    },
+    {
+      "claim_text": "Push Operation in Stacks",
+      "status": "verified",
+      "confidence": 0.9047071933746338,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "Pop Operation in Stacks",
+      "status": "verified",
+      "confidence": 0.8996119499206543,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "You have a stack with the elements [2,4,6,1,8]. Perform a push operation to add the element 10 to th",
+      "status": "verified",
+      "confidence": 0.8453415036201477,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "Misconception: Stacks operate on the principle of First In - Firs...",
+      "status": "needs_framing",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "misconception"
+    },
+    {
+      "claim_text": "Push operation removes an element from the stack",
+      "status": "verified",
+      "confidence": 0.8959590792655945,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "Elements can be added or removed from either end of the stack",
+      "status": "verified",
+      "confidence": 0.8586382269859314,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "What is a stack in data structures?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "What does LIFO mean in the context of stacks?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "What is a push operation in a stack?",
+      "status": "verified",
+      "confidence": 0.9038069844245911,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "What is a pop operation in a stack?",
+      "status": "verified",
+      "confidence": 0.9022676944732666,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "Why is a stack considered a LIFO structure?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "Can you add",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "remove elements from the bottom of a stack?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "What happens if you try to pop an element from an empty stack?",
+      "status": "verified",
+      "confidence": 0.8432862758636475,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "What happens if you try to push an element onto a stack that has reached its maximum capacity?",
+      "status": "verified",
+      "confidence": 0.8279061913490295,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "How does a stack differ from a queue?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "Why are stacks important in programming?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "Can you give an example of where stacks are used in real-world applications?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "What is the time complexity of push and pop operations in a stack?",
+      "status": "verified",
+      "confidence": 0.8065633773803711,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "What is the time complexity of push and pop operations in a stack?",
+      "status": "verified",
+      "confidence": 0.893099308013916,
+      "evidence_count": 2,
+      "top_evidence": "ons in stack are known as push and pop operations. Stack Trays Stack after pushing Stack after popping 2,4,6,1,8 Operation of stack The following operations perform in stack: 1. Push: The process of adding an element in the stack. 2. Pop: The operation removes an element from the stack.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "algorithm_step"
+    },
+    {
+      "claim_text": "What is the difference between a static stack",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "a dynamic stack?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "How can we implement a stack in a programming language?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    },
+    {
+      "claim_text": "What is the use of the top pointer in a stack?",
+      "status": "rejected",
+      "confidence": 0.0,
+      "evidence_count": 2,
+      "top_evidence": "NOTES:\nStack A stack is a linear data structure which is used to store data items and follows the principle of Last In - First Out (LIFO). First In - Last Out (FILO): It is a considered list in which addition of new data items and deletion of existing data items is done from one end known as the top of the stack. The insertion and deletion operations in stack are known as push and pop operations.",
+      "page_num": null,
+      "span_id": null,
+      "claim_type": "question"
+    }
+  ],
+  "performance": {},
+  "metadata": {
+    "report_version": "1.0",
+    "total_sections": 6
+  }
+}

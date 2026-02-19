@@ -29,13 +29,17 @@ class Evidence:
     """A single evidence chunk with metadata."""
     evidence_id: str
     source_id: str  # e.g., "session_input", "https://youtu.be/abc"
-    source_type: str  # "transcript", "notes", "youtube", "article", "external"
+    source_type: str  # "pdf_page", "notes_text", "youtube_transcript", "url_article", "audio_transcript", "external_context"
     text: str
     chunk_index: int
     char_start: int
     char_end: int
     metadata: Dict[str, Any] = field(default_factory=dict)
     embedding: Optional[np.ndarray] = None
+    # Provenance fields
+    origin: Optional[str] = None  # Filename or URL
+    page_num: Optional[int] = None  # For PDF sources
+    timestamp_range: Optional[tuple] = None  # For youtube/audio (start_sec, end_sec)
     
     def __post_init__(self):
         """Generate evidence ID if not provided."""

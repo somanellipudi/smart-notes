@@ -43,8 +43,8 @@ def sample_ingestion_report():
         headers_removed=98,
         footers_removed=98,
         watermarks_removed=5,
-        total_chunks=450,
-        avg_chunk_size=512,
+        chunks_total_all_sources=450,
+        avg_chunk_size_all_sources=512,
         extraction_methods=["pdf_text", "pdf_image_ocr", "text_raw"],
     )
 

@@ -25,12 +25,16 @@ logger = logging.getLogger(__name__)
 class EvidenceSpan:
     """A candidate evidence span with metadata."""
     text: str
-    source_type: str  # transcript, notes, external_context, equations
+    source_type: str  # pdf_page, notes_text, external_context, url_article, youtube_transcript, audio_transcript, equations
     source_id: str
     span_start: int
     span_end: int
     similarity: float
     rerank_score: Optional[float] = None
+    # Provenance fields
+    origin: Optional[str] = None  # Filename or URL
+    page_num: Optional[int] = None  # For PDF sources
+    timestamp_range: Optional[Tuple[float, float]] = None  # For youtube/audio (start_sec, end_sec)
 
 
 class SemanticRetriever:

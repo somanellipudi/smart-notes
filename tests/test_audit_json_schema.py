@@ -42,8 +42,8 @@ def complete_report_builder():
             headers_removed=49,
             footers_removed=49,
             watermarks_removed=2,
-            total_chunks=225,
-            avg_chunk_size=512,
+            chunks_total_all_sources=225,
+            avg_chunk_size_all_sources=512,
             extraction_methods=["pdf_text", "ocr"],
         )
     )
@@ -193,8 +193,8 @@ class TestAuditJSONSchema:
             "headers_removed",
             "footers_removed",
             "watermarks_removed",
-            "total_chunks",
-            "avg_chunk_size",
+            "chunks_total_all_sources",
+            "avg_chunk_size_all_sources",
             "extraction_methods",
         ]
         
@@ -211,8 +211,8 @@ class TestAuditJSONSchema:
         assert isinstance(ingestion["headers_removed"], int)
         assert isinstance(ingestion["footers_removed"], int)
         assert isinstance(ingestion["watermarks_removed"], int)
-        assert isinstance(ingestion["total_chunks"], int)
-        assert isinstance(ingestion["avg_chunk_size"], int)
+        assert isinstance(ingestion["chunks_total_all_sources"], int)
+        assert isinstance(ingestion["avg_chunk_size_all_sources"], int)
         assert isinstance(ingestion["extraction_methods"], list)
 
     def test_ingestion_counts_valid(self, complete_report_builder):

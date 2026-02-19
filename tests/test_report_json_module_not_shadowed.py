@@ -30,8 +30,8 @@ def test_report_generation_does_not_shadow_json(tmp_path):
         headers_removed=0,
         footers_removed=0,
         watermarks_removed=0,
-        total_chunks=0,
-        avg_chunk_size=0,
+        chunks_total_all_sources=0,
+        avg_chunk_size_all_sources=0,
         extraction_methods=[],
     )
     verification_summary = VerificationSummary(

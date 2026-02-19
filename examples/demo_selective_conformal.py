@@ -257,8 +257,8 @@ def demo_report_integration():
         headers_removed=50,
         footers_removed=50,
         watermarks_removed=0,
-        total_chunks=200,
-        avg_chunk_size=512,
+        chunks_total_all_sources=200,
+        avg_chunk_size_all_sources=512,
         extraction_methods=["pdf_text", "pdf_ocr"]
     )
     

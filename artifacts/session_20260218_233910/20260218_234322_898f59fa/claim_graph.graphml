@@ -1,0 +1,713 @@
+<?xml version='1.0' encoding='utf-8'?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd"><key id="d8" for="edge" attr.name="weight" attr.type="double"/>
+<key id="d7" for="node" attr.name="snippet" attr.type="string"/>
+<key id="d6" for="node" attr.name="similarity" attr.type="double"/>
+<key id="d5" for="node" attr.name="source_type" attr.type="string"/>
+<key id="d4" for="node" attr.name="source_id" attr.type="string"/>
+<key id="d3" for="node" attr.name="confidence" attr.type="double"/>
+<key id="d2" for="node" attr.name="status" attr.type="string"/>
+<key id="d1" for="node" attr.name="claim_type" attr.type="string"/>
+<key id="d0" for="node" attr.name="node_type" attr.type="string"/>
+<graph edgedefault="directed"><node id="claim_a1c29318">
+  <data key="d0">claim</data>
+  <data key="d1">definition</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8877562880516052</data>
+</node>
+<node id="claim_b0b198b4">
+  <data key="d0">claim</data>
+  <data key="d1">definition</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8587667942047119</data>
+</node>
+<node id="claim_2c700554">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.9047071933746338</data>
+</node>
+<node id="claim_39df3648">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8996119499206543</data>
+</node>
+<node id="claim_461f0079">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8453415036201477</data>
+</node>
+<node id="claim_e8d54658">
+  <data key="d0">claim</data>
+  <data key="d1">misconception</data>
+  <data key="d2">needs_framing</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_244a30dc">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8959590792655945</data>
+</node>
+<node id="claim_3350a882">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8586382269859314</data>
+</node>
+<node id="claim_54533ff2">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_4abcd6f5">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_93e03bd3">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.9038069844245911</data>
+</node>
+<node id="claim_ea5e822e">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.9022676944732666</data>
+</node>
+<node id="claim_c17db777">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="a3bd881f-733e-4c93-b6f0-f9a614c8cde6">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="fe326bb4-f47f-4106-b70e-548c3df1bb8b">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_df3f745d">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8432862758636475</data>
+</node>
+<node id="claim_33e6256c">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8279061913490295</data>
+</node>
+<node id="claim_10cb6392">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_06db570e">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_4c09b2e1">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="9bd2cc98-9168-4267-be41-ba4a2d69ba96">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.8065633773803711</data>
+</node>
+<node id="24f2236a-aa97-495e-a73a-10678e7fe3f4">
+  <data key="d0">claim</data>
+  <data key="d1">algorithm_step</data>
+  <data key="d2">verified</data>
+  <data key="d3">0.893099308013916</data>
+</node>
+<node id="2e740d79-a3f1-4bab-9931-de65cfc488a4">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="a7d14a57-d7c3-4e1c-8021-c7e4257e648d">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_6853da80">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_62a81609">
+  <data key="d0">claim</data>
+  <data key="d1">question</data>
+  <data key="d2">rejected</data>
+  <data key="d3">0.0</data>
+</node>
+<node id="claim_a1c29318_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8877562880516052</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_a1c29318_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8371809720993042</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_b0b198b4_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8587667942047119</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_b0b198b4_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.7640185356140137</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_2c700554_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.9047071933746338</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_2c700554_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8645125031471252</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_39df3648_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8996119499206543</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_39df3648_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8591911792755127</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_461f0079_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8453415036201477</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_461f0079_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.81252121925354</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_e8d54658_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8876228928565979</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_e8d54658_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8149551153182983</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_244a30dc_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8959590792655945</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_244a30dc_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8502484560012817</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_3350a882_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8586382269859314</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_3350a882_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8487693071365356</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_54533ff2_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.9020168781280518</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_54533ff2_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.834978461265564</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_4abcd6f5_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8792698383331299</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_4abcd6f5_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.7779315710067749</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_93e03bd3_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.9038069844245911</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_93e03bd3_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8745884895324707</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_ea5e822e_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.9022676944732666</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_ea5e822e_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8744350671768188</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_c17db777_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8972188234329224</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_c17db777_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8015557527542114</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="a3bd881f-733e-4c93-b6f0-f9a614c8cde6_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.7602019309997559</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="a3bd881f-733e-4c93-b6f0-f9a614c8cde6_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.7558073997497559</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="fe326bb4-f47f-4106-b70e-548c3df1bb8b_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.848081111907959</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="fe326bb4-f47f-4106-b70e-548c3df1bb8b_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8392079472541809</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_df3f745d_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8432862758636475</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_df3f745d_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.810678243637085</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_33e6256c_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8279061913490295</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_33e6256c_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8085570335388184</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_10cb6392_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8282409906387329</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_10cb6392_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.824555516242981</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_06db570e_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8505052924156189</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_06db570e_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8319616913795471</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_4c09b2e1_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8262097239494324</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_4c09b2e1_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8134705424308777</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="9bd2cc98-9168-4267-be41-ba4a2d69ba96_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8065633773803711</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="9bd2cc98-9168-4267-be41-ba4a2d69ba96_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.7817933559417725</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="24f2236a-aa97-495e-a73a-10678e7fe3f4_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.893099308013916</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="24f2236a-aa97-495e-a73a-10678e7fe3f4_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.86475670337677</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="2e740d79-a3f1-4bab-9931-de65cfc488a4_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.834610104560852</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="2e740d79-a3f1-4bab-9931-de65cfc488a4_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8174156546592712</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="a7d14a57-d7c3-4e1c-8021-c7e4257e648d_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8212791681289673</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="a7d14a57-d7c3-4e1c-8021-c7e4257e648d_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.7961795926094055</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_6853da80_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8467478156089783</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_6853da80_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8256661891937256</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<node id="claim_62a81609_ev_0">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8503531217575073</data>
+  <data key="d7">NOTES:
+Stack A stack is a linear data structure wh</data>
+</node>
+<node id="claim_62a81609_ev_1">
+  <data key="d0">evidence</data>
+  <data key="d4">session_input</data>
+  <data key="d5">transcript</data>
+  <data key="d6">0.8236767053604126</data>
+  <data key="d7">ons in stack are known as push and pop operations.</data>
+</node>
+<edge source="claim_a1c29318" target="claim_a1c29318_ev_0">
+  <data key="d8">0.8877562880516052</data>
+</edge>
+<edge source="claim_a1c29318" target="claim_a1c29318_ev_1">
+  <data key="d8">0.8371809720993042</data>
+</edge>
+<edge source="claim_b0b198b4" target="claim_b0b198b4_ev_0">
+  <data key="d8">0.8587667942047119</data>
+</edge>
+<edge source="claim_b0b198b4" target="claim_b0b198b4_ev_1">
+  <data key="d8">0.7640185356140137</data>
+</edge>
+<edge source="claim_2c700554" target="claim_2c700554_ev_0">
+  <data key="d8">0.9047071933746338</data>
+</edge>
+<edge source="claim_2c700554" target="claim_2c700554_ev_1">
+  <data key="d8">0.8645125031471252</data>
+</edge>
+<edge source="claim_39df3648" target="claim_39df3648_ev_0">
+  <data key="d8">0.8996119499206543</data>
+</edge>
+<edge source="claim_39df3648" target="claim_39df3648_ev_1">
+  <data key="d8">0.8591911792755127</data>
+</edge>
+<edge source="claim_461f0079" target="claim_461f0079_ev_0">
+  <data key="d8">0.8453415036201477</data>
+</edge>
+<edge source="claim_461f0079" target="claim_461f0079_ev_1">
+  <data key="d8">0.81252121925354</data>
+</edge>
+<edge source="claim_e8d54658" target="claim_e8d54658_ev_0">
+  <data key="d8">0.8876228928565979</data>
+</edge>
+<edge source="claim_e8d54658" target="claim_e8d54658_ev_1">
+  <data key="d8">0.8149551153182983</data>
+</edge>
+<edge source="claim_244a30dc" target="claim_244a30dc_ev_0">
+  <data key="d8">0.8959590792655945</data>
+</edge>
+<edge source="claim_244a30dc" target="claim_244a30dc_ev_1">
+  <data key="d8">0.8502484560012817</data>
+</edge>
+<edge source="claim_3350a882" target="claim_3350a882_ev_0">
+  <data key="d8">0.8586382269859314</data>
+</edge>
+<edge source="claim_3350a882" target="claim_3350a882_ev_1">
+  <data key="d8">0.8487693071365356</data>
+</edge>
+<edge source="claim_54533ff2" target="claim_54533ff2_ev_0">
+  <data key="d8">0.9020168781280518</data>
+</edge>
+<edge source="claim_54533ff2" target="claim_54533ff2_ev_1">
+  <data key="d8">0.834978461265564</data>
+</edge>
+<edge source="claim_4abcd6f5" target="claim_4abcd6f5_ev_0">
+  <data key="d8">0.8792698383331299</data>
+</edge>
+<edge source="claim_4abcd6f5" target="claim_4abcd6f5_ev_1">
+  <data key="d8">0.7779315710067749</data>
+</edge>
+<edge source="claim_93e03bd3" target="claim_93e03bd3_ev_0">
+  <data key="d8">0.9038069844245911</data>
+</edge>
+<edge source="claim_93e03bd3" target="claim_93e03bd3_ev_1">
+  <data key="d8">0.8745884895324707</data>
+</edge>
+<edge source="claim_ea5e822e" target="claim_ea5e822e_ev_0">
+  <data key="d8">0.9022676944732666</data>
+</edge>
+<edge source="claim_ea5e822e" target="claim_ea5e822e_ev_1">
+  <data key="d8">0.8744350671768188</data>
+</edge>
+<edge source="claim_c17db777" target="claim_c17db777_ev_0">
+  <data key="d8">0.8972188234329224</data>
+</edge>
+<edge source="claim_c17db777" target="claim_c17db777_ev_1">
+  <data key="d8">0.8015557527542114</data>
+</edge>
+<edge source="a3bd881f-733e-4c93-b6f0-f9a614c8cde6" target="a3bd881f-733e-4c93-b6f0-f9a614c8cde6_ev_0">
+  <data key="d8">0.7602019309997559</data>
+</edge>
+<edge source="a3bd881f-733e-4c93-b6f0-f9a614c8cde6" target="a3bd881f-733e-4c93-b6f0-f9a614c8cde6_ev_1">
+  <data key="d8">0.7558073997497559</data>
+</edge>
+<edge source="fe326bb4-f47f-4106-b70e-548c3df1bb8b" target="fe326bb4-f47f-4106-b70e-548c3df1bb8b_ev_0">
+  <data key="d8">0.848081111907959</data>
+</edge>
+<edge source="fe326bb4-f47f-4106-b70e-548c3df1bb8b" target="fe326bb4-f47f-4106-b70e-548c3df1bb8b_ev_1">
+  <data key="d8">0.8392079472541809</data>
+</edge>
+<edge source="claim_df3f745d" target="claim_df3f745d_ev_0">
+  <data key="d8">0.8432862758636475</data>
+</edge>
+<edge source="claim_df3f745d" target="claim_df3f745d_ev_1">
+  <data key="d8">0.810678243637085</data>
+</edge>
+<edge source="claim_33e6256c" target="claim_33e6256c_ev_0">
+  <data key="d8">0.8279061913490295</data>
+</edge>
+<edge source="claim_33e6256c" target="claim_33e6256c_ev_1">
+  <data key="d8">0.8085570335388184</data>
+</edge>
+<edge source="claim_10cb6392" target="claim_10cb6392_ev_0">
+  <data key="d8">0.8282409906387329</data>
+</edge>
+<edge source="claim_10cb6392" target="claim_10cb6392_ev_1">
+  <data key="d8">0.824555516242981</data>
+</edge>
+<edge source="claim_06db570e" target="claim_06db570e_ev_0">
+  <data key="d8">0.8505052924156189</data>
+</edge>
+<edge source="claim_06db570e" target="claim_06db570e_ev_1">
+  <data key="d8">0.8319616913795471</data>
+</edge>
+<edge source="claim_4c09b2e1" target="claim_4c09b2e1_ev_0">
+  <data key="d8">0.8262097239494324</data>
+</edge>
+<edge source="claim_4c09b2e1" target="claim_4c09b2e1_ev_1">
+  <data key="d8">0.8134705424308777</data>
+</edge>
+<edge source="9bd2cc98-9168-4267-be41-ba4a2d69ba96" target="9bd2cc98-9168-4267-be41-ba4a2d69ba96_ev_0">
+  <data key="d8">0.8065633773803711</data>
+</edge>
+<edge source="9bd2cc98-9168-4267-be41-ba4a2d69ba96" target="9bd2cc98-9168-4267-be41-ba4a2d69ba96_ev_1">
+  <data key="d8">0.7817933559417725</data>
+</edge>
+<edge source="24f2236a-aa97-495e-a73a-10678e7fe3f4" target="24f2236a-aa97-495e-a73a-10678e7fe3f4_ev_0">
+  <data key="d8">0.893099308013916</data>
+</edge>
+<edge source="24f2236a-aa97-495e-a73a-10678e7fe3f4" target="24f2236a-aa97-495e-a73a-10678e7fe3f4_ev_1">
+  <data key="d8">0.86475670337677</data>
+</edge>
+<edge source="2e740d79-a3f1-4bab-9931-de65cfc488a4" target="2e740d79-a3f1-4bab-9931-de65cfc488a4_ev_0">
+  <data key="d8">0.834610104560852</data>
+</edge>
+<edge source="2e740d79-a3f1-4bab-9931-de65cfc488a4" target="2e740d79-a3f1-4bab-9931-de65cfc488a4_ev_1">
+  <data key="d8">0.8174156546592712</data>
+</edge>
+<edge source="a7d14a57-d7c3-4e1c-8021-c7e4257e648d" target="a7d14a57-d7c3-4e1c-8021-c7e4257e648d_ev_0">
+  <data key="d8">0.8212791681289673</data>
+</edge>
+<edge source="a7d14a57-d7c3-4e1c-8021-c7e4257e648d" target="a7d14a57-d7c3-4e1c-8021-c7e4257e648d_ev_1">
+  <data key="d8">0.7961795926094055</data>
+</edge>
+<edge source="claim_6853da80" target="claim_6853da80_ev_0">
+  <data key="d8">0.8467478156089783</data>
+</edge>
+<edge source="claim_6853da80" target="claim_6853da80_ev_1">
+  <data key="d8">0.8256661891937256</data>
+</edge>
+<edge source="claim_62a81609" target="claim_62a81609_ev_0">
+  <data key="d8">0.8503531217575073</data>
+</edge>
+<edge source="claim_62a81609" target="claim_62a81609_ev_1">
+  <data key="d8">0.8236767053604126</data>
+</edge>
+</graph></graphml>

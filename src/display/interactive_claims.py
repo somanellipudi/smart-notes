@@ -191,15 +191,35 @@ class InteractiveClaimDisplay:
                 st.write("**Evidence Sources & Relevance**")
                 
                 if claim.evidence_objects:
+                    # Import citation display helper
+                    try:
+                        from src.display.citation_display import (
+                            CitationInfo,
+                            render_citation_inline,
+                            get_source_icon
+                        )
+                        use_new_citation_display = True
+                    except ImportError:
+                        use_new_citation_display = False
+                    
                     for i, evidence in enumerate(claim.evidence_objects, 1):
+                        # Get provenance fields
+                        source_type = evidence.source_type or "unknown"
+                        origin = getattr(evidence, "origin", None)
+                        page_num = getattr(evidence, "page_num", None)
+                        timestamp_range = getattr(evidence, "timestamp_range", None)
+                        
                         # Source badge
-                        source_colors = {
-                            "transcript": "🎙️",
-                            "notes": "📝",
-                            "external_context": "🌐",
-                            "equations": "📐"
-                        }
-                        source_icon = source_colors.get(evidence.source_type, "📄")
+                        if use_new_citation_display:
+                            source_icon = get_source_icon(source_type)
+                        else:
+                            source_colors = {
+                                "transcript": "🎙️",
+                                "notes": "📝",
+                                "external_context": "🌐",
+                                "equations": "📐"
+                            }
+                            source_icon = source_colors.get(source_type, "📄")
                         
                         similarity = getattr(evidence, "similarity", None)
                         similarity_display = f"{similarity:.0%}" if isinstance(similarity, (int, float)) else "N/A"
@@ -209,16 +229,36 @@ class InteractiveClaimDisplay:
                         location = span_meta.get("location") or span_meta.get("line") or span_meta.get("page")
 
                         with st.expander(
-                            f"{source_icon} Source {i}: {evidence.source_type} "
+                            f"{source_icon} Source {i}: {source_type} "
                             f"(similarity: {similarity_display})",
                             expanded=(i == 1)
                         ):
+                            # Show citation with provenance
+                            if use_new_citation_display and (origin or page_num or timestamp_range):
+                                citation_info = CitationInfo(
+                                    source_type=source_type,
+                                    origin=origin,
+                                    page_num=page_num,
+                                    timestamp_range=timestamp_range,
+                                    snippet=snippet,
+                                    confidence=similarity if isinstance(similarity, (int, float)) else 1.0
+                                )
+                                render_citation_inline(citation_info, max_length=80)
+                                st.divider()
+                            
+                            # Show snippet
                             st.write(f"**Snippet**: {snippet}")
+                            
+                            # Show metadata
                             st.caption(
                                 f"Source ID: {source_id or 'N/A'} | "
-                                f"Location: {location or 'N/A'} | "
+                                f"Location: {location or page_num or 'N/A'} | "
                                 f"Similarity: {similarity_display}"
                             )
+                            
+                            # Show clickable URL if available
+                            if origin and origin.startswith("http"):
+                                st.link_button("🔗 Open Source", origin)
                 else:
                     st.warning("⚠️ No evidence attached to this claim yet")
             

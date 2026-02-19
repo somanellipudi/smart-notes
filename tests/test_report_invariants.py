@@ -55,8 +55,8 @@ class TestReportInvariants:
             headers_removed=0,
             footers_removed=0,
             watermarks_removed=0,
-            total_chunks=100,
-            avg_chunk_size=512,
+            chunks_total_all_sources=100,
+            avg_chunk_size_all_sources=512,
             extraction_methods=["text"],
         ))
         
@@ -85,7 +85,7 @@ class TestReportInvariants:
         Test: No placeholder values when report data is empty.
         
         Invariant:
-        - If total_chunks == 0, then avg_chunk_size must be None or N/A
+        - If chunks_total_all_sources == 0, then avg_chunk_size_all_sources must be None or N/A
         - If total_claims == 0, then avg_confidence should be N/A
         - If rejected_count == 0, then rejection_reasons should be None or empty
         
@@ -101,13 +101,13 @@ class TestReportInvariants:
             headers_removed=0,
             footers_removed=0,
             watermarks_removed=0,
-            total_chunks=0,  # Empty ingestion
-            avg_chunk_size=None,  # Must be None when chunks=0
+            chunks_total_all_sources=0,  # Empty ingestion
+            avg_chunk_size_all_sources=None,  # Must be None when chunks=0
             extraction_methods=[],
         )
         
-        assert empty_ingestion.avg_chunk_size is None, (
-            f"avg_chunk_size should be None when total_chunks=0, got {empty_ingestion.avg_chunk_size}"
+        assert empty_ingestion.avg_chunk_size_all_sources is None, (
+            f"avg_chunk_size_all_sources should be None when chunks_total_all_sources=0, got {empty_ingestion.avg_chunk_size_all_sources}"
         )
         
         # Session with empty verification
@@ -221,8 +221,8 @@ class TestReportInvariants:
             headers_removed=0,
             footers_removed=0,
             watermarks_removed=0,
-            total_chunks=100,
-            avg_chunk_size=512,
+            chunks_total_all_sources=100,
+            avg_chunk_size_all_sources=512,
             extraction_methods=["text"],
         ))
         builder.add_verification_summary(VerificationSummary(
@@ -300,8 +300,8 @@ class TestReportInvariants:
             headers_removed=0,
             footers_removed=0,
             watermarks_removed=0,
-            total_chunks=1000,
-            avg_chunk_size=512,
+            chunks_total_all_sources=1000,
+            avg_chunk_size_all_sources=512,
             extraction_methods=["text"],
         ))
         builder.add_verification_summary(VerificationSummary(
@@ -351,8 +351,8 @@ class TestReportBuilderIntegration:
             headers_removed=10,
             footers_removed=10,
             watermarks_removed=0,
-            total_chunks=500,
-            avg_chunk_size=512,
+            chunks_total_all_sources=500,
+            avg_chunk_size_all_sources=512,
             extraction_methods=["text", "ocr"],
         )
         
@@ -445,7 +445,7 @@ class TestReportBuilderIntegration:
         assert "Verified Claims" in md_content or "Rejected Claims" in md_content
         
         # Verify no placeholder values
-        assert "512" not in md_content or "total_chunks" not in md_content  # avg_chunk_size should be computed
+        assert "512" not in md_content or "chunks_total_all_sources" not in md_content  # avg_chunk_size_all_sources should be computed
         
         # Verify claims are present
         assert any(f"Verified claim {i}" in md_content for i in range(3))

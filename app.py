@@ -1289,8 +1289,22 @@ def _display_research_reports(
             headers_removed=ingestion_diagnostics.get("headers_removed", 0),
             footers_removed=ingestion_diagnostics.get("footers_removed", 0),
             watermarks_removed=ingestion_diagnostics.get("watermarks_removed", 0),
-            total_chunks=ingestion_diagnostics.get("total_chunks", 0),
-            avg_chunk_size=ingestion_diagnostics.get("avg_chunk_size", 512),
+            # URL metrics
+            url_count=ingestion_diagnostics.get("url_count", 0),
+            url_fetch_success_count=ingestion_diagnostics.get("url_fetch_success_count", 0),
+            url_chunks_total=ingestion_diagnostics.get("url_chunks_total", 0),
+            # Text metrics
+            text_chars_total=ingestion_diagnostics.get("text_chars_total", 0),
+            text_chunks_total=ingestion_diagnostics.get("text_chunks_total", 0),
+            # Audio metrics
+            audio_seconds=ingestion_diagnostics.get("audio_seconds", 0.0),
+            transcript_chars=ingestion_diagnostics.get("transcript_chars", 0),
+            transcript_chunks_total=ingestion_diagnostics.get("transcript_chunks_total", 0),
+            # Overall (renamed from total_chunks -> chunks_total_all_sources)
+            chunks_total_all_sources=ingestion_diagnostics.get("chunks_total_all_sources", 
+                                                                ingestion_diagnostics.get("total_chunks", 0)),
+            avg_chunk_size_all_sources=ingestion_diagnostics.get("avg_chunk_size_all_sources",
+                                                                  ingestion_diagnostics.get("avg_chunk_size")),
             extraction_methods=ingestion_diagnostics.get("extraction_methods", []),
         )
         

@@ -1,0 +1,71 @@
+{
+  "timestamp": "2026-02-19T10:44:20.892246",
+  "session_id": "session_20260219_103830",
+  "total_claims": 36,
+  "verified_claims": 17,
+  "low_confidence_claims": 0,
+  "rejected_claims": 16,
+  "rejection_rate": 0.4444,
+  "verification_rate": 0.4722,
+  "low_confidence_rate": 0.0,
+  "avg_confidence": 0.4019,
+  "evidence_metrics": {
+    "avg_evidence_per_claim": 2.0,
+    "min_evidence_per_claim": 2,
+    "max_evidence_per_claim": 2,
+    "claims_without_evidence": 0,
+    "unsupported_rate": 0.0,
+    "avg_evidence_quality": 0.8269240409135818
+  },
+  "graph_metrics": {
+    "avg_redundancy": 2.0,
+    "avg_diversity": 1.0,
+    "avg_support_depth": 0.5,
+    "conflict_count": 0,
+    "total_claims": 36,
+    "total_evidence": 72
+  },
+  "rejection_reasons": {
+    "NO_EVIDENCE": 0,
+    "LOW_SIMILARITY": 0,
+    "INSUFFICIENT_SOURCES": 0,
+    "LOW_CONSISTENCY": 0,
+    "CONFLICT": 0,
+    "INSUFFICIENT_CONFIDENCE": 5,
+    "DEPENDENCY_REQUIRED": 0,
+    "LOW_CONFIDENCE": 0
+  },
+  "traceability_metrics": {
+    "traceability_rate": 1.0,
+    "claims_with_evidence": 36,
+    "claims_without_evidence": 0,
+    "avg_evidence_per_verified": 2.0,
+    "multi_source_rate": 1.0
+  },
+  "baseline_comparison": {
+    "baseline_total_items": 40,
+    "verifiable_total_claims": 36,
+    "verifiable_verified_claims": 17,
+    "verifiable_rejected_claims": 16,
+    "reduction_rate": 0.575,
+    "hallucination_reduction_estimate": 0.4,
+    "baseline_breakdown": {
+      "concepts": 8,
+      "equations": 0,
+      "examples": 5,
+      "misconceptions": 4,
+      "faqs": 15,
+      "connections": 8
+    }
+  },
+  "negative_control": false,
+  "negative_control_details": {
+    "is_negative_control": false,
+    "explanation": "Normal verification run with evidence present",
+    "total_evidence": 72,
+    "evidence_nodes": 72,
+    "traceability_rate": 1.0,
+    "verified_count": 17
+  },
+  "quality_flags": []
+}

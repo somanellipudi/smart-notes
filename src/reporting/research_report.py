@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union
 from datetime import datetime
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 try:
     import config
@@ -48,24 +48,41 @@ class SessionMetadata:
 
 @dataclass
 class IngestionReport:
-    """Ingestion statistics."""
+    """Ingestion statistics for all source types."""
+    # PDF-specific
     total_pages: int
     pages_ocr: int
     headers_removed: int
     footers_removed: int
     watermarks_removed: int
-    total_chunks: int
-    avg_chunk_size: Optional[Union[int, float]]  # None if total_chunks == 0
-    extraction_methods: List[str]
+    
+    # URL-specific
+    url_count: int = 0
+    url_fetch_success_count: int = 0
+    url_chunks_total: int = 0
+    
+    # Text-specific
+    text_chars_total: int = 0
+    text_chunks_total: int = 0
+    
+    # Audio-specific
+    audio_seconds: float = 0.0
+    transcript_chars: int = 0
+    transcript_chunks_total: int = 0
+    
+    # Overall
+    chunks_total_all_sources: int = 0
+    avg_chunk_size_all_sources: Optional[Union[int, float]] = None  # None if chunks_total_all_sources == 0
+    extraction_methods: List[str] = field(default_factory=list)
     
     def __post_init__(self):
-        """Enforce invariant: avg_chunk_size should be None if no chunks."""
-        if self.total_chunks == 0 and self.avg_chunk_size is not None:
+        """Enforce invariant: avg_chunk_size_all_sources should be None if no chunks."""
+        if self.chunks_total_all_sources == 0 and self.avg_chunk_size_all_sources is not None:
             logger.warning(
-                f"Invariant: avg_chunk_size must be None when total_chunks=0. "
-                f"Setting to None (was {self.avg_chunk_size})"
+                f"Invariant: avg_chunk_size_all_sources must be None when chunks_total_all_sources=0. "
+                f"Setting to None (was {self.avg_chunk_size_all_sources})"
             )
-            self.avg_chunk_size = None
+            self.avg_chunk_size_all_sources = None
 
 
 @dataclass
@@ -119,6 +136,10 @@ class ClaimEntry:
     page_num: Optional[int] = None
     span_id: Optional[str] = None
     claim_type: str = "fact_claim"  # From ClaimType enum
+    # Citation provenance
+    citation_origin: Optional[str] = None  # URL or filename
+    citation_source_type: Optional[str] = None  # pdf_page, url_article, youtube_transcript, etc.
+    citation_timestamp: Optional[str] = None  # For audio/video "01:23-02:45"
 
 
 class ResearchReportBuilder:
@@ -365,32 +386,85 @@ class ResearchReportBuilder:
     def _build_md_ingestion_section(self) -> List[str]:
         """Build ingestion statistics section.
         
-        Enforces invariant: avg_chunk_size is None/N/A when total_chunks == 0
+        Shows statistics for all source types:
+        - PDF metrics (pages, OCR, headers/footers/watermarks removed)
+        - URL metrics (count, fetch success, chunks)
+        - Text metrics (chars, chunks)
+        - Audio metrics (duration, transcript chars, chunks)
+        - Overall metrics (total chunks across all sources)
         """
         lines = ["## Ingestion Statistics", ""]
         if not self.ingestion_report:
+            lines.append("_No ingestion data available._")
             return lines
 
         ing = self.ingestion_report
         
-        # Format avg_chunk_size properly: None or N/A when no chunks
-        avg_chunk_display = "N/A"
-        if ing.total_chunks > 0 and ing.avg_chunk_size is not None:
-            avg_chunk_display = f"{ing.avg_chunk_size:.0f}"
+        # PDF metrics (if any PDFs processed)
+        if ing.total_pages > 0:
+            lines.extend([
+                "### PDF Sources",
+                "",
+                f"- **Total Pages**: {ing.total_pages}",
+                f"- **Pages OCR'd**: {ing.pages_ocr}",
+                f"- **Headers Removed**: {ing.headers_removed}",
+                f"- **Footers Removed**: {ing.footers_removed}",
+                f"- **Watermarks Removed**: {ing.watermarks_removed}",
+                ""
+            ])
         
+        # URL metrics (if any URLs processed)
+        if ing.url_count > 0:
+            success_rate = (ing.url_fetch_success_count / ing.url_count * 100) if ing.url_count > 0 else 0
+            lines.extend([
+                "### URL Sources",
+                "",
+                f"- **URLs Provided**: {ing.url_count}",
+                f"- **Successfully Fetched**: {ing.url_fetch_success_count} ({success_rate:.0f}%)",
+                f"- **Chunks Extracted**: {ing.url_chunks_total}",
+                ""
+            ])
+        
+        # Text metrics (if any text input)
+        if ing.text_chars_total > 0:
+            lines.extend([
+                "### Text Input",
+                "",
+                f"- **Characters**: {ing.text_chars_total:,}",
+                f"- **Chunks**: {ing.text_chunks_total}",
+                ""
+            ])
+        
+        # Audio metrics (if any audio processed)
+        if ing.audio_seconds > 0:
+            minutes = int(ing.audio_seconds / 60)
+            seconds = int(ing.audio_seconds % 60)
+            lines.extend([
+                "### Audio/Video Sources",
+                "",
+                f"- **Duration**: {minutes}m {seconds}s",
+                f"- **Transcript Characters**: {ing.transcript_chars:,}",
+                f"- **Chunks**: {ing.transcript_chunks_total}",
+                ""
+            ])
+        
+        # Overall extraction metrics
         lines.extend([
-            f"- **Total Pages**: {ing.total_pages}",
-            f"- **Pages OCR'd**: {ing.pages_ocr}",
-            f"- **Headers Removed**: {ing.headers_removed}",
-            f"- **Footers Removed**: {ing.footers_removed}",
-            f"- **Watermarks Removed**: {ing.watermarks_removed}",
+            "### Overall Extraction",
             "",
-            "### Extraction",
-            f"- **Total Chunks**: {ing.total_chunks}",
-            f"- **Avg Chunk Size**: {avg_chunk_display} chars",
-            f"- **Methods**: {', '.join(ing.extraction_methods) if ing.extraction_methods else 'N/A'}",
-            "",
+            f"- **Total Chunks (All Sources)**: {ing.chunks_total_all_sources}",
         ])
+        
+        if ing.avg_chunk_size_all_sources is not None:
+            lines.append(f"- **Avg Chunk Size**: {ing.avg_chunk_size_all_sources:.0f} chars")
+        else:
+            lines.append("- **Avg Chunk Size**: N/A")
+        
+        if ing.extraction_methods:
+            methods_str = ", ".join(ing.extraction_methods)
+            lines.append(f"- **Methods**: {methods_str}")
+        
+        lines.append("")
         return lines
 
     def _build_md_verification_section(self) -> List[str]:
@@ -654,14 +728,44 @@ class ResearchReportBuilder:
                 conf = f"{claim.confidence:.2f}"
                 evid_count = str(claim.evidence_count)
                 
-                # Build citation - show when evidence_count > 0
+                # Build citation with provenance - show URL/file/timestamp when available
                 if claim.evidence_count > 0:
                     citation_parts = []
+                    
+                    # Source type indicator
+                    if claim.citation_source_type:
+                        source_icon = {
+                            "pdf_page": "📄",
+                            "url_article": "🔗",
+                            "youtube_transcript": "▶️",
+                            "audio_transcript": "🎤",
+                            "notes_text": "📝"
+                        }.get(claim.citation_source_type, "📌")
+                        citation_parts.append(source_icon)
+                    
+                    # Origin (URL or filename) - make URLs clickable in Markdown
+                    if claim.citation_origin:
+                        if claim.citation_origin.startswith("http"):
+                            # Truncate long URLs for display
+                            display_url = claim.citation_origin[:40] + "..." if len(claim.citation_origin) > 40 else claim.citation_origin
+                            citation_parts.append(f"[{display_url}]({claim.citation_origin})")
+                        else:
+                            # File name
+                            citation_parts.append(claim.citation_origin)
+                    
+                    # Page number for PDFs
                     if claim.page_num is not None:
                         citation_parts.append(f"p.{claim.page_num}")
-                    if claim.span_id:
-                        citation_parts.append(f"`{claim.span_id[:20]}...`")
-                    citation = " | ".join(citation_parts) if citation_parts else "Yes"
+                    
+                    # Timestamp for audio/video
+                    if claim.citation_timestamp:
+                        citation_parts.append(f"t={claim.citation_timestamp}")
+                    
+                    # Span ID (shortened)
+                    if claim.span_id and not claim.citation_origin:
+                        citation_parts.append(f"`{claim.span_id[:12]}...`")
+                    
+                    citation = " ".join(citation_parts) if citation_parts else "Yes"
                 else:
                     citation = "N/A"
                 

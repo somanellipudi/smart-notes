@@ -38,37 +38,68 @@ class InputsReceived:
 @dataclass
 class IngestionReportContext:
     """Detailed ingestion diagnostics."""
+    # PDF-specific metrics
     total_pages: int = 0
     pages_ocr: int = 0
     headers_removed: int = 0
     footers_removed: int = 0
     watermarks_removed: int = 0
-    total_chunks: int = 0
-    avg_chunk_size: Optional[float] = None  # None if no chunks
+    
+    # URL-specific metrics
+    url_count: int = 0
+    url_fetch_success_count: int = 0
+    url_chunks_total: int = 0
+    
+    # Text-specific metrics
+    text_chars_total: int = 0
+    text_chunks_total: int = 0
+    
+    # Audio-specific metrics
+    audio_seconds: float = 0.0
+    transcript_chars: int = 0
+    transcript_chunks_total: int = 0
+    
+    # Overall metrics
+    chunks_total_all_sources: int = 0
+    avg_chunk_size_all_sources: Optional[float] = None  # None if no chunks
     extraction_methods: List[str] = field(default_factory=list)
-    sources_processed: Dict[str, int] = field(default_factory=dict)  # {'pdf': 3, 'text': 1, ...}
+    sources_processed: Dict[str, int] = field(default_factory=dict)  # {'pdf': 3, 'text': 1, 'url': 5, 'audio': 1}
     total_text_length: int = 0  # Total characters extracted
     
     def validate_invariants(self) -> List[str]:
         """Return list of invariant violations, empty if all valid."""
         violations = []
         
-        # Invariant: if total_chunks > 0, avg_chunk_size must be set
-        if self.total_chunks > 0 and self.avg_chunk_size is None:
+        # Invariant: if chunks_total_all_sources > 0, avg_chunk_size_all_sources must be set
+        if self.chunks_total_all_sources > 0 and self.avg_chunk_size_all_sources is None:
             violations.append(
-                f"avg_chunk_size must be set when total_chunks > 0 ({self.total_chunks} chunks)"
+                f"avg_chunk_size_all_sources must be set when chunks_total_all_sources > 0 ({self.chunks_total_all_sources} chunks)"
             )
         
-        # Invariant: if total_chunks == 0, avg_chunk_size should be None
-        if self.total_chunks == 0 and self.avg_chunk_size is not None:
+        # Invariant: if chunks_total_all_sources == 0, avg_chunk_size_all_sources should be None
+        if self.chunks_total_all_sources == 0 and self.avg_chunk_size_all_sources is not None:
             violations.append(
-                f"avg_chunk_size should be None when total_chunks == 0 (was {self.avg_chunk_size})"
+                f"avg_chunk_size_all_sources should be None when chunks_total_all_sources == 0 (was {self.avg_chunk_size_all_sources})"
             )
         
         # Invariant: OCR pages <= total pages
         if self.pages_ocr > self.total_pages:
             violations.append(
                 f"pages_ocr ({self.pages_ocr}) cannot exceed total_pages ({self.total_pages})"
+            )
+        
+        # Invariant: url_fetch_success_count <= url_count
+        if self.url_fetch_success_count > self.url_count:
+            violations.append(
+                f"url_fetch_success_count ({self.url_fetch_success_count}) cannot exceed url_count ({self.url_count})"
+            )
+        
+        # Invariant: chunks_total_all_sources should equal sum of individual source chunks
+        computed_total = self.url_chunks_total + self.text_chunks_total + self.transcript_chunks_total
+        # Note: PDF chunks tracked via sources_processed if available
+        if self.chunks_total_all_sources > 0 and computed_total > self.chunks_total_all_sources:
+            violations.append(
+                f"Computed chunk total ({computed_total}) exceeds chunks_total_all_sources ({self.chunks_total_all_sources})"
             )
         
         return violations

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>AI Verification Session Report</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;             line-height: 1.6; max-width: 900px; margin: 0 auto; padding: 20px;             color: #1d1d1f; background-color: #f5f5f7; }
+    h1 { color: #0a84ff; border-bottom: 3px solid #0a84ff; padding-bottom: 10px; }
+    h2 { color: #1d1d1f; margin-top: 30px; border-left: 4px solid #0a84ff;          padding-left: 15px; }
+    h3 { color: #424245; }
+    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+    th { background-color: #0a84ff; color: white; padding: 10px; text-align: left; }
+    td { border-bottom: 1px solid #e5e5ea; padding: 10px; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+    .trust-yes { color: #34c759; font-weight: bold; }
+    .trust-no { color: #ff3b30; font-weight: bold; }
+    .metric { background-color: white; padding: 15px; margin: 10px 0;               border-radius: 8px; border-left: 4px solid #34c759; }
+    code { background-color: #f0f0f0; padding: 2px 6px; border-radius: 4px;            font-family: 'Monaco', monospace; }
+  </style>
+</head>
+<body>
+<h1>AI Verification Session Report</h1>
+<br>
+<h2>Session Information</h2>
+<br>
+<ul>
+<li>**Session ID**: `session_20260219_103830`</li>
+<li>**Timestamp**: 2026-02-19T10:44:22.496174</li>
+<li>**Version**: 1.0.0</li>
+<li>**Random Seed**: 42</li>
+</ul>
+<br>
+<h3>Models Used</h3>
+<ul>
+<li>**Language Model**: gpt-4</li>
+<li>**Embedding Model**: intfloat/e5-base-v2</li>
+<li>**NLI Model**: cross-encoder/qnli</li>
+</ul>
+<br>
+<h3>Inputs</h3>
+<br>
+<h2>Ingestion Statistics</h2>
+<br>
+<h3>Overall Extraction</h3>
+<br>
+<ul>
+<li>**Total Chunks (All Sources)**: 0</li>
+<li>**Avg Chunk Size**: N/A</li>
+</ul>
+<br>
+<h2>Verification Results</h2>
+<br>
+<h3>Claim Status Distribution</h3>
+<ul>
+<li>**Verified**: 17/33 (51.5%)</li>
+<li>**Low Confidence**: 0/33 (0.0%)</li>
+<li>**Rejected**: 16/33 (48.5%)</li>
+</ul>
+<br>
+<h3>Overall Metrics</h3>
+<ul>
+<li>**Average Confidence**: 0.40</li>
+</ul>
+<br>
+<h3>Top Rejection Reasons</h3>
+<ul>
+<li>RejectionReason.DISALLOWED_CLAIM_TYPE: 11 claims (68.8%)</li>
+<li>RejectionReason.INSUFFICIENT_CONFIDENCE: 5 claims (31.2%)</li>
+</ul>
+<br>
+<h2>What to Trust / What Not to Trust</h2>
+<br>
+<h3>✅ You Can Trust Claims That Are:</h3>
+<ul>
+<li>**Verified with high confidence** (status = VERIFIED, confidence > 0.8)</li>
+<li>**Supported by multiple evidence sources** from authoritative materials</li>
+<li>**Not contradicted** by any retrieved evidence</li>
+<li>**Common in domain literature** (not edge cases or disputed claims)</li>
+</ul>
+<br>
+<h3>⚠️ Use With Caution:</h3>
+<ul>
+<li>**Low-confidence claims** that lack multiple supporting sources</li>
+<li>**Claims from specialized/technical domains** that may have nuanced context</li>
+<li>**Claims where model confidence is 0.5-0.8** (middle range)</li>
+</ul>
+<br>
+<h3>❌ Do Not Trust:</h3>
+<ul>
+<li>**Rejected claims** - evidence contradicted or insufficient</li>
+<li>**Claims with zero supporting evidence** from course materials</li>
+<li>**Highly technical definitions** without expert review</li>
+<li>**Edge case or controversial claims** marked as low confidence</li>
+</ul>
+<br>
+<h3>🔍 How to Verify Further:</h3>
+<p>1. Check the evidence citations (linked to page numbers and snippets below)</p>
+<p>2. Cross-reference low-confidence claims with original texts</p>
+<p>3. For critical material, consult with instructor or textbook</p>
+<p>4. Review the confidence score and calibration metrics</p>
+<br>
+<h2>Verified Claims Table</h2>
+<br>
+<h3>✅ Verified Claims</h3>
+<br>
+<table>
+<tr><td>Claim</td><td>Confidence</td><td>Evidence</td><td>Citation</td></tr>
+<tr><td>A stack is a type of data structure that follows the principle of "Last In, Firs...</td><td>0.89</td><td>2</td><td>Yes</td></tr>
+<tr><td>A Last In - First Out (LIFO) data structure is a way to store information in a s...</td><td>0.85</td><td>2</td><td>Yes</td></tr>
+<tr><td>First In - Last Out (FILO) is a principle that prioritizes the order in which it...</td><td>0.83</td><td>2</td><td>Yes</td></tr>
+<tr><td>The "Top of the Stack" refers to the last item added in a stack, which is the fi...</td><td>0.84</td><td>2</td><td>Yes</td></tr>
+<tr><td>Push Operation...</td><td>0.86</td><td>2</td><td>Yes</td></tr>
+<tr><td>Pop Operation...</td><td>0.85</td><td>2</td><td>Yes</td></tr>
+<tr><td>A linear data structure is a type of organization for storing information sequen...</td><td>0.85</td><td>2</td><td>Yes</td></tr>
+<tr><td>A Data Item is a single piece of information stored in a computer system, such a...</td><td>0.78</td><td>2</td><td>Yes</td></tr>
+<tr><td>Push and pop operations are the same...</td><td>0.87</td><td>2</td><td>Yes</td></tr>
+<tr><td>What is a push operation in a stack?...</td><td>0.90</td><td>2</td><td>Yes</td></tr>
+</table>
+<p>_... and 7 more_</p>
+<br>
+<h3>⚠️ Low-Confidence Claims</h3>
+<br>
+<p>_None_</p>
+<br>
+<h3>❌ Rejected Claims</h3>
+<br>
+<table>
+<tr><td>Claim</td><td>Confidence</td><td>Evidence</td><td>Citation</td></tr>
+<tr><td>Example: What is a stack in data structures?......</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>Example: What is the process of adding an element in the st......</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>Example: What operation removes an element from the stack?......</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>Example: What is the principle that a stack follows?......</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>Example: Where are the addition and deletion of data items ......</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+</ul>
+<br>
+<h3>❓ Questions Answered</h3>
+<br>
+<table>
+<tr><td>Claim</td><td>Confidence</td><td>Evidence</td><td>Citation</td></tr>
+<tr><td>What is a stack in data structures?...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>What does LIFO mean in the context of stacks?...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>What is the top of the stack?...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>Why is a stack considered a linear data structure?...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>What is the difference between LIFO...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>FILO in the context of stacks?...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>What types of problems can be solved using stacks?...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>What is the difference between a stack...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>a queue?...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+<tr><td>Can we implement a stack using an array?...</td><td>0.00</td><td>2</td><td>Yes</td></tr>
+</table>
+<p>_... and 1 more_</p>
+<br>
+</body>
+</html>

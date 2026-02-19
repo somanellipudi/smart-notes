@@ -5,7 +5,7 @@ This module extends the base output schema with claim-based structures that
 enforce evidence grounding and source attribution for research-oriented use cases.
 """
 
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any, Literal, Tuple
 from datetime import datetime
 from pydantic import BaseModel, Field, validator
 
@@ -26,12 +26,25 @@ class EvidenceCitation(BaseModel):
     Citation linking a claim to its source evidence.
     
     Attributes:
-        source_type: Type of source (transcript, notes, external_context, equation)
+        source_type: Type of source
         quote: Exact quote from source
         location: Where in source (line, timestamp, page)
         confidence: Confidence in citation accuracy (0-1)
+        origin: Filename or URL of source
+        page_num: Page number for PDF sources
+        timestamp_range: (start_sec, end_sec) for audio/video
+        span_id: Evidence span identifier for traceability
     """
-    source_type: Literal["transcript", "notes", "external_context", "equation", "inferred"] = Field(
+    source_type: Literal[
+        "pdf_page",
+        "notes_text",
+        "external_context",
+        "url_article",
+        "youtube_transcript",
+        "audio_transcript",
+        "equation",
+        "inferred"
+    ] = Field(
         ...,
         description="Type of source material"
     )
@@ -49,6 +62,23 @@ class EvidenceCitation(BaseModel):
         ge=0.0,
         le=1.0,
         description="Confidence that citation accurately supports claim"
+    )
+    # Provenance fields
+    origin: Optional[str] = Field(
+        None,
+        description="Filename or URL of source (e.g., 'lecture.pdf', 'https://youtube.com/...')"
+    )
+    page_num: Optional[int] = Field(
+        None,
+        description="Page number for PDF sources"
+    )
+    timestamp_range: Optional[Tuple[float, float]] = Field(
+        None,
+        description="(start_sec, end_sec) for audio/video sources"
+    )
+    span_id: Optional[str] = Field(
+        None,
+        description="Evidence span identifier for traceability"
     )
     
     @validator('quote')
