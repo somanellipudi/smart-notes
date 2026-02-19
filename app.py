@@ -334,6 +334,11 @@ st.markdown(
 @st.cache_resource
 def initialize_ocr():
     """Initialize OCR once and cache it."""
+    # Check if OCR is enabled
+    if not config.OCR_ENABLED:
+        logger.info("OCR is disabled (OCR_ENABLED=False)")
+        return None
+    
     try:
         logger.info("Initializing OCR system...")
         ocr = ImageOCR()
@@ -2269,6 +2274,14 @@ def main():
     
     st.divider()
     
+    # OCR Warning Banner (if disabled)
+    if not config.OCR_ENABLED:
+        st.warning(
+            "⚠️ **OCR is disabled in hosted mode** — Upload images and scanned PDFs are not supported. "
+            "For scanned content, please paste text directly or run locally with OCR enabled.",
+            icon="⚠️"
+        )
+    
     # ====================================================================
     # INPUT
     # ====================================================================
@@ -2300,24 +2313,33 @@ def main():
                 label_visibility="collapsed"
             )
         else:
-            notes_images = st.file_uploader(
-                "Upload note images or PDF files",
-                type=["jpg", "jpeg", "png", "bmp", "pdf"],
-                accept_multiple_files=True,
-                label_visibility="collapsed"
-            )
+            # Show warning if OCR is disabled
+            if not config.OCR_ENABLED:
+                st.info(
+                    "ℹ️ **Image/PDF upload is disabled** because OCR is not available. "
+                    "Please use the 'Type/Paste Text' option instead.",
+                    icon="ℹ️"
+                )
+                notes_images = []
+            else:
+                notes_images = st.file_uploader(
+                    "Upload note images or PDF files",
+                    type=["jpg", "jpeg", "png", "bmp", "pdf"],
+                    accept_multiple_files=True,
+                    label_visibility="collapsed"
+                )
 
-            if notes_images:
-                st.success(f"✓ {len(notes_images)} file(s) uploaded - OCR and PDF extraction will extract text")
+                if notes_images:
+                    st.success(f"✓ {len(notes_images)} file(s) uploaded - OCR and PDF extraction will extract text")
 
-                if len(notes_images) <= 3:
-                    cols = st.columns(len(notes_images))
-                    for idx, (col, img) in enumerate(zip(cols, notes_images)):
-                        with col:
-                            if img.type == "application/pdf":
-                                st.info(f"📄 PDF: {img.name}")
-                            else:
-                                st.image(img, caption=f"Image {idx+1}")
+                    if len(notes_images) <= 3:
+                        cols = st.columns(len(notes_images))
+                        for idx, (col, img) in enumerate(zip(cols, notes_images)):
+                            with col:
+                                if img.type == "application/pdf":
+                                    st.info(f"📄 PDF: {img.name}")
+                                else:
+                                    st.image(img, caption=f"Image {idx+1}")
 
         with st.expander("🎤 Audio (Optional)", expanded=False):
             st.caption("Upload a lecture recording for transcription")
@@ -2592,46 +2614,54 @@ def main():
             
             # Process Images with OCR
             if image_files:
-                with st.spinner("📸 Extracting text from images using OCR..."):
-                    try:
-                        cache = _load_ocr_cache()
-                        image_hashes = []
-                        for img in image_files:
-                            img_bytes = img.getvalue()
-                            image_hashes.append(_image_hash(img_bytes))
+                if not config.OCR_ENABLED:
+                    st.warning(
+                        "⚠️ **OCR is disabled** - Cannot process uploaded images. "
+                        "Please paste text directly or enable OCR in local deployment.",
+                        icon="⚠️"
+                    )
+                    logger.warning("Skipping image OCR - OCR_ENABLED=False")
+                else:
+                    with st.spinner("📸 Extracting text from images using OCR..."):
+                        try:
+                            cache = _load_ocr_cache()
+                            image_hashes = []
+                            for img in image_files:
+                                img_bytes = img.getvalue()
+                                image_hashes.append(_image_hash(img_bytes))
 
-                        cache_key = "|".join(image_hashes)
-                        if cache_key in cache["items"]:
-                            ocr_extracted_text = cache["items"][cache_key]
-                            st.success(f"✓ Using cached OCR: {len(ocr_extracted_text)} characters")
-                            ingestion_diagnostics["ocr_chars"] = len(ocr_extracted_text)
-                            ingestion_diagnostics["ocr_images"] = len(image_files)
-                            extraction_methods.append("image_ocr_cache")
-                        else:
-                            selected_model = config.OLLAMA_MODEL if llm_type == "ollama" else config.LLM_MODEL
-                            ocr_extracted_text = process_images(
-                                image_files, 
-                                correct_with_llm=True,
-                                provider_type=llm_type,
-                                api_key=config.OPENAI_API_KEY,
-                                ollama_url=config.OLLAMA_URL,
-                                model=selected_model
-                            )
-                            ingestion_diagnostics["ocr_chars"] = len(ocr_extracted_text)
-                            ingestion_diagnostics["ocr_images"] = len(image_files)
-                            extraction_methods.append("image_ocr")
-                            cache["items"][cache_key] = ocr_extracted_text
-                            cache["order"] = [k for k in cache["order"] if k != cache_key]
-                            cache["order"].append(cache_key)
-                            while len(cache["order"]) > 3:
-                                old_key = cache["order"].pop(0)
-                                cache["items"].pop(old_key, None)
-                            _save_ocr_cache(cache)
-                            st.success(f"✓ OCR extraction + LLM correction complete: {len(ocr_extracted_text)} characters")
-                        
-                    except Exception as e:
-                        st.error(f"❌ Image OCR extraction failed: {str(e)}")
-                        logger.error(f"Image OCR error: {str(e)}")
+                            cache_key = "|".join(image_hashes)
+                            if cache_key in cache["items"]:
+                                ocr_extracted_text = cache["items"][cache_key]
+                                st.success(f"✓ Using cached OCR: {len(ocr_extracted_text)} characters")
+                                ingestion_diagnostics["ocr_chars"] = len(ocr_extracted_text)
+                                ingestion_diagnostics["ocr_images"] = len(image_files)
+                                extraction_methods.append("image_ocr_cache")
+                            else:
+                                selected_model = config.OLLAMA_MODEL if llm_type == "ollama" else config.LLM_MODEL
+                                ocr_extracted_text = process_images(
+                                    image_files, 
+                                    correct_with_llm=True,
+                                    provider_type=llm_type,
+                                    api_key=config.OPENAI_API_KEY,
+                                    ollama_url=config.OLLAMA_URL,
+                                    model=selected_model
+                                )
+                                ingestion_diagnostics["ocr_chars"] = len(ocr_extracted_text)
+                                ingestion_diagnostics["ocr_images"] = len(image_files)
+                                extraction_methods.append("image_ocr")
+                                cache["items"][cache_key] = ocr_extracted_text
+                                cache["order"] = [k for k in cache["order"] if k != cache_key]
+                                cache["order"].append(cache_key)
+                                while len(cache["order"]) > 3:
+                                    old_key = cache["order"].pop(0)
+                                    cache["items"].pop(old_key, None)
+                                _save_ocr_cache(cache)
+                                st.success(f"✓ OCR extraction + LLM correction complete: {len(ocr_extracted_text)} characters")
+                            
+                        except Exception as e:
+                            st.error(f"❌ Image OCR extraction failed: {str(e)}")
+                            logger.error(f"Image OCR error: {str(e)}")
             
             # Combine all extracted text
             combined_extracted_text = (pdf_extracted_text.strip() + "\n" + ocr_extracted_text.strip()).strip()

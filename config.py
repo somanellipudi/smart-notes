@@ -37,6 +37,32 @@ ENVIRONMENT: Literal["development", "staging", "production"] = os.getenv(
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 ENABLE_DEBUG = DEBUG
 
+# ==================== STREAMLIT CLOUD DETECTION ====================
+
+def _is_streamlit_cloud() -> bool:
+    """
+    Detect if running on Streamlit Cloud.
+    
+    Checks multiple indicators:
+    - STREAMLIT_SHARING environment variable (legacy)
+    - STREAMLIT_CLOUD environment variable
+    - Home directory path heuristics
+    """
+    # Check explicit environment variables
+    if os.getenv("STREAMLIT_SHARING") == "true":
+        return True
+    if os.getenv("STREAMLIT_CLOUD") == "true":
+        return True
+    
+    # Check home path heuristics
+    home = os.path.expanduser("~")
+    if "/home/appuser" in home or "\\appuser" in home:
+        return True
+    
+    return False
+
+IS_STREAMLIT_CLOUD = _is_streamlit_cloud()
+
 # Base directories
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -136,7 +162,15 @@ CODE_LINE_PROTECT_TOKENS = [
 
 # ==================== PDF OCR FALLBACK ====================
 
-ENABLE_OCR_FALLBACK = os.getenv("ENABLE_OCR_FALLBACK", "true").lower() == "true"
+# OCR is disabled by default on Streamlit Cloud (EasyOCR/Tesseract are heavy dependencies)
+# Users can explicitly enable via OCR_ENABLED=true environment variable
+_ocr_default = "false" if IS_STREAMLIT_CLOUD else "true"
+OCR_ENABLED = os.getenv("OCR_ENABLED", _ocr_default).lower() == "true"
+"""Master switch to enable/disable OCR functionality entirely"""
+
+ENABLE_OCR_FALLBACK = OCR_ENABLED and os.getenv("ENABLE_OCR_FALLBACK", "true").lower() == "true"
+"""Enable OCR fallback for PDFs (only if OCR_ENABLED=True)"""
+
 OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "10"))
 OCR_DPI = int(os.getenv("OCR_DPI", "200"))
 
@@ -487,13 +521,6 @@ MIN_INPUT_CHARS_ABSOLUTE = int(os.getenv("MIN_INPUT_CHARS_ABSOLUTE", "100"))
 
 MIN_INPUT_CHARS_FOR_VERIFICATION = int(os.getenv("MIN_INPUT_CHARS_FOR_VERIFICATION", "500"))
 """Recommended minimum input characters for robust verification"""
-
-# PDF OCR fallback
-ENABLE_OCR_FALLBACK = os.getenv("ENABLE_OCR_FALLBACK", "true").lower() == "true"
-"""Enable OCR fallback for PDFs when text extraction fails quality checks"""
-
-OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "5"))
-"""Maximum number of PDF pages to OCR"""
 
 # Multi-source policy
 STRICT_MULTI_SOURCE = os.getenv("STRICT_MULTI_SOURCE", "false").lower() == "true"
