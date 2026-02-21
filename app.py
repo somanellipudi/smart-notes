@@ -1508,8 +1508,10 @@ def _display_research_reports(
             st.components.v1.html(html_content, height=800, scrolling=True)
     
     except Exception as e:
-        st.error(f"Failed to generate research reports: {e}")
         logger.exception("Error in _display_research_reports")
+        st.error(f"Failed to generate research reports: {e}")
+        with st.expander("🐛 Error Details"):
+            st.code(str(e))
 
 
 def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] = None):
@@ -2492,10 +2494,30 @@ def main():
         combined_extracted_text = ""
         extraction_methods = []
         ingestion_diagnostics = {
+            # PDF sources
             "pdf_files": [],
-            "ocr_images": 0,
+            "total_pages": 0,
+            "pages_ocr": 0,
             "pdf_chars": 0,
-            "ocr_chars": 0
+            # OCR sources (images)
+            "ocr_images": 0,
+            "ocr_chars": 0,
+            # Audio sources
+            "audio_seconds": 0.0,
+            "transcript_chars": 0,
+            "transcript_chunks_total": 0,
+            # URL sources
+            "url_count": 0,
+            "url_fetch_success_count": 0,
+            "url_chunks_total": 0,
+            # Text sources
+            "text_chars_total": 0,
+            "text_chunks_total": 0,
+            "manual_text_chars": 0,
+            # Cleanup stats
+            "headers_removed": 0,
+            "footers_removed": 0,
+            "watermarks_removed": 0,
         }
         
         if notes_images and len(notes_images) > 0:
@@ -2688,6 +2710,19 @@ def main():
 
         st.session_state.notes_char_count = len(combined_notes or "")
         st.session_state.extraction_methods = extraction_methods
+        
+        # Ensure ingestion_diagnostics has all required fields with defaults
+        if "extraction_methods" not in ingestion_diagnostics:
+            ingestion_diagnostics["extraction_methods"] = extraction_methods
+        
+        # Add manual text input if any
+        if notes_text and not combined_extracted_text:
+            ingestion_diagnostics["manual_text_chars"] = len(notes_text)
+            ingestion_diagnostics["text_chars_total"] = len(notes_text)  # Track as text source
+            if "manual_text" not in extraction_methods:
+                extraction_methods.append("manual_text")
+                ingestion_diagnostics["extraction_methods"] = extraction_methods
+        
         st.session_state.ingestion_diagnostics = ingestion_diagnostics
         
         # Parse and validate URLs
