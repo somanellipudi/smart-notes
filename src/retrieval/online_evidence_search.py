@@ -103,48 +103,69 @@ class OnlineEvidenceSearcher:
         """
         Search specific authoritative sources directly.
         
-        This is a fallback when search API is unavailable.
-        Constructs URLs for known authoritative sources.
+        This constructs URLs to known authoritative sources.
+        Returns search URLs that will be fetched and validated.
         """
         results = []
         query_encoded = query.replace(" ", "+")
         
-        # Wikipedia
-        wiki_url = f"https://en.wikipedia.org/wiki/Special:Search?search={query_encoded}"
+        # Wikipedia - Always try encyclopedia first
         results.append(SearchResult(
             title=f"Wikipedia: {query}",
-            url=f"https://en.wikipedia.org/wiki/{query.replace(' ', '_')}",
-            snippet=f"Search Wikipedia for: {query}",
-            authority_tier=3,
-            relevance_score=0.7
+            url=f"https://en.wikipedia.org/wiki/Special:Search?search={query_encoded}",
+            snippet=f"Wikipedia search: {query}",
+            authority_tier=2,
+            relevance_score=0.8
         ))
         
-        # Khan Academy
-        if any(term in query.lower() for term in ['math', 'science', 'calculus', 'algebra', 'physics']):
+        # Stack Overflow - Excellent for data structures/programming
+        if any(term in query.lower() for term in ['stack', 'queue', 'lifo', 'fifo', 'heap', 'tree', 'list', 'data structure', 'algorithm', 'insertion', 'deletion', 'push', 'pop']):
+            results.append(SearchResult(
+                title=f"Stack Overflow: {query}",
+                url=f"https://stackoverflow.com/search?q={query_encoded}",
+                snippet=f"Stack Overflow - {query}",
+                authority_tier=2,
+                relevance_score=0.85
+            ))
+        
+        # GeeksforGeeks - Authoritative for computer science
+        if any(term in query.lower() for term in ['stack', 'queue', 'data structure', 'algorithm', 'tree', 'graph', 'sorting', 'linked list', 'array']):
+            results.append(SearchResult(
+                title=f"GeeksforGeeks: {query}",
+                url=f"https://www.geeksforgeeks.org/search/?q={query_encoded}",
+                snippet=f"GeeksforGeeks - {query}",
+                authority_tier=2,
+                relevance_score=0.82
+            ))
+        
+        # Khan Academy - For foundational content
+        if any(term in query.lower() for term in ['algorithm', 'data', 'structure', 'sort', 'search', 'math']):
             results.append(SearchResult(
                 title=f"Khan Academy: {query}",
-                url=f"https://www.khanacademy.org/search?search_again=1&page_search_query={query_encoded}",
-                snippet=f"Khan Academy content on: {query}",
+                url=f"https://www.khanacademy.org/search?page_search_query={query_encoded}",
+                snippet=f"Khan Academy - {query}",
+                authority_tier=1,
+                relevance_score=0.78
+            ))
+        
+        # Official Python docs for programming concepts
+        if any(term in query.lower() for term in ['python', 'list', 'array', 'collection', 'set', 'dict', 'tuple']):
+            results.append(SearchResult(
+                title=f"Python Docs: {query}",
+                url=f"https://docs.python.org/3/search.html?q={query_encoded}",
+                snippet=f"Python documentation",
                 authority_tier=1,
                 relevance_score=0.9
             ))
         
-        # ArXiv (for technical/academic queries)
-        if any(term in query.lower() for term in ['algorithm', 'theorem', 'proof', 'research', 'paper']):
-            results.append(SearchResult(
-                title=f"ArXiv: {query}",
-                url=f"https://arxiv.org/search/?query={query_encoded}&searchtype=all",
-                snippet=f"ArXiv papers on: {query}",
-                authority_tier=1,
-                relevance_score=0.85
-            ))
-        
+        logger.info(f"Constructed {len(results)} authoritative source URLs for query: {query[:50]}")
         return results[:self.max_results_per_query]
     
     def search_and_retrieve_evidence(
         self,
         claim_text: str,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        use_query_expansion: bool = True
     ) -> List[Evidence]:
         """
         Search online and retrieve evidence for a claim.
@@ -152,6 +173,7 @@ class OnlineEvidenceSearcher:
         Args:
             claim_text: Claim to find evidence for
             session_id: Session ID for logging
+            use_query_expansion: Enable ML-based query expansion
         
         Returns:
             List of Evidence objects from online sources
@@ -159,6 +181,18 @@ class OnlineEvidenceSearcher:
         if not claim_text or not claim_text.strip():
             logger.info("Skipping online search for empty claim")
             return []
+
+        # ML Optimization: Expand query for better search results
+        search_query = claim_text
+        if use_query_expansion:
+            try:
+                from src.utils.ml_advanced_optimizations import get_query_expander
+                expander = get_query_expander()
+                search_query = expander.expand_query(claim_text)
+                logger.debug(f"Query expanded: '{claim_text[:50]}...' → '{search_query[:80]}...'")
+            except Exception as e:
+                logger.debug(f"Query expansion failed, using original: {e}")
+                search_query = claim_text
 
         claim_preview = (claim_text or "").strip().replace("\n", " ")
         claim_preview = claim_preview[:120] + ("..." if len(claim_preview) > 120 else "")
@@ -168,11 +202,12 @@ class OnlineEvidenceSearcher:
             session_id=session_id,
             metadata={
                 "claim_length": len(claim_text),
-                "claim_preview": claim_preview
+                "claim_preview": claim_preview,
+                "query_expanded": use_query_expansion
             }
         ):
-            # Search for relevant content
-            search_results = self.search_duckduckgo(claim_text)
+            # Search for relevant content (using expanded query)
+            search_results = self.search_duckduckgo(search_query)
             
             if not search_results:
                 logger.warning(f"No search results for claim: {claim_text[:100]}")
@@ -273,6 +308,8 @@ def build_online_evidence_store(
     Returns:
         (evidence_store, stats) tuple
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
     searcher = OnlineEvidenceSearcher(
         max_results_per_query=5,
         max_urls_to_fetch=3
@@ -282,33 +319,49 @@ def build_online_evidence_store(
     all_evidence = []
     
     skipped_claims = 0
+    max_claims_to_search = min(len(claims), config.ONLINE_MAX_CLAIMS_TO_SEARCH)
 
     with PerformanceTimer(
         "build_online_evidence_store",
         session_id=session_id,
         metadata={"num_claims": len(claims)}
     ):
-        # Search online for each claim
-        for i, claim in enumerate(claims[:20], 1):  # Limit to first 20 claims to avoid excessive searching
-            logger.info(f"Searching online evidence for claim {i}/{min(len(claims), 20)}")
-
+        # PARALLEL SEARCH: Use ThreadPoolExecutor for I/O-bound search operations
+        claims_to_search = claims[:max_claims_to_search]
+        
+        def search_claim(i_claim_tuple):
+            """Search for a single claim (for parallel execution)."""
+            i, claim = i_claim_tuple
             claim_text = (claim.claim_text or claim.metadata.get("draft_text", "")).strip()
             if not claim_text:
-                skipped_claims += 1
-                logger.info("Skipping empty claim at index %s", i)
-                continue
-
+                logger.info(f"Skipping empty claim at index {i+1}")
+                return None, i+1
+            
+            logger.info(f"Searching online evidence for claim {i+1}/{max_claims_to_search}")
             claim_evidence = searcher.search_and_retrieve_evidence(
                 claim_text=claim_text,
                 session_id=session_id
             )
+            return claim_evidence[:max_evidence_per_claim], i+1
+        
+        # Execute searches in parallel (max 4 concurrent threads to respect rate limits)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                executor.submit(search_claim, (i, claim)): i 
+                for i, claim in enumerate(claims_to_search)
+            }
             
-            # Limit evidence per claim
-            all_evidence.extend(claim_evidence[:max_evidence_per_claim])
-            
-            # Rate limiting between claims
-            if i < min(len(claims), 20):
-                time.sleep(0.5)
+            for future in as_completed(futures):
+                try:
+                    claim_evidence, claim_idx = future.result()
+                    if claim_evidence is None:
+                        skipped_claims += 1
+                    else:
+                        all_evidence.extend(claim_evidence)
+                        logger.info(f"Claim {claim_idx}: Retrieved {len(claim_evidence)} evidence chunks")
+                except Exception as e:
+                    logger.error(f"Error searching claim: {e}", exc_info=True)
+                    skipped_claims += 1
         
         logger.info(f"Total evidence collected: {len(all_evidence)} chunks")
         
@@ -336,7 +389,7 @@ def build_online_evidence_store(
         # Compile statistics
         stats = {
             "session_id": session_id,
-            "num_claims_searched": min(len(claims), 20),
+            "num_claims_searched": max_claims_to_search,
             "num_claims_skipped": skipped_claims,
             "total_evidence_chunks": len(all_evidence),
             "num_sources": len(set(ev.source_id for ev in all_evidence)),
@@ -351,3 +404,52 @@ def build_online_evidence_store(
 def should_use_online_evidence() -> bool:
     """Check if online evidence should be used instead of input."""
     return getattr(config, 'ENABLE_ONLINE_VERIFICATION', False)
+
+
+# Module-level convenience function for cited generation pipeline
+def search_and_retrieve_evidence(
+    query: str,
+    session_id: Optional[str] = None,
+    max_results: int = 3,
+    use_query_expansion: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Module-level convenience function for searching and retrieving online evidence.
+    
+    This is a simpler interface for use in cited generation pipeline.
+    
+    Args:
+        query: Search query (topic or concept)
+        session_id: Session ID for logging
+        max_results: Maximum results to return
+        use_query_expansion: Enable ML-based query expansion
+    
+    Returns:
+        List of evidence dicts with keys: snippet, url, source_id, text
+    """
+    searcher = OnlineEvidenceSearcher(
+        max_results_per_query=5,
+        max_urls_to_fetch=max_results
+    )
+    
+    evidence_list = searcher.search_and_retrieve_evidence(
+        claim_text=query,
+        session_id=session_id,
+        use_query_expansion=use_query_expansion
+    )
+    
+    # Convert Evidence objects to simple dicts
+    results = []
+    for ev in evidence_list:
+        results.append({
+            "snippet": ev.text,
+            "text": ev.text,
+            "url": ev.metadata.get("origin_url", ""),
+            "title": ev.metadata.get("source_title", ""),
+            "authority_tier": ev.metadata.get("authority_tier", "Unknown"),
+            "authority_weight": float(ev.metadata.get("authority_weight", 0.5)),
+            "source_id": ev.source_id,
+            "evidence_id": ev.evidence_id
+        })
+    
+    return results

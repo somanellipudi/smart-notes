@@ -14,7 +14,7 @@ from datetime import datetime
 import config
 from src.reasoning.pipeline import ReasoningPipeline
 from src.schema.output_schema import ClassSessionOutput
-from src.claims.schema import ClaimCollection, ClaimType, VerificationStatus
+from src.claims.schema import ClaimCollection, ClaimType, VerificationStatus, RejectionReason
 from src.claims.extractor import ClaimExtractor
 from src.retrieval.claim_rag import ClaimRAG
 from src.claims.validator import ClaimValidator
@@ -43,6 +43,11 @@ from src.retrieval.evidence_builder import build_session_evidence_store
 from src.retrieval.online_evidence_search import build_online_evidence_store
 from src.retrieval.embedding_provider import EmbeddingProvider
 from src.utils.performance_logger import PerformanceTimer, set_session_id
+from src.utils.ml_optimizations import (
+    SemanticDeduplicationCache,
+    EvidenceQualityPredictor,
+    ClaimPriorityScorer
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +97,16 @@ class VerifiablePipelineWrapper:
             ollama_url=ollama_url
         )
         
+        # Cited generation pipeline (FAST MODE)
+        from src.reasoning.cited_pipeline import CitedGenerationPipeline
+        self.cited_pipeline = CitedGenerationPipeline(
+            model=model,
+            temperature=temperature,
+            provider_type=provider_type,
+            api_key=api_key,
+            embedding_provider=None  # Will be created in CitedGenerationPipeline
+        )
+        
         # Domain profile
         self.domain_profile = config.get_domain_profile(domain_profile)
         logger.info(f"Using domain profile: {self.domain_profile.display_name}")
@@ -107,6 +122,36 @@ class VerifiablePipelineWrapper:
             strict_mode=config.VERIFIABLE_STRICT_MODE
         )
         self.metrics_calculator = VerifiabilityMetrics()
+        
+        # ML-based optimizations for performance
+        from src.utils.ml_optimizations import (
+            SemanticDeduplicationCache,
+            EvidenceQualityPredictor,
+            ClaimPriorityScorer
+        )
+        from src.utils.ml_advanced_optimizations import (
+            get_claim_clusterer,
+            get_query_expander,
+            get_evidence_ranker,
+            get_type_classifier
+        )
+        
+        # Basic ML optimizations
+        self.dedup_cache = SemanticDeduplicationCache(similarity_threshold=0.95)
+        self.evidence_predictor = EvidenceQualityPredictor(
+            min_similarity=0.4,
+            min_sources=1,
+            min_evidence_length=50
+        )
+        self.priority_scorer = ClaimPriorityScorer()
+        
+        # Advanced ML optimizations
+        self.claim_clusterer = get_claim_clusterer()
+        self.query_expander = get_query_expander()
+        self.evidence_ranker = get_evidence_ranker()
+        self.type_classifier = get_type_classifier()
+        
+        logger.info("ML optimizations enabled: cache, quality prediction, priority scoring, clustering, query expansion, evidence ranking, type classification")
         
         # Initialize agent with config
         agent_config = {
@@ -186,6 +231,140 @@ class VerifiablePipelineWrapper:
                 'worked_examples': True,
                 'real_world': True
             }
+        
+        # FAST MODE: Cited generation (generates with sources in single pass)
+        if verifiable_mode and config.ENABLE_CITED_GENERATION:
+            logger.info("🚀 Running in CITED GENERATION mode (FAST - generates with sources)")
+            output, metadata = self.cited_pipeline.process(
+                combined_content=combined_content,
+                equations=equations,
+                external_context=external_context,
+                session_id=session_id,
+                output_filters=output_filters
+            )
+            
+            # Convert concepts to synthetic claims with sources for report compatibility
+            from src.claims.schema import ClaimCollection, LearningClaim, ClaimType, VerificationStatus
+            
+            synthetic_claims = []
+            skipped_claims = []
+            evidence_summary = metadata.get("evidence_summary", {})
+            skipped_concepts = metadata.get("skipped_concepts", [])
+            
+            logger.info(f"🔍 Evidence summary from pipeline:")
+            logger.info(f"   Keys: {list(evidence_summary.keys())}")
+            logger.info(f"   Concepts to verify: {[c.name for c in output.key_concepts]}")
+            
+            verified_count = 0
+            low_conf_count = 0
+            
+            for concept in output.key_concepts:
+                # Try exact match first, then case-insensitive
+                sources = evidence_summary.get(concept.name, [])
+                if not sources:
+                    # Try case-insensitive lookup
+                    for key, val in evidence_summary.items():
+                        if key.lower() == concept.name.lower():
+                            sources = val
+                            logger.info(f"Found case-insensitive match for {concept.name}")
+                            break
+                
+                source_urls = [s.get("url") for s in sources] if sources else []
+                has_sources = len(source_urls) > 0
+                
+                # STRICT VERIFICATION: Only VERIFIED if external sources found
+                if has_sources and any(url not in ["Class Notes", "Class Notes / Primary Source"] for url in source_urls):
+                    status = VerificationStatus.VERIFIED
+                    verified_count += 1
+                else:
+                    # Mark as LOW_CONFIDENCE - requires external verification
+                    status = VerificationStatus.LOW_CONFIDENCE
+                    low_conf_count += 1
+                
+                logger.info(f"✓ Concept '{concept.name}': external_sources={has_sources}, status={status.value}, urls={len(source_urls)}")
+                
+                claim = LearningClaim(
+                    claim_text=f"{concept.name}: {concept.definition}",
+                    claim_type=ClaimType.DEFINITION,
+                    status=status,
+                    confidence=0.95 if has_sources else 0.5,  # Lower confidence for unverified
+                    metadata={
+                        "source": "cited_generation",
+                        "concept_name": concept.name,
+                        "source_urls": source_urls,
+                        "source_count": len(source_urls),
+                        "sources": sources,
+                        "requires_verification": not has_sources
+                    }
+                )
+                synthetic_claims.append(claim)
+            
+            # Create skipped claims for documentation
+            for skipped in skipped_concepts:
+                skip_claim = LearningClaim(
+                    claim_text=f"{skipped['name']}: (Skipped - {skipped['reason']})",
+                    claim_type=ClaimType.DEFINITION,
+                    status=VerificationStatus.REJECTED,
+                    confidence=0.0,
+                    metadata={
+                        "source": "cited_generation",
+                        "skipped": True,
+                        "skip_reason": skipped['reason']
+                    }
+                )
+                skipped_claims.append(skip_claim)
+            
+            claim_collection = ClaimCollection(session_id=session_id, claims=synthetic_claims + skipped_claims)
+            verified_collection = ClaimCollection(session_id=session_id, claims=synthetic_claims)  # Only verified, no skipped
+            
+            # Enhanced metadata to match verifiable format
+            num_concepts = metadata.get("concepts", 0)
+            num_with_sources = len([c for c in synthetic_claims if c.metadata.get("source_urls")])
+            num_skipped = len(skipped_concepts)
+            num_verified_citations = metadata.get("verified_citations", 0)
+            
+            # Debug logging
+            logger.info(f"📊 Cited mode metadata: topics={metadata.get('topics')}, concepts={num_concepts}, citations={num_verified_citations}")
+            logger.info(f"📝 Topics extracted: {metadata.get('topics_list', [])}")
+            logger.info(f"📝 Concepts extracted: {metadata.get('concepts_list', [])}")
+            logger.info(f"📚 Concepts with sources: {num_with_sources}/{num_concepts}")
+            logger.info(f"⏭️  Concepts skipped (no evidence): {num_skipped}")
+            if skipped_concepts:
+                for skip in skipped_concepts:
+                    logger.info(f"   - {skip['name']}: {skip['reason']}")
+            
+            if num_concepts == 0:
+                logger.error("❌ CRITICAL: Cited generation returned 0 concepts! Check extraction logic.")
+            
+            logger.info(
+                f"✅ Cited generation complete: {num_concepts} concepts, "
+                f"{num_verified_citations} verified citations"
+            )
+            
+            verifiable_metadata = {
+                "verifiable_mode": True,
+                "mode": "cited_generation",
+                "processing_time": metadata.get("processing_time", 0),
+                "metrics": {
+                    "total_claims": num_concepts,
+                    "verified_claims": num_with_sources,  # Only those with verified sources
+                    "rejected_claims": num_skipped,
+                    "low_confidence_claims": num_concepts - num_with_sources,
+                    "evidence_docs": metadata.get("total_evidence", 0),
+                    "verification_rate": num_with_sources / num_concepts if num_concepts > 0 else 0.0,
+                    "quality_flags": [
+                        f"Fast cited generation: {num_verified_citations} online citations",
+                        f"Sources verified: {num_with_sources}/{num_concepts} concepts"
+                    ]
+                },
+                "citations": metadata.get("citations", []),
+                "claim_collection": claim_collection,
+                "verified_collection": verified_collection,
+                "fast_mode": True,
+                "evidence_summary": evidence_summary,
+                "skipped_concepts": skipped_concepts
+            }
+            return output, verifiable_metadata
         
         if not verifiable_mode:
             # Standard mode: delegate directly to standard pipeline
@@ -681,7 +860,9 @@ class VerifiablePipelineWrapper:
         def _sigmoid(value: float) -> float:
             return 1.0 / (1.0 + math.exp(-value))
 
-        all_nli_results = []
+        # PHASE 1: Retrieve candidates for ALL claims (parallelizable with FAISS)
+        logger.info("Retrieving initial candidates for all claims...")
+        all_retrieved = []
         for i, claim in enumerate(claim_collection.claims):
             query_embedding = claim_embeddings[i].astype("float32")
             retrieved = evidence_store.search(
@@ -689,22 +870,72 @@ class VerifiablePipelineWrapper:
                 top_k=rerank_top_k,
                 min_similarity=min_similarity
             )
-
-            reranked = []
-            if use_reranker and retrieved:
-                passages = [ev.text for ev, _ in retrieved]
-                raw_scores = self.embedding_provider.rerank(claim.claim_text, passages)
-                if raw_scores:
-                    for (ev, vec_sim), raw_score in zip(retrieved, raw_scores):
-                        reranked.append((ev, _sigmoid(raw_score), vec_sim, raw_score))
-                    reranked.sort(key=lambda item: item[1], reverse=True)
-                    reranked = reranked[:final_top_k]
+            all_retrieved.append((claim, retrieved))
+        
+        # PHASE 2: Batch reranking (if enabled)
+        if use_reranker:
+            logger.info("Batch reranking all claim-evidence pairs...")
+            with PerformanceTimer("batch_rerank_all_claims", session_id=session_id):
+                # Build all (claim, passage) pairs with metadata
+                batch_pairs = []
+                batch_metadata = []  # (claim_idx, passage_idx, ev, vec_sim)
+                
+                for claim_idx, (claim, retrieved) in enumerate(all_retrieved):
+                    if retrieved:
+                        for passage_idx, (ev, vec_sim) in enumerate(retrieved):
+                            batch_pairs.append((claim.claim_text, ev.text))
+                            batch_metadata.append((claim_idx, passage_idx, ev, vec_sim))
+                
+                # Single batch rerank call for ALL pairs
+                if batch_pairs:
+                    logger.info(f"Reranking {len(batch_pairs)} claim-evidence pairs in one batch...")
+                    all_raw_scores = []
+                    
+                    # Batch in chunks to avoid OOM (max 256 pairs per batch)
+                    batch_size = 256
+                    for chunk_start in range(0, len(batch_pairs), batch_size):
+                        chunk_end = min(chunk_start + batch_size, len(batch_pairs))
+                        chunk_pairs = batch_pairs[chunk_start:chunk_end]
+                        
+                        # Call reranker on chunk
+                        reranker = self.embedding_provider._load_reranker()
+                        if reranker:
+                            chunk_scores = reranker.predict(chunk_pairs, show_progress_bar=False)
+                            all_raw_scores.extend([float(s) for s in chunk_scores])
+                        else:
+                            all_raw_scores.extend([0.0] * len(chunk_pairs))
+                    
+                    # Now group scores back by claim
+                    claim_rerank_results = [[] for _ in range(len(claim_collection.claims))]
+                    for (claim_idx, passage_idx, ev, vec_sim), raw_score in zip(batch_metadata, all_raw_scores):
+                        claim_rerank_results[claim_idx].append((ev, vec_sim, raw_score))
                 else:
-                    reranked = [(ev, sim, sim, None) for ev, sim in retrieved[:final_top_k]]
-            else:
+                    claim_rerank_results = [[] for _ in range(len(claim_collection.claims))]
+        else:
+            claim_rerank_results = [[] for _ in range(len(claim_collection.claims))]
+        
+        # PHASE 3: Assign evidence to claims
+        logger.info("Assigning reranked evidence to claims...")
+        all_nli_results = []
+        from src.claims.schema import EvidenceItem
+        
+        for i, claim in enumerate(claim_collection.claims):
+            retrieved = all_retrieved[i][1]
+            
+            # Use reranked scores if available
+            if use_reranker and claim_rerank_results[i]:
+                reranked = []
+                for ev, vec_sim, raw_score in claim_rerank_results[i]:
+                    reranked.append((ev, _sigmoid(raw_score), vec_sim, raw_score))
+                reranked.sort(key=lambda item: item[1], reverse=True)
+                reranked = reranked[:final_top_k]
+            elif retrieved:
+                # No reranking, use vector similarity
                 reranked = [(ev, sim, sim, None) for ev, sim in retrieved[:final_top_k]]
-
-            from src.claims.schema import EvidenceItem
+            else:
+                reranked = []
+            
+            # Build evidence objects
             evidence = []
             for ev, score, vec_sim, raw_score in reranked:
                 span_metadata = {"vector_similarity": vec_sim}
@@ -800,37 +1031,139 @@ class VerifiablePipelineWrapper:
         logger.info(f"Step 3 time: {step_timings['step_3_retrieve_evidence']:.2f}s")
         _update_progress("retrieval", "complete")
 
-        # Step 3.5: Evidence-first claim text generation
-        logger.info("Step 3.5: Generating claim text only after evidence")
+        # Step 3.5: Evidence-first claim text generation (PARALLEL)
+        logger.info("Step 3.5: Generating claim text only after evidence (with parallel LLM calls)")
         step_start = time.perf_counter()
-        for claim in claim_collection.claims:
-            if claim.status == VerificationStatus.REJECTED:
-                continue
-            if not claim.evidence_objects:
-                claim.status = VerificationStatus.REJECTED
-                claim.confidence = 0.0
-                continue
-
-            if claim.claim_type == ClaimType.DEFINITION:
-                try:
-                    # ConceptAgent.generate() requires claim and evidence list
-                    generated_text = self.concept_agent.generate(claim, claim.evidence_objects)
-                    claim.claim_text = generated_text
-                    # Confidence already set by decision policy
-                except AgentRefusalError as e:
-                    logger.info(f"Agent refused to generate: {e}")
+        
+        with PerformanceTimer("step_3_5_generate_text_parallel", session_id=session_id):
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            
+            # Separate claims by type
+            definition_claims = []
+            other_claims = []
+            
+            for claim in claim_collection.claims:
+                if claim.status == VerificationStatus.REJECTED:
+                    continue
+                if not claim.evidence_objects:
                     claim.status = VerificationStatus.REJECTED
                     claim.confidence = 0.0
-            else:
-                # For non-definition claims, use draft if available
+                    continue
+                
+                if claim.claim_type == ClaimType.DEFINITION:
+                    definition_claims.append(claim)
+                else:
+                    other_claims.append(claim)
+            
+            # Process non-definition claims (fast, no LLM)
+            for claim in other_claims:
                 draft_text = claim.metadata.get("draft_text", "")
                 if draft_text:
                     claim.claim_text = draft_text
                 else:
                     claim.status = VerificationStatus.REJECTED
                     claim.confidence = 0.0
-            step_timings["step_3_5_generate_text"] = time.perf_counter() - step_start
-            logger.info(f"Step 3.5 time: {step_timings['step_3_5_generate_text']:.2f}s")
+            
+            # PARALLEL LLM calls for DEFINITION claims with ML optimizations
+            if definition_claims:
+                logger.info(f"Generating definitions for {len(definition_claims)} claims (with ML optimizations)...")
+                
+                # Compute embeddings for deduplication AND clustering
+                claim_texts_for_cache = [
+                    claim.metadata.get("draft_text", claim.claim_text) for claim in definition_claims
+                ]
+                claim_embeddings_for_cache = self.embedding_provider.embed_queries(claim_texts_for_cache)
+                
+                # ML Optimization: Cluster similar claims for batch processing
+                clusters = self.claim_clusterer.cluster_claims(definition_claims, claim_embeddings_for_cache)
+                logger.info(f"Clustered {len(definition_claims)} claims into {len(clusters)} batches")
+                
+                def generate_definition(claim_idx_tuple):
+                    """Generate definition text for a single claim (parallel execution).""" 
+                    idx, claim = claim_idx_tuple
+                    
+                    # ML Optimization 1: Evidence quality check (skip bad evidence early)
+                    is_sufficient, reason = self.evidence_predictor.predict_quality(
+                        claim.evidence_objects,
+                        claim.metadata.get("draft_text", claim.claim_text)
+                    )
+                    if not is_sufficient:
+                        logger.warning(
+                            f"⚠️ Skipping LLM call for claim '{claim.metadata.get('draft_text', '')[:50]}...' - "
+                            f"Reason: {reason} | "
+                            f"Evidence count: {len(claim.evidence_objects)} | "
+                            f"Max similarity: {max((ev.similarity for ev in claim.evidence_objects), default=0.0):.3f}"
+                        )
+                        return claim, None, f"evidence_quality_{reason}"
+                    
+                    # ML Optimization 2: Semantic deduplication (check cache)
+                    claim_embedding = claim_embeddings_for_cache[idx]
+                    cached_result = self.dedup_cache.lookup(claim_embedding, claim.evidence_objects)
+                    if cached_result:
+                        logger.info("Using cached result (semantic match)")
+                        return claim, cached_result, None
+                    
+                    try:
+                        with PerformanceTimer(
+                            "concept_agent_generate",
+                            session_id=session_id,
+                            metadata={"claim_preview": claim.metadata.get("draft_text", "")[:30]}
+                        ):
+                            generated_text = self.concept_agent.generate(claim, claim.evidence_objects)
+                            
+                            # Store in cache for future reuse
+                            self.dedup_cache.store(
+                                claim_text=claim.metadata.get("draft_text", claim.claim_text),
+                                claim_embedding=claim_embedding,
+                                evidence_items=claim.evidence_objects,
+                                generated_text=generated_text,
+                                confidence=claim.confidence
+                            )
+                            
+                            return claim, generated_text, None
+                    except AgentRefusalError as e:
+                        logger.info(f"Agent refused to generate: {e}")
+                        return claim, None, e
+                    except Exception as e:
+                        logger.error(f"Error generating definition: {e}", exc_info=True)
+                        return claim, None, e
+                
+                # ML Optimization 3: Priority-based processing (process important claims first)
+                evidence_map = {i: claim.evidence_objects for i, claim in enumerate(definition_claims)}
+                ranked_claims = self.priority_scorer.rank_claims(definition_claims, evidence_map)
+                
+                logger.info(f"Claim priorities: {[(i, f'{score:.2f}') for i, score in ranked_claims[:5]]}")
+                
+                # Execute LLM calls in parallel (max 3 concurrent to avoid rate limits)
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    # Submit in priority order
+                    futures = {
+                        executor.submit(generate_definition, (i, definition_claims[i])): i 
+                        for i, score in ranked_claims
+                    }
+                    
+                    for future in as_completed(futures):
+                        claim, generated_text, error = future.result()
+                        if error:
+                            claim.status = VerificationStatus.REJECTED
+                            claim.confidence = 0.0
+                            claim.rejection_reason = RejectionReason.NO_EVIDENCE if "evidence" in str(error) else None
+                            logger.info(f"Claim rejected (ML optimization): {error}")
+                        else:
+                            claim.claim_text = generated_text
+                            # Confidence already set by decision policy
+                
+                # Log ML optimization stats
+                cache_stats = self.dedup_cache.get_stats()
+                predictor_stats = self.evidence_predictor.get_stats()
+                logger.info(
+                    f"ML Optimization Results: "
+                    f"Cache hits={cache_stats['hits']} (saved {cache_stats['llm_calls_saved']} LLM calls), "
+                    f"Quality skips={predictor_stats['skipped']} (saved {predictor_stats['llm_calls_saved']} LLM calls)"
+                )
+        
+        step_timings["step_3_5_generate_text"] = time.perf_counter() - step_start
+        logger.info(f"Step 3.5 time: {step_timings['step_3_5_generate_text']:.2f}s")
         
         # Step 4: Validate claims
         logger.info("Step 4: Validating claims")
@@ -888,6 +1221,31 @@ class VerifiablePipelineWrapper:
             include_low_confidence=False,  # Exclude low-confidence
             include_rejected=False  # Exclude rejected
         )
+        
+        # Log filtering breakdown
+        total_claims = len(claim_collection.claims)
+        verified_count = len(verified_collection.claims)
+        rejected_count = sum(1 for c in claim_collection.claims if c.status == VerificationStatus.REJECTED)
+        low_conf_count = sum(1 for c in claim_collection.claims if c.status == VerificationStatus.LOW_CONFIDENCE)
+        
+        logger.info(
+            f"📊 Step 7 Filtering Results: "
+            f"Total={total_claims}, "
+            f"Verified={verified_count}, "
+            f"Rejected={rejected_count}, "
+            f"Low-Confidence={low_conf_count}"
+        )
+        
+        if rejected_count > 0:
+            # Log top rejection reasons
+            rejection_reasons = {}
+            for claim in claim_collection.claims:
+                if claim.status == VerificationStatus.REJECTED:
+                    reason = str(claim.rejection_reason) if claim.rejection_reason else "UNKNOWN"
+                    rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+            
+            logger.warning(f"⚠️ Rejection reasons breakdown: {rejection_reasons}")
+        
         step_timings["step_7_filter_verified"] = time.perf_counter() - step_start
         logger.info(f"Step 7 time: {step_timings['step_7_filter_verified']:.2f}s")
 

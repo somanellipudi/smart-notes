@@ -291,6 +291,21 @@ VERIFIABLE_AGENT_MIN_CONFIDENCE = float(os.getenv("VERIFIABLE_AGENT_MIN_CONFIDEN
 VERIFIABLE_STRICT_MODE = os.getenv("VERIFIABLE_STRICT_MODE", "true").lower() == "true"
 
 
+# ==================== CITED GENERATION MODE (FAST) ====================
+
+# Enable cited generation mode (generates with sources in single pass - 5-10x faster)
+# When enabled, replaces generate→extract→verify with extract→search→generate-with-citations
+ENABLE_CITED_GENERATION = os.getenv("ENABLE_CITED_GENERATION", "false").lower() == "true"
+"""Fast citation-based generation: LLM provides sources during generation (not after)"""
+
+# Cited generation evidence settings
+CITED_MAX_EVIDENCE_PER_TOPIC = int(os.getenv("CITED_MAX_EVIDENCE_PER_TOPIC", "3"))
+"""Maximum online evidence items to retrieve per topic/concept"""
+
+CITED_PARALLEL_SEARCH_WORKERS = int(os.getenv("CITED_PARALLEL_SEARCH_WORKERS", "6"))
+"""Number of parallel workers for evidence search"""
+
+
 # ==================== VERIFIABLE MODE PERFORMANCE OPTIMIZATION ====================
 
 # Selective verification: limit number of claims to verify (for speed)

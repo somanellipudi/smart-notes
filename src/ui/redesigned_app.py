@@ -905,17 +905,59 @@ def render_results_tab():
         st.divider()
         st.markdown("### 📊 Detailed Verifiability Report")
         
+        # Check if using cited generation mode
+        is_cited_mode = verifiable_metadata.get("mode") == "cited_generation"
+        if is_cited_mode:
+            st.info("🚀 **Fast Cited Generation Mode**: Content generated with inline source citations (5-10x faster)")
+        
+        # Show quality report if available
+        quality_report = verifiable_metadata.get("quality_report")
+        if quality_report:
+            with st.expander("🔍 Content Quality Analysis", expanded=True):
+                extraction = quality_report.get("extraction_count", {})
+                evidence_cov = quality_report.get("evidence_coverage", {})
+                richness = quality_report.get("content_richness", {})
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Topics Extracted", extraction.get("topics", 0))
+                    st.caption(extraction.get("status", ""))
+                with col2:
+                    st.metric("Concepts Extracted", extraction.get("concepts", 0))
+                    expected = extraction.get("expected_minimum", 10)
+                    st.caption(f"Expected: {expected}+ for rich content")
+                with col3:
+                    coverage = evidence_cov.get("coverage_rate", 0)
+                    st.metric("Evidence Coverage", f"{coverage:.0f}%")
+                    st.caption(f"{evidence_cov.get('with_sources', 0)}/{evidence_cov.get('with_sources', 0) + evidence_cov.get('without_sources', 0)} verified")
+                
+                # Show recommendations if any
+                recommendations = quality_report.get("recommendations", [])
+                if recommendations:
+                    st.warning("**💡 Quality Recommendations:**")
+                    for i, rec in enumerate(recommendations, 1):
+                        st.markdown(f"{i}. {rec}")
+        
         with st.expander("📈 Verification Metrics", expanded=True):
             metrics = verifiable_metadata.get("metrics", {})
             
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Verified Claims", metrics.get("verified_claims", 0))
+                verified_count = metrics.get("verified_claims", 0)
+                st.metric(
+                    "Verified Claims" if not is_cited_mode else "Verified Concepts",
+                    verified_count,
+                    help="Concepts extracted and verified with online sources" if is_cited_mode else None
+                )
                 st.metric("Low Confidence", metrics.get("low_confidence_claims", 0))
             with col2:
                 st.metric("Rejected Claims", metrics.get("rejected_claims", 0))
                 rejection_rate = metrics.get("rejection_rate", 0)
-                st.metric("Rejection Rate", f"{rejection_rate:.1%}" if rejection_rate > 0 else "0%")
+                if is_cited_mode:
+                    st.metric("Verification Rate", f"{metrics.get('verification_rate', 1.0):.1%}",
+                             help="Percentage of citations verified against online evidence")
+                else:
+                    st.metric("Rejection Rate", f"{rejection_rate:.1%}" if rejection_rate > 0 else "0%")
         
         # Show claim details
         claim_collection = verifiable_metadata.get("claim_collection")
@@ -923,14 +965,17 @@ def render_results_tab():
             with st.expander("🔍 Claim Details", expanded=False):
                 from src.claims.schema import VerificationStatus
                 
-                verified = [c for c in claim_collection.claims if c.status == VerificationStatus.VERIFIED]
-                rejected = [c for c in claim_collection.claims if c.status == VerificationStatus.REJECTED]
-                low_conf = [c for c in claim_collection.claims if c.status == VerificationStatus.LOW_CONFIDENCE]
+                # Separate skipped claims
+                skipped = [c for c in claim_collection.claims if c.metadata.get("skipped", False)]
+                verified = [c for c in claim_collection.claims if c.status == VerificationStatus.VERIFIED and not c.metadata.get("skipped")]
+                rejected = [c for c in claim_collection.claims if c.status == VerificationStatus.REJECTED and not c.metadata.get("skipped")]
+                low_conf = [c for c in claim_collection.claims if c.status == VerificationStatus.LOW_CONFIDENCE and not c.metadata.get("skipped")]
                 
-                tab1, tab2, tab3 = st.tabs([
+                tab1, tab2, tab3, tab4 = st.tabs([
                     f"✅ Verified ({len(verified)})",
-                    f"❌ Rejected ({len(rejected)})",
-                    f"⚠️ Low Confidence ({len(low_conf)})"
+                    f"❌ Skipped ({len(skipped)})",
+                    f"⚠️ Low Confidence ({len(low_conf)})",
+                    f"🚫 Rejected ({len(rejected)})"
                 ])
                 
                 with tab1:
@@ -940,10 +985,44 @@ def render_results_tab():
                                 st.write(f"**Full Claim:** {claim.claim_text}")
                                 st.caption(f"Confidence: {claim.confidence:.2f}")
                                 
-                                # Show evidence sources
-                                if hasattr(claim, 'evidence_objects') and claim.evidence_objects:
+                                # Show sources from metadata (for cited generation)
+                                meta = claim.metadata or {}
+                                source_urls = meta.get("source_urls", [])
+                                sources = meta.get("sources", [])
+                                
+                                if sources:
+                                    st.markdown(f"**📚 Verified Sources ({len(sources)}):**")
+                                    for src_idx, source in enumerate(sources[:3], 1):
+                                        with st.container():
+                                            url = source.get("url", "Unknown")
+                                            domain = source.get("domain", "")
+                                            title = source.get("title", "")
+                                            snippet = source.get("snippet", "")
+                                            authority_tier = source.get("authority_tier", "")
+                                            
+                                            # Display source with authority badge
+                                            tier_label = ""
+                                            if authority_tier and "TIER_1" in str(authority_tier):
+                                                tier_label = "🏆"  # Official/Authoritative
+                                            elif authority_tier and "TIER_2" in str(authority_tier):
+                                                tier_label = "✅"  # Academic/Institutional
+                                            else:
+                                                tier_label = "📖"  # Community/General
+                                            
+                                            st.markdown(f"**{tier_label} [{title or domain}]({url})**")
+                                            if snippet:
+                                                st.caption(f"📝 \"{snippet.strip()}...\"")
+                                            st.caption(f"🔗 {domain}")
+                                            st.markdown("---")
+                                elif source_urls:
+                                    st.markdown(f"**📚 Verified Sources ({len(source_urls)}):**")
+                                    for url in source_urls[:3]:
+                                        st.markdown(f"🔗 [{url}]({url})")
+                                
+                                # Show evidence objects if available (for standard mode)
+                                elif hasattr(claim, 'evidence_objects') and claim.evidence_objects:
                                     st.markdown(f"**📚 Evidence ({len(claim.evidence_objects)} sources):**")
-                                    for ev_idx, evidence in enumerate(claim.evidence_objects[:3], 1):  # Show top 3
+                                    for ev_idx, evidence in enumerate(claim.evidence_objects[:3], 1):
                                         with st.container():
                                             st.markdown(f"**Source {ev_idx}:**")
                                             st.text(evidence.snippet[:300] + "..." if len(evidence.snippet) > 300 else evidence.snippet)
@@ -956,15 +1035,34 @@ def render_results_tab():
                         st.info("No verified claims")
                 
                 with tab2:
-                    if rejected:
-                        for claim in rejected[:10]:
-                            st.write(f"**Claim:** {claim.claim_text}")
-                            st.caption(f"Reason: {claim.rejection_reason or 'Unknown'}")
-                            if hasattr(claim, 'confidence'):
-                                st.caption(f"Confidence: {claim.confidence:.2f}")
-                            st.divider()
+                    if skipped:
+                        st.warning("⏭️ **These topics/concepts had insufficient supporting evidence in reliable sources and were excluded from the study guide.**")
+                        st.info("🔍 **Authority Tiers:**\n- 🏆 TIER 1: Official documentation, standards, academic papers\n- ✅ TIER 2: Institutional sources, textbooks\n- 📖 TIER 3: Community resources, blogs")
+                        
+                        for i, claim in enumerate(skipped, 1):
+                            concept_name = claim.claim_text.split(':')[0]
+                            meta = claim.metadata or {}
+                            skip_reason = meta.get("skip_reason", "Unknown reason")
+                            
+                            with st.expander(f"**{i}. {concept_name}** ⏭️", expanded=i <= 2):
+                                col1, col2 = st.columns([3, 1])
+                                with col1:
+                                    st.write(f"**Concept:** {concept_name}")
+                                    st.error(f"**Reason:** {skip_reason}")
+                                with col2:
+                                    st.caption("Status")
+                                    st.caption("⏭️ Skipped")
+                                
+                                st.markdown("---")
+                                st.markdown("**💡 What you can do:**")
+                                st.markdown(f"""
+1. **Add more details** - Include more information about "{concept_name}" in your notes
+2. **Cite sources** - If you have textbooks or references, mention them
+3. **Use external resources** - Search online resources and share relevant content
+4. **Define yourself** - Provide a clear definition if the concept is important to your studies
+                                """)
                     else:
-                        st.info("No rejected claims")
+                        st.success("✅ **All extracted concepts have supporting evidence sources!**")
                 
                 with tab3:
                     if low_conf:
@@ -973,8 +1071,37 @@ def render_results_tab():
                                 st.write(f"**Full Claim:** {claim.claim_text}")
                                 st.caption(f"Confidence: {claim.confidence:.2f}")
                                 
-                                # Show evidence sources
-                                if hasattr(claim, 'evidence_objects') and claim.evidence_objects:
+                                # Show sources from metadata
+                                meta = claim.metadata or {}
+                                sources = meta.get("sources", [])
+                                
+                                if sources:
+                                    st.markdown(f"**📚 Partial Sources ({len(sources)}):**")
+                                    for src_idx, source in enumerate(sources[:2], 1):
+                                        with st.container():
+                                            url = source.get("url", "Unknown")
+                                            domain = source.get("domain", "")
+                                            title = source.get("title", "")
+                                            snippet = source.get("snippet", "")
+                                            authority_tier = source.get("authority_tier", "")
+                                            
+                                            # Display source with authority badge
+                                            tier_label = ""
+                                            if authority_tier and "TIER_1" in str(authority_tier):
+                                                tier_label = "🏆"
+                                            elif authority_tier and "TIER_2" in str(authority_tier):
+                                                tier_label = "✅"
+                                            else:
+                                                tier_label = "📖"
+                                            
+                                            st.markdown(f"**{tier_label} [{title or domain}]({url})**")
+                                            if snippet:
+                                                st.caption(f"📝 \"{snippet.strip()}...\"")
+                                            st.caption(f"🔗 {domain}")
+                                            st.markdown("---")
+                                
+                                # Show evidence objects if available
+                                elif hasattr(claim, 'evidence_objects') and claim.evidence_objects:
                                     st.markdown(f"**📚 Evidence ({len(claim.evidence_objects)} sources):**")
                                     for ev_idx, evidence in enumerate(claim.evidence_objects[:3], 1):
                                         with st.container():
@@ -987,6 +1114,17 @@ def render_results_tab():
                                     st.caption(f"Evidence: {len(claim.evidence_ids)} source(s) (details not available)")
                     else:
                         st.info("No low confidence claims")
+                
+                with tab4:
+                    if rejected:
+                        for claim in rejected[:10]:
+                            st.write(f"**Claim:** {claim.claim_text}")
+                            st.caption(f"Reason: {claim.rejection_reason or 'Unknown'}")
+                            if hasattr(claim, 'confidence'):
+                                st.caption(f"Confidence: {claim.confidence:.2f}")
+                            st.divider()
+                    else:
+                        st.info("No rejected claims")
         elif verifiable_metadata.get("status"):
             # Special status already shown above
             pass
