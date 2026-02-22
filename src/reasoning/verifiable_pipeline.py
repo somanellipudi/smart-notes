@@ -40,7 +40,9 @@ from src.retrieval.evidence_store import (
     get_ingestion_diagnostics
 )
 from src.retrieval.evidence_builder import build_session_evidence_store
+from src.retrieval.online_evidence_search import build_online_evidence_store
 from src.retrieval.embedding_provider import EmbeddingProvider
+from src.utils.performance_logger import PerformanceTimer, set_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -403,43 +405,96 @@ class VerifiablePipelineWrapper:
         step_timings["step_0_25_quality_assessment"] = time.perf_counter() - step_start
         logger.info(f"Step 0.25 time: {step_timings['step_0_25_quality_assessment']:.2f}s")
         
-        # Step 0.5: Build Evidence Store (MANDATORY)
-        logger.info("Step 0.5: Building session evidence store")
-        step_start = time.perf_counter()
+        # Set session ID for performance logging
+        set_session_id(session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         
+        # Determine evidence source mode
+        evidence_source_mode = getattr(config, 'EVIDENCE_SOURCE_MODE', 'input')
+        logger.info(f"Evidence source mode: {evidence_source_mode}")
+        
+        # Step 0.5: Build Evidence Store (if using INPUT mode)
+        # For ONLINE mode, evidence store will be built AFTER claim extraction (Step 2)
+        evidence_store = None
         evidence_stats = None
-        try:
-            # Build evidence store from all inputs
-            evidence_store, evidence_stats = build_session_evidence_store(
-                session_id=session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                input_text=combined_content,
-                external_context=external_context,
-                equations=equations,
-                urls=urls if config.ENABLE_URL_SOURCES else None,
-                min_input_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION,
-                embedding_provider=self.embedding_provider
-            )
+        
+        if evidence_source_mode == "input":
+            logger.info("Step 0.5: Building session evidence store from INPUT")
+            step_start = time.perf_counter()
             
-            if not evidence_store.index_built:
-                raise ValueError("Evidence index not built; dense retrieval unavailable")
+            try:
+                with PerformanceTimer("build_input_evidence_store", session_id=session_id):
+                    # Build evidence store from all inputs
+                    evidence_store, evidence_stats = build_session_evidence_store(
+                        session_id=session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                        input_text=combined_content,
+                        external_context=external_context,
+                        equations=equations,
+                        urls=urls if config.ENABLE_URL_SOURCES else None,
+                        min_input_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION,
+                        embedding_provider=self.embedding_provider
+                    )
             
-            # Validate evidence store (non-blocking)
-            is_valid, validation_msg, classification = validate_evidence_store(
-                evidence_store,
-                min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION,
-                strict=False
-            )
-            
-            # Log evidence statistics
-            ev_stats = evidence_store.get_statistics()
-            evidence_stats = ev_stats
-            logger.info(
-                f"Evidence store stats: {ev_stats['num_chunks']} chunks, "
-                f"{ev_stats['total_chars']} chars, {ev_stats['num_sources']} sources"
-            )
+                if not evidence_store.index_built:
+                    raise ValueError("Evidence index not built; dense retrieval unavailable")
+                
+                # Validate evidence store (non-blocking)
+                is_valid, validation_msg, classification = validate_evidence_store(
+                    evidence_store,
+                    min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION,
+                    strict=False
+                )
+                
+                # Log evidence statistics
+                ev_stats = evidence_store.get_statistics()
+                evidence_stats = ev_stats
+                logger.info(
+                    f"Evidence store stats: {ev_stats['num_chunks']} chunks, "
+                    f"{ev_stats['total_chars']} chars, {ev_stats['num_sources']} sources"
+                )
 
-            if not is_valid:
+                if not is_valid:
+                    logger.warning("Insufficient evidence for verification mode. Falling back to baseline mode.")
+                    baseline_output = self.standard_pipeline.process(
+                        combined_content=combined_content,
+                        equations=equations,
+                        external_context=external_context,
+                        session_id=session_id,
+                        output_filters=output_filters
+                    )
+
+                    verifiable_metadata = {
+                        "verifiable_mode": False,
+                        "verification_unavailable": True,
+                        "status": classification,
+                        "reason": validation_msg,
+                        "message": (
+                            "Verification unavailable due to insufficient evidence. "
+                            "Showing baseline study guide (unverified content)."
+                        ),
+                        "metrics": {
+                            "total_claims": 0,
+                            "verified_claims": 0,
+                            "rejected_claims": 0,
+                            "evidence_docs": 0,
+                            "quality_flags": [validation_msg]
+                        },
+                        "evidence_diagnostics": get_ingestion_diagnostics(
+                            evidence_store,
+                            min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION
+                        )
+                    }
+
+                    return baseline_output, verifiable_metadata
+
+                # Store evidence stats for diagnostics
+                if diagnostics:
+                    diagnostics.evidence_stats = ev_stats
+
+            except ValueError as e:
+                error_msg = f"Evidence validation skipped: {str(e)}"
+                logger.warning(f"⚠ {error_msg}")
                 logger.warning("Insufficient evidence for verification mode. Falling back to baseline mode.")
+
                 baseline_output = self.standard_pipeline.process(
                     combined_content=combined_content,
                     equations=equations,
@@ -451,8 +506,8 @@ class VerifiablePipelineWrapper:
                 verifiable_metadata = {
                     "verifiable_mode": False,
                     "verification_unavailable": True,
-                    "status": classification,
-                    "reason": validation_msg,
+                    "status": "INSUFFICIENT_EVIDENCE",
+                    "reason": str(e),
                     "message": (
                         "Verification unavailable due to insufficient evidence. "
                         "Showing baseline study guide (unverified content)."
@@ -462,55 +517,19 @@ class VerifiablePipelineWrapper:
                         "verified_claims": 0,
                         "rejected_claims": 0,
                         "evidence_docs": 0,
-                        "quality_flags": [validation_msg]
-                    },
-                    "evidence_diagnostics": get_ingestion_diagnostics(
-                        evidence_store,
-                        min_chars=config.MIN_INPUT_CHARS_FOR_VERIFICATION
-                    )
+                        "quality_flags": [error_msg]
+                    }
                 }
 
                 return baseline_output, verifiable_metadata
-
-            # Store evidence stats for diagnostics
-            if diagnostics:
-                diagnostics.evidence_stats = ev_stats
-
-        except ValueError as e:
-            error_msg = f"Evidence validation skipped: {str(e)}"
-            logger.warning(f"⚠ {error_msg}")
-            logger.warning("Insufficient evidence for verification mode. Falling back to baseline mode.")
-
-            baseline_output = self.standard_pipeline.process(
-                combined_content=combined_content,
-                equations=equations,
-                external_context=external_context,
-                session_id=session_id,
-                output_filters=output_filters
-            )
-
-            verifiable_metadata = {
-                "verifiable_mode": False,
-                "verification_unavailable": True,
-                "status": "INSUFFICIENT_EVIDENCE",
-                "reason": str(e),
-                "message": (
-                    "Verification unavailable due to insufficient evidence. "
-                    "Showing baseline study guide (unverified content)."
-                ),
-                "metrics": {
-                    "total_claims": 0,
-                    "verified_claims": 0,
-                    "rejected_claims": 0,
-                    "evidence_docs": 0,
-                    "quality_flags": [error_msg]
-                }
-            }
-
-            return baseline_output, verifiable_metadata
+            
+            step_timings["step_0_5_build_evidence_store"] = time.perf_counter() - step_start
+            logger.info(f"Step 0.5 time: {step_timings['step_0_5_build_evidence_store']:.2f}s")
         
-        step_timings["step_0_5_build_evidence_store"] = time.perf_counter() - step_start
-        logger.info(f"Step 0.5 time: {step_timings['step_0_5_build_evidence_store']:.2f}s")
+        else:
+            # ONLINE mode: Evidence store will be built after claim extraction
+            logger.info("Step 0.5: Skipping input evidence store (ONLINE mode - will build after claims)")
+            step_timings["step_0_5_build_evidence_store"] = 0.0
         
         # Step 1: Run standard pipeline to get baseline
         logger.info("Step 1: Running standard pipeline for baseline")
@@ -530,6 +549,18 @@ class VerifiablePipelineWrapper:
         _update_progress("claim_extraction", "running")
         step_start = time.perf_counter()
         claim_collection = self.claim_extractor.extract_from_session(baseline_output)
+        
+        # Filter out questions and claims with skip_verification flag
+        initial_count = len(claim_collection.claims)
+        claim_collection.claims = [
+            c for c in claim_collection.claims 
+            if not c.metadata.get("skip_verification", False) 
+            and c.claim_type != ClaimType.QUESTION
+        ]
+        filtered_count = initial_count - len(claim_collection.claims)
+        if filtered_count > 0:
+            logger.info(f"Filtered out {filtered_count} non-verifiable claims (questions, etc.)")
+        
         step_timings["step_2_extract_claims"] = time.perf_counter() - step_start
         logger.info(f"Step 2 time: {step_timings['step_2_extract_claims']:.2f}s")
         _update_progress("claim_extraction", "complete")
@@ -546,6 +577,86 @@ class VerifiablePipelineWrapper:
             tag_claim_type(claim, self.domain_profile)
         step_timings["step_2_5_enforce_granularity"] = time.perf_counter() - step_start
         logger.info(f"Step 2.5 time: {step_timings['step_2_5_enforce_granularity']:.2f}s")
+        
+        # Step 2.75: Build online evidence store (if using ONLINE mode)
+        if evidence_source_mode == "online" and evidence_store is None:
+            logger.info("Step 2.75: Building evidence store from ONLINE sources")
+            step_start = time.perf_counter()
+            
+            try:
+                max_claims_for_search = getattr(config, 'ONLINE_MAX_CLAIMS_TO_SEARCH', 20)
+                claims_to_search = claim_collection.claims[:max_claims_for_search]
+                
+                logger.info(f"Searching online evidence for {len(claims_to_search)} claims")
+                
+                evidence_store, evidence_stats = build_online_evidence_store(
+                    session_id=session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    claims=claims_to_search,
+                    embedding_provider=self.embedding_provider,
+                    max_evidence_per_claim=getattr(config, 'ONLINE_MAX_SOURCES_PER_CLAIM', 5)
+                )
+                
+                # Log evidence statistics
+                if evidence_stats:
+                    logger.info(
+                        f"Online evidence stats: {evidence_stats.get('total_evidence_chunks', 0)} chunks, "
+                        f"{evidence_stats.get('num_sources', 0)} online sources"
+                    )
+                    
+                    # Store evidence stats for diagnostics
+                    if diagnostics:
+                        diagnostics.evidence_stats = evidence_stats
+                
+                # Validate that we got useful evidence
+                if not evidence_store or not evidence_store.index_built:
+                    logger.warning("Failed to build online evidence store. Falling back to baseline mode.")
+                    
+                    verifiable_metadata = {
+                        "verifiable_mode": False,
+                        "verification_unavailable": True,
+                        "status": "ONLINE_EVIDENCE_UNAVAILABLE",
+                        "reason": "Could not retrieve evidence from online sources",
+                        "message": (
+                            "Online evidence retrieval unavailable. "
+                            "Showing baseline study guide (unverified content)."
+                        ),
+                        "metrics": {
+                            "total_claims": len(claim_collection.claims),
+                            "verified_claims": 0,
+                            "rejected_claims": 0,
+                            "evidence_docs": 0,
+                            "quality_flags": ["Online evidence unavailable"]
+                        }
+                    }
+                    
+                    return baseline_output, verifiable_metadata
+                    
+            except Exception as e:
+                logger.error(f"Online evidence retrieval failed: {e}", exc_info=True)
+                logger.warning("Falling back to baseline mode due to online evidence error.")
+                
+                verifiable_metadata = {
+                    "verifiable_mode": False,
+                    "verification_unavailable": True,
+                    "status": "ONLINE_EVIDENCE_ERROR",
+                    "reason": str(e),
+                    "message": (
+                        f"Online evidence retrieval error: {str(e)}. "
+                        "Showing baseline study guide (unverified content)."
+                    ),
+                    "metrics": {
+                        "total_claims": len(claim_collection.claims),
+                        "verified_claims": 0,
+                        "rejected_claims": 0,
+                        "evidence_docs": 0,
+                        "quality_flags": [f"Error: {str(e)}"]
+                    }
+                }
+                
+                return baseline_output, verifiable_metadata
+            
+            step_timings["step_2_75_build_online_evidence"] = time.perf_counter() - step_start
+            logger.info(f"Step 2.75 time: {step_timings['step_2_75_build_online_evidence']:.2f}s")
         
         # Step 3: Retrieve evidence for each claim
         logger.info("Step 3: Retrieving evidence for claims")

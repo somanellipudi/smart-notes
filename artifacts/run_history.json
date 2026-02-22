@@ -1,65 +1,5 @@
 [
   {
-    "run_id": "20260218_214917_15d83cef",
-    "session_id": "session_20260218_214456",
-    "timestamp": "2026-02-18T21:49:17.300349",
-    "domain_profile": "Algorithms & Data Structures",
-    "llm_model": "gpt-4",
-    "embedding_model": "intfloat/e5-base-v2",
-    "nli_model": "unknown",
-    "inputs_used": [
-      "text"
-    ],
-    "ingestion_stats": {
-      "pages": 0,
-      "ocr_pages": 0
-    },
-    "verification_stats": {
-      "total_claims": 29,
-      "verified": 14,
-      "rejected": 12,
-      "low_conf": 0,
-      "avg_conf": 0.4095
-    },
-    "artifact_paths": {
-      "report_md": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_214456\\20260218_214917_15d83cef\\research_report.md",
-      "report_html": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_214456\\20260218_214917_15d83cef\\research_report.html",
-      "audit_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_214456\\20260218_214917_15d83cef\\research_report_audit.json",
-      "metrics_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_214456\\20260218_214917_15d83cef\\metrics.json",
-      "graphml": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_214456\\20260218_214917_15d83cef\\claim_graph.graphml"
-    }
-  },
-  {
-    "run_id": "20260218_234322_898f59fa",
-    "session_id": "session_20260218_233910",
-    "timestamp": "2026-02-18T23:43:22.793004",
-    "domain_profile": "Algorithms & Data Structures",
-    "llm_model": "gpt-4",
-    "embedding_model": "intfloat/e5-base-v2",
-    "nli_model": "unknown",
-    "inputs_used": [
-      "text"
-    ],
-    "ingestion_stats": {
-      "pages": 0,
-      "ocr_pages": 0
-    },
-    "verification_stats": {
-      "total_claims": 26,
-      "verified": 13,
-      "rejected": 12,
-      "low_conf": 0,
-      "avg_conf": 0.4357
-    },
-    "artifact_paths": {
-      "report_md": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_233910\\20260218_234322_898f59fa\\research_report.md",
-      "report_html": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_233910\\20260218_234322_898f59fa\\research_report.html",
-      "audit_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_233910\\20260218_234322_898f59fa\\research_report_audit.json",
-      "metrics_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_233910\\20260218_234322_898f59fa\\metrics.json",
-      "graphml": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260218_233910\\20260218_234322_898f59fa\\claim_graph.graphml"
-    }
-  },
-  {
     "run_id": "20260219_104422_6d2d45d3",
     "session_id": "session_20260219_103830",
     "timestamp": "2026-02-19T10:44:22.663822",
@@ -87,6 +27,66 @@
       "audit_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260219_103830\\20260219_104422_6d2d45d3\\research_report_audit.json",
       "metrics_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260219_103830\\20260219_104422_6d2d45d3\\metrics.json",
       "graphml": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260219_103830\\20260219_104422_6d2d45d3\\claim_graph.graphml"
+    }
+  },
+  {
+    "run_id": "20260221_121028_45b2ad2a",
+    "session_id": "session_20260221_120522",
+    "timestamp": "2026-02-21T12:10:28.688247",
+    "domain_profile": "Algorithms & Data Structures",
+    "llm_model": "gpt-4",
+    "embedding_model": "intfloat/e5-base-v2",
+    "nli_model": "unknown",
+    "inputs_used": [
+      "text"
+    ],
+    "ingestion_stats": {
+      "pages": 0,
+      "ocr_pages": 0
+    },
+    "verification_stats": {
+      "total_claims": 30,
+      "verified": 20,
+      "rejected": 8,
+      "low_conf": 0,
+      "avg_conf": 0.5658
+    },
+    "artifact_paths": {
+      "report_md": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_120522\\20260221_121028_45b2ad2a\\research_report.md",
+      "report_html": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_120522\\20260221_121028_45b2ad2a\\research_report.html",
+      "audit_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_120522\\20260221_121028_45b2ad2a\\research_report_audit.json",
+      "metrics_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_120522\\20260221_121028_45b2ad2a\\metrics.json",
+      "graphml": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_120522\\20260221_121028_45b2ad2a\\claim_graph.graphml"
+    }
+  },
+  {
+    "run_id": "20260221_140845_fb6e1ea1",
+    "session_id": "session_20260221_140257",
+    "timestamp": "2026-02-21T14:08:45.269293",
+    "domain_profile": "Algorithms & Data Structures",
+    "llm_model": "gpt-4",
+    "embedding_model": "intfloat/e5-base-v2",
+    "nli_model": "unknown",
+    "inputs_used": [
+      "text"
+    ],
+    "ingestion_stats": {
+      "pages": 0,
+      "ocr_pages": 0
+    },
+    "verification_stats": {
+      "total_claims": 33,
+      "verified": 18,
+      "rejected": 13,
+      "low_conf": 0,
+      "avg_conf": 0.4696
+    },
+    "artifact_paths": {
+      "report_md": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_140257\\20260221_140845_fb6e1ea1\\research_report.md",
+      "report_html": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_140257\\20260221_140845_fb6e1ea1\\research_report.html",
+      "audit_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_140257\\20260221_140845_fb6e1ea1\\research_report_audit.json",
+      "metrics_json": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_140257\\20260221_140845_fb6e1ea1\\metrics.json",
+      "graphml": "D:\\dev\\ai\\projects\\Smart-Notes\\artifacts\\session_20260221_140257\\20260221_140845_fb6e1ea1\\claim_graph.graphml"
     }
   }
 ]

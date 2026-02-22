@@ -12,10 +12,13 @@ Supports multiple OCR backends:
 from __future__ import annotations
 
 import logging
+import hashlib
+import copy
 from pathlib import Path
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 import tempfile
 import importlib.util
+import config
 
 try:
     from PIL import Image
@@ -34,6 +37,9 @@ EASYOCR_AVAILABLE = _check_easyocr()
 PYTESSERACT_AVAILABLE = _check_pytesseract()
 
 logger = logging.getLogger(__name__)
+
+_OCR_RESULT_CACHE: Dict[str, Dict[str, Any]] = {}
+_OCR_CACHE_MAX_ENTRIES = 64
 
 
 class ImageOCR:
@@ -160,6 +166,20 @@ class ImageOCR:
         Returns:
             OCR result dictionary
         """
+        if not image_bytes:
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "metadata": {"error": "Empty image bytes"}
+            }
+
+        cache_key = hashlib.sha256(image_bytes).hexdigest()
+        cached = _OCR_RESULT_CACHE.get(cache_key)
+        if cached:
+            cached_result = copy.deepcopy(cached)
+            cached_result.setdefault("metadata", {})["from_cache"] = True
+            return cached_result
+
         # Save to temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
             tmp.write(image_bytes)
@@ -170,14 +190,43 @@ class ImageOCR:
         finally:
             # Clean up temp file
             Path(tmp_path).unlink(missing_ok=True)
-        
+
+        if result and "text" in result:
+            if len(_OCR_RESULT_CACHE) >= _OCR_CACHE_MAX_ENTRIES:
+                _OCR_RESULT_CACHE.clear()
+            _OCR_RESULT_CACHE[cache_key] = copy.deepcopy(result)
+
         return result
+
+    def _downscale_image(self, image: Image.Image) -> Image.Image:
+        """Downscale large images to speed up OCR."""
+        try:
+            max_dim = int(getattr(config, "OCR_MAX_IMAGE_DIM", 1600))
+        except Exception:
+            max_dim = 1600
+
+        if max_dim <= 0:
+            return image
+
+        width, height = image.size
+        current_max = max(width, height)
+        if current_max <= max_dim:
+            return image
+
+        scale = max_dim / float(current_max)
+        new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+        resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+        image = image.resize(new_size, resample=resample)
+        logger.info("Downscaled image from %sx%s to %sx%s for OCR", width, height, new_size[0], new_size[1])
+        return image
     
     def _preprocess_notes_image(self, image: Image.Image) -> Image.Image:
         """Preprocess handwritten notes image for better OCR accuracy."""
         try:
             from PIL import ImageEnhance, ImageFilter
-            
+
+            image = self._downscale_image(image)
+
             # Convert to grayscale
             image = image.convert('L')
             
@@ -206,7 +255,9 @@ class ImageOCR:
         """Preprocess blackboard/whiteboard image for better OCR accuracy."""
         try:
             from PIL import ImageEnhance, ImageOps, ImageFilter
-            
+
+            image = self._downscale_image(image)
+
             # Convert to grayscale
             image = image.convert('L')
             
@@ -244,14 +295,19 @@ class ImageOCR:
         # Convert PIL Image to numpy array
         img_array = np.array(image)
         
-        # Additional preprocessing: increase DPI effect by upscaling
-        # This helps with small text
+        # Additional preprocessing: optional upscaling for small images
         try:
             import cv2
-            scale_factor = 1.5
-            new_size = (int(img_array.shape[1] * scale_factor), int(img_array.shape[0] * scale_factor))
-            img_array = cv2.resize(img_array, new_size, interpolation=cv2.INTER_CUBIC)
-            logger.info(f"✓ Image upscaled by {scale_factor}x for better OCR")
+            min_dim = min(img_array.shape[0], img_array.shape[1])
+            upscale_min_dim = int(getattr(config, "OCR_UPSCALE_MIN_DIM", 600))
+            upscale_factor = float(getattr(config, "OCR_UPSCALE_FACTOR", 1.3))
+            if min_dim < upscale_min_dim and upscale_factor > 1.0:
+                new_size = (
+                    int(img_array.shape[1] * upscale_factor),
+                    int(img_array.shape[0] * upscale_factor)
+                )
+                img_array = cv2.resize(img_array, new_size, interpolation=cv2.INTER_CUBIC)
+                logger.info("✓ Image upscaled by %sx for OCR", upscale_factor)
         except Exception as e:
             logger.debug(f"OpenCV upscaling skipped: {e}")
         

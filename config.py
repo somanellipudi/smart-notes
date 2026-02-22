@@ -344,6 +344,12 @@ GLOBAL_RANDOM_SEED = int(os.getenv("GLOBAL_RANDOM_SEED", "42"))
 # Enable online authority verification for evidence augmentation
 ENABLE_ONLINE_VERIFICATION = os.getenv("ENABLE_ONLINE_VERIFICATION", "false").lower() == "true"
 
+# CRITICAL: Evidence source mode
+# "input" = Evidence from user's uploaded content (OLD BEHAVIOR - circular verification!)
+# "online" = Evidence from authoritative online sources ONLY (RECOMMENDED)
+# "hybrid" = Combine both input and online evidence (future enhancement)
+EVIDENCE_SOURCE_MODE = os.getenv("EVIDENCE_SOURCE_MODE", "online")  # DEFAULT CHANGED TO ONLINE!
+
 # Online verification cache settings
 ONLINE_CACHE_ENABLED = os.getenv("ONLINE_CACHE_ENABLED", "true").lower() == "true"
 ONLINE_RATE_LIMIT = float(os.getenv("ONLINE_RATE_LIMIT", "2.0"))  # Requests per second
@@ -354,7 +360,15 @@ ONLINE_TIMEOUT_SECONDS = int(os.getenv("ONLINE_TIMEOUT_SECONDS", "10"))  # Reque
 ONLINE_MIN_TIER_FOR_SOLO_VERIFICATION = int(os.getenv("ONLINE_MIN_TIER_FOR_SOLO_VERIFICATION", "2"))
 
 # Maximum online sources to fetch per claim
-ONLINE_MAX_SOURCES_PER_CLAIM = int(os.getenv("ONLINE_MAX_SOURCES_PER_CLAIM", "5"))
+ONLINE_MAX_SOURCES_PER_CLAIM = int(os.getenv("ONLINE_MAX_SOURCES_PER_CLAIM", "3"))
+
+# Maximum claims to search online (to prevent excessive API calls)
+ONLINE_MAX_CLAIMS_TO_SEARCH = int(os.getenv("ONLINE_MAX_CLAIMS_TO_SEARCH", "10"))
+
+# OCR tuning (performance vs accuracy)
+OCR_MAX_IMAGE_DIM = int(os.getenv("OCR_MAX_IMAGE_DIM", "1600"))
+OCR_UPSCALE_MIN_DIM = int(os.getenv("OCR_UPSCALE_MIN_DIM", "600"))
+OCR_UPSCALE_FACTOR = float(os.getenv("OCR_UPSCALE_FACTOR", "1.3"))
 
 
 # ==================== CS-AWARE VERIFICATION SIGNALS ====================

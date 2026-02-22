@@ -132,3 +132,4 @@ downloads/
 *.pickle
 results/
 exports/
+artifacts/

@@ -40,8 +40,9 @@ DOMAIN_PROFILES: Dict[str, DomainProfile] = {
         name="physics",
         display_name="Physics",
         description="Physics domain with equations, units, and physical laws",
-        allowed_claim_types=["definition", "equation", "example", "misconception"],
+        allowed_claim_types=["fact_claim", "definition", "equation", "example", "misconception"],
         evidence_type_expectations={
+            "fact_claim": ["transcript", "notes", "external"],
             "definition": ["transcript", "notes", "external"],
             "equation": ["transcript", "notes", "external", "equation"],
             "example": ["transcript", "notes", "external"],
@@ -57,8 +58,9 @@ DOMAIN_PROFILES: Dict[str, DomainProfile] = {
         name="discrete_math",
         display_name="Discrete Mathematics",
         description="Discrete math domain with definitions, proofs, and formal logic",
-        allowed_claim_types=["definition", "example", "misconception"],
+        allowed_claim_types=["fact_claim", "definition", "example", "misconception"],
         evidence_type_expectations={
+            "fact_claim": ["transcript", "notes", "external"],
             "definition": ["transcript", "notes", "external"],
             "example": ["transcript", "notes", "external"],
             "misconception": ["transcript", "notes"]
@@ -73,8 +75,9 @@ DOMAIN_PROFILES: Dict[str, DomainProfile] = {
         name="algorithms",
         display_name="Algorithms & Data Structures",
         description="Algorithms domain with pseudocode and complexity analysis",
-        allowed_claim_types=["definition", "algorithm_step", "complexity", "invariant"],
+        allowed_claim_types=["fact_claim", "definition", "algorithm_step", "complexity", "invariant"],
         evidence_type_expectations={
+            "fact_claim": ["transcript", "notes", "external"],
             "definition": ["transcript", "notes", "external"],
             "algorithm_step": ["transcript", "notes", "external"],
             "complexity": ["transcript", "notes", "external"],
@@ -90,8 +93,9 @@ DOMAIN_PROFILES: Dict[str, DomainProfile] = {
         name="cs",
         display_name="CS Algorithms & Data Structures",
         description="CS algorithms domain with pseudocode, invariants, and complexity",
-        allowed_claim_types=["definition", "algorithm_step", "complexity", "invariant"],
+        allowed_claim_types=["fact_claim", "definition", "algorithm_step", "complexity", "invariant"],
         evidence_type_expectations={
+            "fact_claim": ["transcript", "notes", "external"],
             "definition": ["transcript", "notes", "external"],
             "algorithm_step": ["transcript", "notes", "external"],
             "complexity": ["transcript", "notes", "external"],

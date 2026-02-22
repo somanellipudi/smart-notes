@@ -20,6 +20,10 @@ from src.retrieval.youtube_ingest import (
 
 logger = logging.getLogger(__name__)
 
+# Backward compatibility aliases for tests
+_is_youtube_url = is_youtube_url
+_extract_youtube_video_id = extract_video_id
+
 # Standard user agent to avoid blocking
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 REQUEST_TIMEOUT = 10
@@ -72,7 +76,9 @@ def fetch_url_text(url: str) -> Tuple[str, Dict[str, Any]]:
             metadata["words"] = len(text.split())
             logger.info(f"✓ URL extraction succeeded: {metadata['words']} words via {metadata['extraction_method']}")
         else:
-            metadata["error"] = "No text extracted"
+            # Preserve specific error message if already set (e.g., from YouTube API)
+            if not metadata.get("error"):
+                metadata["error"] = "No text extracted"
             logger.warning(f"✗ URL extraction failed: {metadata['error']}")
         
         return text, metadata

@@ -86,6 +86,17 @@ try:
         FAQ,
         RealWorldConnection
     )
+    # Execution Flow Dashboard imports
+    from src.ui.progress_tracker import create_run_context, RunContext
+    from src.ui.execution_flow_ui import render_execution_flow_dashboard
+    from src.ui.pipeline_instrumentation import (
+        track_stage,
+        track_llm_call,
+        track_ocr_usage,
+        track_url_ingestion,
+        track_retrieval_usage
+    )
+    from src.ui.redesigned_app import render_redesigned_ui
     import config
     logger.info("✅ All imports successful")
 except ImportError as e:
@@ -432,6 +443,19 @@ def process_session(
     Returns:
         Tuple of (result_dict, verifiable_metadata)
     """
+    # Get run context from session state
+    run_context = st.session_state.get("run_context")
+    
+    # STAGE: Inputs Received
+    if run_context:
+        run_context.start_stage("inputs_received")
+        run_context.complete_stage("inputs_received", {
+            "audio_provided": audio_file is not None,
+            "urls_provided": len(urls) if urls else 0,
+            "text_chars": len(notes_text),
+            "equations_provided": len(equations.split('\n')) if equations else 0
+        })
+    
     # Step 1: Audio Transcription
     with st.spinner("🎤 Transcribing audio..."):
         if audio_file is not None:
@@ -455,6 +479,10 @@ def process_session(
     
     # Step 1.5: URL Content Extraction
     url_extracted_text = ""
+    url_extraction_summary = {"success": 0, "failed": 0}  # Track for logging only
+    failed_urls_with_errors = []  # Track failed URLs with error messages
+    youtube_count = 0
+    article_count = 0
     if urls:
         with st.spinner("🌐 Fetching URL content..."):
             try:
@@ -463,16 +491,48 @@ def process_session(
                         content, metadata = fetch_url_text(url)
                         if content:
                             source_type = metadata.get("source_type", "unknown")
-                            st.success(f"✓ {source_type.title()}: {metadata.get('words', 0)} words extracted from {url[:50]}...")
+                            url_extraction_summary["success"] += 1
+                            # Count YouTube vs articles
+                            if source_type == "youtube":
+                                youtube_count += 1
+                            else:
+                                article_count += 1
+                            logger.info(f"✓ URL ingestion: {source_type} from {url[:60]}... ({len(content)} chars)")
                             url_extracted_text += content + "\n\n"
                         else:
                             error_msg = metadata.get("error", "No content extracted")
-                            st.warning(f"⚠️ Could not extract content from {url}: {error_msg}")
+                            url_extraction_summary["failed"] += 1
+                            failed_urls_with_errors.append((url, error_msg))
+                            logger.warning(f"URL extraction failed for {url}: {error_msg}")
                     except Exception as e:
-                        st.warning(f"⚠️ Error fetching {url}: {str(e)}")
+                        url_extraction_summary["failed"] += 1
+                        failed_urls_with_errors.append((url, str(e)))
+                        logger.warning(f"Error fetching {url}: {str(e)}")
             except Exception as e:
-                st.error(f"❌ Error during URL ingestion: {str(e)}")
                 logger.error(f"URL ingestion error: {e}")
+        
+        # Show results with detailed error information
+        if url_extraction_summary["success"] > 0:
+            st.success(f"✓ Extracted content from {url_extraction_summary['success']} URL(s)")
+        
+        if failed_urls_with_errors:
+            if url_extraction_summary["success"] == 0:
+                st.info(f"ℹ️ URL extraction: Could not fetch content from {url_extraction_summary['failed']} URL(s). Proceeding with notes only.")
+            with st.expander(f"📋 URL extraction details ({url_extraction_summary['failed']} failed)", expanded=False):
+                for failed_url, error in failed_urls_with_errors:
+                    st.write(f"**{failed_url}**")
+                    st.write(f"⚠️ {error}")
+                    st.divider()
+        
+        # Track URL ingestion in run context
+        if run_context:
+            track_url_ingestion(
+                run_context,
+                total=len(urls),
+                success=url_extraction_summary["success"],
+                youtube=youtube_count,
+                articles=article_count
+            )
     
     # Combine notes with URL-extracted content
     if url_extracted_text:
@@ -482,6 +542,9 @@ def process_session(
             notes_text = url_extracted_text
     
     # Step 2: Preprocessing
+    if run_context:
+        run_context.start_stage("ingestion_cleaning")
+    
     with st.spinner("🔄 Preprocessing content..."):
         equations_list = [eq.strip() for eq in equations.split('\n') if eq.strip()]
         
@@ -493,8 +556,23 @@ def process_session(
         
         combined_text = preprocessed["combined_text"]
         st.success(f"✓ Preprocessing complete: {preprocessed['metadata']['num_segments']} segments")
+        
+        # Complete ingestion stage
+        if run_context:
+            run_context.complete_stage("ingestion_cleaning", {
+                "segments": preprocessed['metadata']['num_segments'],
+                "combined_chars": len(combined_text),
+                "transcript_chars": len(transcript),
+                "notes_chars": len(notes_text)
+            })
+            # Skip OCR stage for now (will be tracked separately if images are processed)
+            run_context.skip_stage("ocr_extraction", "No OCR processing in main pipeline")
+            run_context.skip_stage("chunking_provenance", "Fast chunking - no detailed tracking")
     
     # Step 3: Multi-Stage Reasoning
+    if run_context:
+        run_context.start_stage("llm_generation")
+    
     with st.spinner("🧠 Running multi-stage reasoning pipeline..."):
         def _build_fallback_output(error_text: str):
             fallback = FallbackGenerator()
@@ -637,6 +715,53 @@ def process_session(
                 f"✓ Reasoning complete: {len(output.topics)} topics, "
                 f"{len(output.key_concepts)} concepts extracted"
             )
+        
+        # Track LLM generation completion
+        if run_context:
+            track_llm_call(
+                run_context,
+                provider=llm_provider_type if llm_provider_type != "fallback" else "openai",
+                model=selected_model,
+                tokens=None  # Could extract from verifiable_metadata if available
+            )
+            run_context.complete_stage("llm_generation", {
+                "provider": llm_provider_type,
+                "model": selected_model,
+                "topics_generated": len(output.topics),
+                "concepts_generated": len(output.key_concepts)
+            })
+            
+            # Track verification stages
+            if verifiable_mode and verifiable_metadata:
+                # Claim extraction
+                run_context.start_stage("claim_extraction")
+                claims_count = verifiable_metadata.get("total_claims", 0)
+                run_context.complete_stage("claim_extraction", {
+                    "claims_total": claims_count
+                })
+                
+                # Retrieval & Reranking
+                run_context.start_stage("retrieval_reranking")
+                track_retrieval_usage(run_context, enabled=True)
+                run_context.complete_stage("retrieval_reranking", {
+                    "retrieval_enabled": True
+                })
+                
+                # Verification
+                run_context.start_stage("verification")
+                verified_count = verifiable_metadata.get("verified_claims", 0)
+                run_context.complete_stage("verification", {
+                    "verified_claims": verified_count,
+                    "total_claims": claims_count
+                })
+            else:
+                # Skip verification stages in fast mode
+                run_context.skip_stage("claim_extraction", "Fast mode - no verification")
+                run_context.skip_stage("retrieval_reranking", "Fast mode - no verification")
+                run_context.skip_stage("verification", "Fast mode - no verification")
+            
+            # Skip embedding stage (not explicitly used in this flow)
+            run_context.skip_stage("embedding_indexing", "Not used in this pipeline configuration")
     
     # Step 4: Evaluation
     with st.spinner("📊 Evaluating quality..."):
@@ -649,10 +774,23 @@ def process_session(
         st.success(f"✓ Evaluation complete")
     
     # Step 5: Save Session
+    if run_context:
+        run_context.start_stage("reporting_exports")
+    
     with st.spinner("💾 Saving session..."):
         session_manager = SessionManager()
         session_path = session_manager.save_session(output, overwrite=True)
         st.success(f"✓ Session saved")
+        
+        if run_context:
+            run_context.complete_stage("reporting_exports", {
+                "session_saved": True,
+                "session_path": str(session_path)
+            })
+            # Save run context to artifacts
+            artifacts_dir = Path(config.ARTIFACTS_DIR)
+            run_context.save(artifacts_dir)
+            logger.info(f"Run context saved for session {run_context.session_id}")
     
     result = {
         "output": output,
@@ -1499,7 +1637,8 @@ def _display_research_reports(
             "View preview in:",
             ["Markdown", "HTML"],
             horizontal=True,
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="research_report_preview_format"
         )
         
         if preview_format == "Markdown":
@@ -1803,1187 +1942,13 @@ def display_output(result: dict, verifiable_metadata: Optional[Dict[str, Any]] =
 # MAIN APP
 # ============================================================================
 
+
 def main():
     """Main Streamlit application."""
     
-    # Initialize session state for persistent storage
-    if 'result' not in st.session_state:
-        st.session_state.result = None
-    if 'verifiable_metadata' not in st.session_state:
-        st.session_state.verifiable_metadata = None
-    if 'processing_complete' not in st.session_state:
-        st.session_state.processing_complete = False
-    if 'ingestion_error' not in st.session_state:
-        st.session_state.ingestion_error = None
-    if 'ingestion_error_details' not in st.session_state:
-        st.session_state.ingestion_error_details = None
-    if 'ingestion_ready' not in st.session_state:
-        st.session_state.ingestion_ready = False
-    if 'ingestion_payload' not in st.session_state:
-        st.session_state.ingestion_payload = None
-    if 'current_run_id' not in st.session_state:
-        st.session_state.current_run_id = None
-    if 'latest_run_summary' not in st.session_state:
-        st.session_state.latest_run_summary = None
-    if 'loaded_run' not in st.session_state:
-        st.session_state.loaded_run = None
-    if 'loaded_run_artifacts' not in st.session_state:
-        st.session_state.loaded_run_artifacts = None
-    if 'show_loaded_run' not in st.session_state:
-        st.session_state.show_loaded_run = False
-    if 'notes_char_count' not in st.session_state:
-        st.session_state.notes_char_count = 0
-    if 'extraction_methods' not in st.session_state:
-        st.session_state.extraction_methods = []
-    if 'ingestion_diagnostics' not in st.session_state:
-        st.session_state.ingestion_diagnostics = {}
-    if 'debug_mode' not in st.session_state:
-        st.session_state.debug_mode = False
-    if (
-        st.session_state.processing_complete
-        and not st.session_state.ingestion_error
-        and st.session_state.ingestion_payload
-    ):
-        st.session_state.ingestion_ready = True
-    if 'has_pyarrow' not in st.session_state:
-        try:
-            import pyarrow  # noqa: F401
-            st.session_state.has_pyarrow = True
-        except Exception:
-            st.session_state.has_pyarrow = False
-    if 'pyarrow_warned' not in st.session_state:
-        st.session_state.pyarrow_warned = False
-    
-    # ====================================================================
-    # SIDEBAR - LLM SELECTION
-    # ====================================================================
-    
-    with st.sidebar:
-        st.title("⚙️ Settings")
-        st.divider()
-        
-        # LLM Selection
-        st.subheader("🤖 AI Model")
-        
-        # Check available LLM providers
-        available_providers = LLMProviderFactory.get_available_providers(
-            openai_api_key=config.OPENAI_API_KEY,
-            ollama_url="http://localhost:11434"
-        )
-        
-        provider_options = []
-        provider_map = {}
-        
-        if available_providers.get("OpenAI (GPT-4)", False):
-            provider_options.append("🌐 OpenAI (GPT-4)")
-            provider_map["🌐 OpenAI (GPT-4)"] = "openai"
-        
-        if available_providers.get("Local LLM - Ollama", False):
-            provider_options.append("💻 Local LLM (Ollama)")
-            provider_map["💻 Local LLM (Ollama)"] = "ollama"
-        
-        # Add demo mode as fallback
-        provider_options.append("🎬 Demo Mode (Offline)")
-        provider_map["🎬 Demo Mode (Offline)"] = "demo"
-        
-        if len(provider_options) == 1:  # Only demo mode available
-            st.warning("⚠️ No LLM providers available. Using Demo Mode (read-only).\n\nTo enable processing:\n1. Set OPENAI_API_KEY in .env\n2. Or run Ollama locally at http://localhost:11434")
-        
-        default_index = 0
-        if "🌐 OpenAI (GPT-4)" in provider_options:
-            default_index = provider_options.index("🌐 OpenAI (GPT-4)")
-        elif "💻 Local LLM (Ollama)" in provider_options:
-            default_index = provider_options.index("💻 Local LLM (Ollama)")
-
-        selected_llm = st.radio(
-            "Choose AI model:",
-            provider_options,
-            index=default_index,
-            help="OpenAI uses cloud API. Local LLM runs on your machine (faster, free, private)."
-        )
-        
-        llm_type = provider_map[selected_llm]
-        
-        if llm_type == "ollama":
-            st.success("💻 Using Local LLM - Faster & Private!")
-            st.caption("Running on your machine · No API calls")
-        elif llm_type == "demo":
-            st.info("🎬 Demo Mode - Display and Export Features Only")
-            st.caption("Processing disabled. View and download previous results.")
-        else:
-            st.info("🌐 Using OpenAI - Higher quality")
-            st.caption(f"Model: GPT-4")
-        
-        # Processing options
-        st.divider()
-        st.subheader("⚡ Processing")
-        
-        # Verifiable Mode toggle
-        enable_verifiable_mode = st.checkbox(
-            "Enable Verifiable Mode (Research)",
-            value=True,
-            help=(
-                "Enforces evidence-grounded, claim-based generation. "
-                "Claims without sufficient evidence are rejected. "
-                "Provides traceability and confidence estimates."
-            )
-        )
-
-        if enable_verifiable_mode and not st.session_state.has_pyarrow and not st.session_state.pyarrow_warned:
-            st.warning("pyarrow missing; install with pip install pyarrow. Dataframe rendering may be limited.")
-            st.session_state.pyarrow_warned = True
-
-        # Online Authority Verification toggle
-        st.divider()
-        st.subheader("🌐 Online Authority Verification")
-        
-        enable_online_verification = st.checkbox(
-            "Augment with Trusted Online Sources",
-            value=False,
-            help=(
-                "Enable retrieval from authoritative online sources "
-                "(Python docs, RFC, academic sources, etc.) "
-                "to supplement local evidence."
-            )
-        )
-        
-        if enable_online_verification:
-            st.info(
-                "🔒 **Privacy & Security**\n\n"
-                "• Queries redact personally identifiable information (email, phone, SSN)\n"
-                "• Only requests from allowlisted authoritative domains\n"
-                "• Tier 1 (official docs), Tier 2 (academic), Tier 3 (community)\n"
-                "• Cached content is versioned and timestamped\n"
-                "• Local evidence always takes precedence"
-            )
-        
-        # Store in session state for use in processing
-        st.session_state.enable_online_verification = enable_online_verification
-        st.session_state.enable_verifiable_mode = enable_verifiable_mode
-
-        st.session_state.debug_mode = st.checkbox(
-            "Debug mode",
-            value=st.session_state.debug_mode,
-            help="Show diagnostic details and raw report data."
-        )
-        
-        # Domain Profile selector (only shown in verifiable mode)
-        domain_profile = "algorithms"  # Default
-        if enable_verifiable_mode:
-            st.info(
-                "🔬 **Verifiable Mode** enabled\n\n"
-                "• Claims require evidence\n"
-                "• Unsupported claims rejected\n"
-                "• Confidence tracking\n"
-                "• Traceability graph"
-            )
-            
-            domain_profile = st.selectbox(
-                "Select Domain Profile",
-                options=["algorithms"],
-                format_func=lambda x: {
-                    "algorithms": "💻 Computer Science (algorithms + complexity)"
-                }[x],
-                help=(
-                    "Domain profile controls validation rules:\n"
-                    "• Computer Science: pseudocode checks, complexity analysis"
-                )
-            )
-        
-        enable_streaming = st.checkbox("Stream results", value=True, help="Show results as they're generated")
-        
-        processing_depth = st.select_slider(
-            "Processing depth",
-            options=["Fast", "Balanced", "Thorough"],
-            value="Balanced",
-            help="Affects both quality and speed"
-        )
-        
-        st.divider()
-        st.subheader("🎯 Output Sections")
-        st.caption("Select which sections to generate (Verifiability Graph always included)")
-        
-        # Store filter selections in session state
-        if 'output_filters' not in st.session_state:
-            st.session_state.output_filters = {
-                'summary': True,
-                'topics': True,
-                'concepts': True,
-                'equations': True,
-                'misconceptions': True,
-                'faqs': True,
-                'worked_examples': True,
-                'real_world': True
-            }
-        
-        # Quick filter presets
-        st.write("**Quick Presets:**")
-        
-        # Store preset in session state to persist across reruns
-        if 'filter_preset' not in st.session_state:
-            st.session_state.filter_preset = "🎯 All Sections"
-        
-        preset = st.radio(
-            "Choose a preset or customize below",
-            ["📝 Summary Only", "🎯 All Sections", "🔧 Custom"],
-            index=["📝 Summary Only", "🎯 All Sections", "🔧 Custom"].index(st.session_state.filter_preset),
-            horizontal=True,
-            label_visibility="collapsed"
-        )
-        st.session_state.filter_preset = preset
-        
-        # Apply preset - set filters directly without checkbox interference
-        if preset == "📝 Summary Only":
-            st.session_state.output_filters = {
-                'summary': True, 'topics': False, 'concepts': False, 'equations': False,
-                'misconceptions': False, 'faqs': False, 'worked_examples': False, 'real_world': False
-            }
-        elif preset == "🎯 All Sections":
-            st.session_state.output_filters = {
-                'summary': True, 'topics': True, 'concepts': True, 'equations': True,
-                'misconceptions': True, 'faqs': True, 'worked_examples': True, 'real_world': True
-            }
-        
-        st.divider()
-        
-        # Show filter status differently based on mode
-        if preset == "🔧 Custom":
-            # Custom mode: show editable checkboxes
-            st.write("**Customize sections:**")
-            col_filters_1, col_filters_2 = st.columns(2)
-            
-            with col_filters_1:
-                st.session_state.output_filters['summary'] = st.checkbox(
-                    "📝 Summary", value=st.session_state.output_filters.get('summary', True))
-                st.session_state.output_filters['topics'] = st.checkbox(
-                    "📚 Topics", value=st.session_state.output_filters.get('topics', True))
-                st.session_state.output_filters['concepts'] = st.checkbox(
-                    "💡 Concepts", value=st.session_state.output_filters.get('concepts', True))
-                st.session_state.output_filters['equations'] = st.checkbox(
-                    "📐 Equations", value=st.session_state.output_filters.get('equations', True))
-            
-            with col_filters_2:
-                st.session_state.output_filters['misconceptions'] = st.checkbox(
-                    "⚠️ Misconceptions", value=st.session_state.output_filters.get('misconceptions', True))
-                st.session_state.output_filters['faqs'] = st.checkbox(
-                    "❓ FAQs", value=st.session_state.output_filters.get('faqs', True))
-                st.session_state.output_filters['worked_examples'] = st.checkbox(
-                    "🎯 Examples", value=st.session_state.output_filters.get('worked_examples', True))
-                st.session_state.output_filters['real_world'] = st.checkbox(
-                    "🌍 Connections", value=st.session_state.output_filters.get('real_world', True))
-        else:
-            # Preset mode: show as read-only status indicators
-            st.write("**Selected sections:**")
-            col_filters_1, col_filters_2 = st.columns(2)
-            
-            sections = [
-                ("📝 Summary", 'summary', col_filters_1),
-                ("📚 Topics", 'topics', col_filters_1),
-                ("💡 Concepts", 'concepts', col_filters_1),
-                ("📐 Equations", 'equations', col_filters_1),
-                ("⚠️ Misconceptions", 'misconceptions', col_filters_2),
-                ("❓ FAQs", 'faqs', col_filters_2),
-                ("🎯 Examples", 'worked_examples', col_filters_2),
-                ("🌍 Connections", 'real_world', col_filters_2)
-            ]
-            
-            with col_filters_1:
-                for label, key, col in sections[:4]:
-                    if st.session_state.output_filters.get(key, False):
-                        st.markdown(f"✅ {label}")
-                    else:
-                        st.markdown(f"⬜ {label}")
-            
-            with col_filters_2:
-                for label, key, col in sections[4:]:
-                    if st.session_state.output_filters.get(key, False):
-                        st.markdown(f"✅ {label}")
-                    else:
-                        st.markdown(f"⬜ {label}")
-            
-            st.caption("💡 Switch to '🔧 Custom' to manually adjust sections")
-        
-        st.caption("✓ Verifiability report includes claim summaries and evidence highlights")
-
-        st.divider()
-        st.subheader("Recent Runs (last 3)")
-
-        run_history_path = config.ARTIFACTS_DIR / "run_history.json"
-        run_history = load_run_history(run_history_path)
-
-        if not run_history:
-            st.caption("No recent runs yet.")
-        else:
-            for run in reversed(run_history):
-                run_id = run.get("run_id", "unknown")
-                timestamp = run.get("timestamp", "")
-                header = f"{run_id}"
-                if timestamp:
-                    header = f"{run_id} • {timestamp[:19]}"
-
-                with st.expander(header, expanded=False):
-                    st.write(f"Session: {run.get('session_id', 'unknown')}")
-                    st.write(f"Domain: {run.get('domain_profile', 'unknown')}")
-                    inputs_used = run.get("inputs_used", [])
-                    if inputs_used:
-                        st.write(f"Inputs: {', '.join(inputs_used)}")
-
-                    ver_stats = run.get("verification_stats", {})
-                    avg_conf = ver_stats.get("avg_conf")
-                    avg_conf_display = f"{avg_conf:.2f}" if isinstance(avg_conf, (int, float)) else "N/A"
-                    st.write(
-                        "Claims: "
-                        f"total={ver_stats.get('total_claims', 0)}, "
-                        f"verified={ver_stats.get('verified', 0)}, "
-                        f"rejected={ver_stats.get('rejected', 0)}, "
-                        f"low_conf={ver_stats.get('low_conf', 0)}, "
-                        f"avg_conf={avg_conf_display}"
-                    )
-
-                    paths = run.get("artifact_paths", {})
-                    report_md = _load_artifact_text(paths.get("report_md"))
-                    report_html = _load_artifact_text(paths.get("report_html"))
-                    audit_json = _load_artifact_text(paths.get("audit_json"))
-                    metrics_json = _load_artifact_text(paths.get("metrics_json"))
-                    graphml_text = _load_artifact_text(paths.get("graphml"))
-
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        if report_md:
-                            st.download_button(
-                                label="Download report.md",
-                                data=report_md,
-                                file_name=f"report_{run_id}.md",
-                                mime="text/markdown",
-                                key=f"dl_md_{run_id}"
-                            )
-                        if audit_json:
-                            st.download_button(
-                                label="Download audit.json",
-                                data=audit_json,
-                                file_name=f"audit_{run_id}.json",
-                                mime="application/json",
-                                key=f"dl_audit_{run_id}"
-                            )
-                        if graphml_text:
-                            st.download_button(
-                                label="Download graph.graphml",
-                                data=graphml_text,
-                                file_name=f"graph_{run_id}.graphml",
-                                mime="application/xml",
-                                key=f"dl_graph_{run_id}"
-                            )
-                    with col_b:
-                        if report_html:
-                            st.download_button(
-                                label="Download report.html",
-                                data=report_html,
-                                file_name=f"report_{run_id}.html",
-                                mime="text/html",
-                                key=f"dl_html_{run_id}"
-                            )
-                        if metrics_json:
-                            st.download_button(
-                                label="Download metrics.json",
-                                data=metrics_json,
-                                file_name=f"metrics_{run_id}.json",
-                                mime="application/json",
-                                key=f"dl_metrics_{run_id}"
-                            )
-
-                    if st.button("Load this run", key=f"load_run_{run_id}"):
-                        st.session_state.loaded_run = run
-                        st.session_state.loaded_run_artifacts = {
-                            "report_md": report_md,
-                            "report_html": report_html,
-                            "audit_json": audit_json,
-                            "metrics_json": metrics_json,
-                            "graphml": graphml_text,
-                        }
-                        st.session_state.show_loaded_run = True
-        
-        if st.session_state.debug_mode:
-            # Debug: Show current filter state
-            enabled_sections = [k for k, v in st.session_state.output_filters.items() if v]
-            disabled_sections = [k for k, v in st.session_state.output_filters.items() if not v]
-            
-            with st.expander("Filter Debug Info", expanded=False):
-                st.caption("Enabled sections:")
-                st.write(", ".join(enabled_sections) if enabled_sections else "None")
-                st.caption("Disabled sections:")
-                st.write(", ".join(disabled_sections) if disabled_sections else "None")
-            
-            # Diagnostics expander for troubleshooting
-            with st.expander("System Diagnostics", expanded=False):
-                st.caption("Python Environment:")
-                st.code(sys.executable, language="text")
-                
-                st.caption("Package Versions:")
-                try:
-                    import streamlit
-                    import pandas
-                    import networkx
-                    st.text(f"streamlit: {streamlit.__version__}")
-                    st.text(f"pandas: {pandas.__version__}")
-                    st.text(f"networkx: {networkx.__version__}")
-                    
-                    try:
-                        import pyarrow
-                        st.text(f"pyarrow: {pyarrow.__version__} OK")
-                    except ImportError:
-                        st.text("pyarrow: NOT INSTALLED")
-                        st.caption("Install: pip install pyarrow")
-                    
-                    try:
-                        import matplotlib
-                        st.text(f"matplotlib: {matplotlib.__version__} OK")
-                    except ImportError:
-                        st.text("matplotlib: NOT INSTALLED")
-                        st.caption("Install: pip install matplotlib")
-                    
-                    try:
-                        import faiss
-                        st.text(f"faiss: {faiss.__version__} OK")
-                    except ImportError:
-                        st.text("faiss: NOT INSTALLED")
-                        st.caption("Install: pip install faiss-cpu")
-                except Exception as e:
-                    st.error(f"Error loading diagnostic info: {e}")
-                
-                st.divider()
-                st.caption("System Information")
-                st.code(f"Python: {sys.version}", language="text")
-                st.code(f"OS: {os.name}", language="text")
-                
-                if st.button("Copy Diagnostic Info"):
-                    st.success("Diagnostic info displayed above - copy manually")
-        
-        st.divider()
-    
-    # Title and description
-    st.title("📘 Smart Notes")
-    st.markdown(
-        """
-        <div style="margin-bottom: 2rem; padding: 1.5rem; background: linear-gradient(135deg, rgba(10, 132, 255, 0.05) 0%, rgba(52, 199, 89, 0.05) 100%); border-radius: 16px; border-left: 4px solid var(--apple-accent);">
-        <p style="margin: 0; font-size: 1rem; line-height: 1.6; color: var(--apple-text);">
-        <strong>Transform classroom content into structured, verified study notes</strong><br>
-        <span style="color: var(--apple-subtle); font-size: 0.9rem;">AI-powered extraction with optional evidence validation and authenticity assessment</span>
-        </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    st.divider()
-    
-    # OCR Warning Banner (if disabled)
-    if not config.OCR_ENABLED:
-        st.warning(
-            "⚠️ **OCR is disabled in hosted mode** — Upload images and scanned PDFs are not supported. "
-            "For scanned content, please paste text directly or run locally with OCR enabled.",
-            icon="⚠️"
-        )
-    
-    # ====================================================================
-    # INPUT
-    # ====================================================================
-    
-    st.header("📥 Input")
-    st.caption("Upload notes, images, or audio. We'll extract and structure the content.")
-
-    # Initialize variables at the top level
-    notes_text = ""
-    notes_images = []
-    audio_file = None
-
-    col1, col2 = st.columns([1.2, 1])
-
-    with col1:
-        st.subheader("📝 Notes")
-
-        notes_input_method = st.radio(
-            "Choose input method:",
-            ["Type/Paste Text", "Upload Images & PDFs"],
-            horizontal=True
-        )
-
-        if notes_input_method == "Type/Paste Text":
-            notes_text = st.text_area(
-                "Paste or type your notes",
-                height=220,
-                placeholder="Example:\nCombustion and Flame\n\n1. Combustion is a chemical reaction...",
-                label_visibility="collapsed"
-            )
-        else:
-            # Show warning if OCR is disabled
-            if not config.OCR_ENABLED:
-                st.info(
-                    "ℹ️ **Image/PDF upload is disabled** because OCR is not available. "
-                    "Please use the 'Type/Paste Text' option instead.",
-                    icon="ℹ️"
-                )
-                notes_images = []
-            else:
-                notes_images = st.file_uploader(
-                    "Upload note images or PDF files",
-                    type=["jpg", "jpeg", "png", "bmp", "pdf"],
-                    accept_multiple_files=True,
-                    label_visibility="collapsed"
-                )
-
-                if notes_images:
-                    st.success(f"✓ {len(notes_images)} file(s) uploaded - OCR and PDF extraction will extract text")
-
-                    if len(notes_images) <= 3:
-                        cols = st.columns(len(notes_images))
-                        for idx, (col, img) in enumerate(zip(cols, notes_images)):
-                            with col:
-                                if img.type == "application/pdf":
-                                    st.info(f"📄 PDF: {img.name}")
-                                else:
-                                    st.image(img, caption=f"Image {idx+1}")
-
-        with st.expander("🎤 Audio (Optional)", expanded=False):
-            st.caption("Upload a lecture recording for transcription")
-            audio_file = st.file_uploader(
-                "Upload audio",
-                type=["wav", "mp3", "m4a"],
-                label_visibility="collapsed"
-            )
-
-    with col2:
-        st.subheader("⚙️ Advanced")
-
-        with st.expander("Equations", expanded=False):
-            equations = st.text_area(
-                "Equations (one per line)",
-                height=80,
-                placeholder="E=mc²\nF=ma\n...",
-                label_visibility="collapsed"
-            )
-
-        with st.expander("External Context", expanded=False):
-            external_context = st.text_area(
-                "Reference material",
-                height=80,
-                placeholder="Textbook excerpts, guidelines, etc.",
-                label_visibility="collapsed"
-            )
-
-        with st.expander("🌐 URL Sources (Beta)", expanded=False):
-            st.caption("Add YouTube videos or web articles as evidence sources")
-            urls_text = st.text_area(
-                "URLs (one per line)",
-                height=100,
-                placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ\nhttps://example.com/article\n...",
-                label_visibility="collapsed",
-                help="Enter YouTube video URLs or web article URLs (one per line). Content will be fetched and used as evidence for claim verification."
-            )
-            
-            if urls_text and not config.ENABLE_URL_SOURCES:
-                st.warning("⚠️ URL ingestion is disabled. Set ENABLE_URL_SOURCES=true in .env to enable.")
-
-        with st.expander("Session ID", expanded=False):
-            session_id = st.text_input(
-                "Custom session ID",
-                value=f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                label_visibility="collapsed"
-            )
-
-    st.divider()
-
-    has_input_now = has_any_input(
-        notes_text=notes_text,
-        notes_images=notes_images,
-        audio_file=audio_file,
-        urls_text=urls_text,
-        min_text_chars=1
-    )
-    if has_input_now and not st.session_state.ingestion_error:
-        st.session_state.ingestion_ready = True
-
-    notes_text_len = len(notes_text.strip()) if notes_text else 0
-    files_present = bool(notes_images and len(notes_images) > 0)
-    
-    # Check for valid URLs
-    valid_urls, url_error = validate_urls_for_processing(urls_text)
-    has_valid_urls = len(valid_urls) > 0
-    
-    notes_ready_for_verification = (
-        (notes_text_len >= config.MIN_INPUT_CHARS_FOR_VERIFICATION)
-        or files_present
-        or bool(audio_file)
-        or has_valid_urls  # URLs count as valid input for verification
-    )
-
-    # Primary + secondary actions
-    col_fast, col_verifiable = st.columns(2)
-
-    fast_button = False
-    verifiable_button = False
-
-    with col_fast:
-        fast_button = st.button(
-            "Generate Notes",
-            type="primary",
-            use_container_width=True,
-            key="fast_btn",
-            disabled=(llm_type == "demo"),
-            help="Clean notes without verification"
-        )
-
-    with col_verifiable:
-        verifiable_button = st.button(
-            "Run Verification",
-            type="secondary",
-            use_container_width=True,
-            key="verifiable_btn",
-            disabled=(
-                llm_type == "demo"
-                or not enable_verifiable_mode
-                or not notes_ready_for_verification
-            ),
-            help="Evidence-grounded verification with claim scoring"
-        )
-        if not enable_verifiable_mode:
-            st.caption("Enable Verifiable Mode in Settings to run the report.")
-        elif not has_input_now:
-            status_msg = get_input_status_message(
-                notes_text=notes_text,
-                notes_images=notes_images,
-                audio_file=audio_file,
-                urls_text=urls_text,
-                min_text_chars=1
-            )
-            st.caption(status_msg)
-        elif notes_text_len and notes_text_len < config.MIN_INPUT_CHARS_FOR_VERIFICATION and not files_present and not has_valid_urls:
-            st.caption(
-                f"Need at least {config.MIN_INPUT_CHARS_FOR_VERIFICATION} characters before verification."
-            )
-        elif files_present and notes_text_len < config.MIN_INPUT_CHARS_FOR_VERIFICATION and not has_valid_urls:
-            st.caption("Text will be extracted during verification.")
-
-        if st.session_state.get("debug_mode"):
-            logger.info(
-                "Verification gate: notes_len=%s, files_present=%s, has_input=%s, ready=%s",
-                notes_text_len,
-                files_present,
-                has_input_now,
-                notes_ready_for_verification
-            )
-    
-    # Show message if buttons are disabled
-    if llm_type == "demo":
-        st.info("💡 To enable processing, set OPENAI_API_KEY or run Ollama locally")
-    
-    # Determine which mode to run
-    generate_button = fast_button or verifiable_button
-    should_run_verifiable = verifiable_button
-    
-    # Process when either button clicked
-    if generate_button:
-        st.session_state.ingestion_ready = False
-        st.session_state.current_run_id = None
-        st.session_state.latest_run_summary = None
-        # Initialize OCR for PDF processing
-        ocr_instance = initialize_ocr()
-        
-        # Extract text from images and PDFs if uploaded
-        ocr_extracted_text = ""
-        pdf_extracted_text = ""
-        combined_extracted_text = ""
-        extraction_methods = []
-        ingestion_diagnostics = {
-            # PDF sources
-            "pdf_files": [],
-            "total_pages": 0,
-            "pages_ocr": 0,
-            "pdf_chars": 0,
-            # OCR sources (images)
-            "ocr_images": 0,
-            "ocr_chars": 0,
-            # Audio sources
-            "audio_seconds": 0.0,
-            "transcript_chars": 0,
-            "transcript_chunks_total": 0,
-            # URL sources
-            "url_count": 0,
-            "url_fetch_success_count": 0,
-            "url_chunks_total": 0,
-            # Text sources
-            "text_chars_total": 0,
-            "text_chunks_total": 0,
-            "manual_text_chars": 0,
-            # Cleanup stats
-            "headers_removed": 0,
-            "footers_removed": 0,
-            "watermarks_removed": 0,
-        }
-        
-        if notes_images and len(notes_images) > 0:
-            # Separate images and PDFs
-            image_files = [f for f in notes_images if f.type != "application/pdf"]
-            pdf_files = [f for f in notes_images if f.type == "application/pdf"]
-            
-            # Process PDFs
-            if pdf_files:
-                with st.spinner("📄 Extracting text from PDF files..."):
-                    from src.exceptions import EvidenceIngestError, INGESTION_ERRORS
-                    
-                    try:
-                        for pdf_file in pdf_files:
-                            try:
-                                pdf_text, pdf_metadata = _extract_text_from_pdf(pdf_file, ocr=ocr_instance)
-                                if pdf_text:
-                                    pdf_extracted_text += pdf_text
-                                    # Handle both old and new metadata keys
-                                    extraction_method = pdf_metadata.get("extraction_method") or pdf_metadata.get("extraction_method_used", "unknown")
-                                    ocr_pages = pdf_metadata.get("ocr_pages", 0)
-                                    chars_extracted = pdf_metadata.get("chars_extracted", len(pdf_text))
-                                    extraction_methods.append(extraction_method)
-                                    
-                                    # Get ingestion report for detailed diagnostics
-                                    ingestion_report = pdf_metadata.get("ingestion_report")
-                                    
-                                    pdf_diag = {
-                                        "file": pdf_file.name,
-                                        "method": extraction_method,
-                                        "chars": chars_extracted,
-                                        "ocr_pages": ocr_pages
-                                    }
-                                    
-                                    # Add detailed ingestion report if available
-                                    if ingestion_report:
-                                        pdf_diag.update({
-                                            "pages_total": ingestion_report.pages_total,
-                                            "pages_low_quality": ingestion_report.pages_low_quality,
-                                            "headers_removed": ingestion_report.headers_removed_count,
-                                            "watermarks_removed": ingestion_report.watermark_removed_count,
-                                            "removed_lines": ingestion_report.removed_lines_count,
-                                            "removed_patterns": ingestion_report.removed_patterns_hit,
-                                            "quality": ingestion_report.quality_assessment
-                                        })
-                                    
-                                    ingestion_diagnostics["pdf_files"].append(pdf_diag)
-                                    ingestion_diagnostics["pdf_chars"] += chars_extracted
-                                    logger.info(f"PDF extraction success: {pdf_file.name} ({extraction_method})")
-                                    
-                                    # Display brief summary with option to expand
-                                    st.caption(
-                                        f"✓ {pdf_file.name}: {chars_extracted:,} chars, {ocr_pages} OCR pages"
-                                    )
-                                    
-                                    # Show detailed ingestion report in expander
-                                    if ingestion_report:
-                                        with st.expander(f"📊 Ingestion Report: {pdf_file.name}", expanded=False):
-                                            col1, col2, col3 = st.columns(3)
-                                            with col1:
-                                                st.metric("Pages", ingestion_report.pages_total)
-                                                st.metric("OCR Pages", ingestion_report.pages_ocr)
-                                            with col2:
-                                                st.metric("Low Quality", ingestion_report.pages_low_quality)
-                                                st.metric("Headers Removed", ingestion_report.headers_removed_count)
-                                            with col3:
-                                                st.metric("Watermarks", ingestion_report.watermark_removed_count)
-                                                st.metric("Lines Cleaned", ingestion_report.removed_lines_count)
-                                            
-                                            if ingestion_report.removed_patterns_hit:
-                                                st.write("**Patterns Removed:**")
-                                                for pattern, count in ingestion_report.removed_patterns_hit.items():
-                                                    st.text(f"  • {pattern}: {count}")
-                                            
-                                            st.caption(f"Quality: {ingestion_report.quality_assessment}")
-                            except EvidenceIngestError as e:
-                                # Store ingestion error for display
-                                st.session_state.ingestion_error = e.code
-                                st.session_state.ingestion_error_details = {
-                                    "file": pdf_file.name,
-                                    "code": e.code,
-                                    "message": e.get_user_message(),
-                                    "next_steps": e.get_next_steps(),
-                                    "details": e.details
-                                }
-                                
-                                # Show error with actionable next steps
-                                error_config = INGESTION_ERRORS.get(e.code, {})
-                                st.error(f"❌ **Evidence ingestion failed: {pdf_file.name}**\n\n{e.get_user_message()}")
-                                
-                                if e.get_next_steps():
-                                    st.info("💡 **Next steps:**\n" + "\n".join(f"- {step}" for step in e.get_next_steps()))
-                                
-                                logger.error(f"Evidence ingestion error for {pdf_file.name}: code={e.code}, {e.message}")
-                                # Don't continue - mark as ingestion failure and stop processing
-                                break
-                        
-                        if pdf_extracted_text and not st.session_state.ingestion_error:
-                            words = len(pdf_extracted_text.split())
-                            st.success(f"✓ PDF extraction complete: {len(pdf_extracted_text)} chars, ~{words} words")
-                    except EvidenceIngestError as e:
-                        # Ingestion error occurred
-                        st.session_state.ingestion_error = e.code
-                        st.session_state.ingestion_error_details = {
-                            "code": e.code,
-                            "message": e.get_user_message(),
-                            "next_steps": e.get_next_steps()
-                        }
-                        st.error(f"❌ **Evidence ingestion failed**\n\n{e.get_user_message()}")
-                        if e.get_next_steps():
-                            st.info("💡 **Next steps:**\n" + "\n".join(f"- {step}" for step in e.get_next_steps()))
-                        logger.error(f"PDF ingestion error: code={e.code}, {e.message}")
-                    except Exception as e:
-                        st.error(f"❌ PDF extraction failed: {str(e)}")
-                        logger.error(f"PDF extraction error: {str(e)}")
-            
-            # Process Images with OCR
-            if image_files:
-                if not config.OCR_ENABLED:
-                    st.warning(
-                        "⚠️ **OCR is disabled** - Cannot process uploaded images. "
-                        "Please paste text directly or enable OCR in local deployment.",
-                        icon="⚠️"
-                    )
-                    logger.warning("Skipping image OCR - OCR_ENABLED=False")
-                else:
-                    with st.spinner("📸 Extracting text from images using OCR..."):
-                        try:
-                            cache = _load_ocr_cache()
-                            image_hashes = []
-                            for img in image_files:
-                                img_bytes = img.getvalue()
-                                image_hashes.append(_image_hash(img_bytes))
-
-                            cache_key = "|".join(image_hashes)
-                            if cache_key in cache["items"]:
-                                ocr_extracted_text = cache["items"][cache_key]
-                                st.success(f"✓ Using cached OCR: {len(ocr_extracted_text)} characters")
-                                ingestion_diagnostics["ocr_chars"] = len(ocr_extracted_text)
-                                ingestion_diagnostics["ocr_images"] = len(image_files)
-                                extraction_methods.append("image_ocr_cache")
-                            else:
-                                selected_model = config.OLLAMA_MODEL if llm_type == "ollama" else config.LLM_MODEL
-                                ocr_extracted_text = process_images(
-                                    image_files, 
-                                    correct_with_llm=True,
-                                    provider_type=llm_type,
-                                    api_key=config.OPENAI_API_KEY,
-                                    ollama_url=config.OLLAMA_URL,
-                                    model=selected_model
-                                )
-                                ingestion_diagnostics["ocr_chars"] = len(ocr_extracted_text)
-                                ingestion_diagnostics["ocr_images"] = len(image_files)
-                                extraction_methods.append("image_ocr")
-                                cache["items"][cache_key] = ocr_extracted_text
-                                cache["order"] = [k for k in cache["order"] if k != cache_key]
-                                cache["order"].append(cache_key)
-                                while len(cache["order"]) > 3:
-                                    old_key = cache["order"].pop(0)
-                                    cache["items"].pop(old_key, None)
-                                _save_ocr_cache(cache)
-                                st.success(f"✓ OCR extraction + LLM correction complete: {len(ocr_extracted_text)} characters")
-                            
-                        except Exception as e:
-                            st.error(f"❌ Image OCR extraction failed: {str(e)}")
-                            logger.error(f"Image OCR error: {str(e)}")
-            
-            # Combine all extracted text
-            combined_extracted_text = (pdf_extracted_text.strip() + "\n" + ocr_extracted_text.strip()).strip()
-            
-            if combined_extracted_text:
-                with st.expander("✏️ Review & Edit Extracted Text", expanded=True):
-                    st.info("💡 The text below has been extracted from your files. You can edit it before processing.")
-                    combined_extracted_text = st.text_area(
-                        "Extracted Text (editable)",
-                        value=combined_extracted_text,
-                        height=250,
-                        key="extracted_text_area"
-                    )
-            else:
-                st.warning("⚠️ No text could be extracted from the uploaded files.")
-        
-        # Combine typed notes and extracted text (from PDFs and OCR)
-        combined_notes = notes_text
-        if combined_extracted_text:
-            if combined_notes:
-                combined_notes += "\n\n---\n\n" + combined_extracted_text
-            else:
-                combined_notes = combined_extracted_text
-
-        st.session_state.notes_char_count = len(combined_notes or "")
-        st.session_state.extraction_methods = extraction_methods
-        
-        # Ensure ingestion_diagnostics has all required fields with defaults
-        if "extraction_methods" not in ingestion_diagnostics:
-            ingestion_diagnostics["extraction_methods"] = extraction_methods
-        
-        # Add manual text input if any
-        if notes_text and not combined_extracted_text:
-            ingestion_diagnostics["manual_text_chars"] = len(notes_text)
-            ingestion_diagnostics["text_chars_total"] = len(notes_text)  # Track as text source
-            if "manual_text" not in extraction_methods:
-                extraction_methods.append("manual_text")
-                ingestion_diagnostics["extraction_methods"] = extraction_methods
-        
-        st.session_state.ingestion_diagnostics = ingestion_diagnostics
-        
-        # Parse and validate URLs
-        valid_urls, url_validation_error = validate_urls_for_processing(urls_text)
-        
-        # Validation - check if we have any input at all
-        # Include valid_urls in input check
-        has_input = combined_notes or audio_file or (notes_images and len(notes_images) > 0) or len(valid_urls) > 0
-        
-        if not has_input:
-            st.error("Please provide notes, images, audio, or URL sources.")
-        # Check if there's a URL validation error
-        elif url_validation_error:
-            st.error(f"⚠️ {url_validation_error}")
-        # Check if ingestion failed (don't proceed with verification)
-        elif st.session_state.ingestion_error:
-            st.error(
-                f"🚫 **Evidence ingestion failed**\n\n"
-                f"**Error Code**: {st.session_state.ingestion_error}\n\n"
-                f"**Reason**: {st.session_state.ingestion_error_details.get('message', 'Unknown error')}"
-            )
-            
-            if st.session_state.ingestion_error_details.get('next_steps'):
-                st.info("💡 **How to fix this:**\n" + "\n".join(f"• {step}" for step in st.session_state.ingestion_error_details['next_steps']))
-            
-            st.error("❌ Cannot proceed to verification or analysis until evidence ingestion succeeds.")
-            logger.warning(f"Verification skipped due to ingestion error: {st.session_state.ingestion_error}")
-        else:
-            # Override verifiable mode based on button clicked
-            actual_verifiable_mode = should_run_verifiable and enable_verifiable_mode
-            
-            if should_run_verifiable and not enable_verifiable_mode:
-                st.warning(
-                    "⚠️ Verifiable Mode not enabled in settings. "
-                    "Enable it in the sidebar Settings → Processing to use evidence verification."
-                )
-                actual_verifiable_mode = False
-            
-            # Apply online verification setting from session state to config
-            if hasattr(st.session_state, 'enable_online_verification'):
-                config.ENABLE_ONLINE_VERIFICATION = st.session_state.enable_online_verification
-            
-            # Show information about what will happen
-            if actual_verifiable_mode and len(combined_notes or "") < config.MIN_INPUT_CHARS_FOR_VERIFICATION:
-                st.warning(
-                    f"Verification needs at least {config.MIN_INPUT_CHARS_FOR_VERIFICATION} characters. "
-                    "Running notes only."
-                )
-                actual_verifiable_mode = False
-
-            if actual_verifiable_mode:
-                st.info(
-                    "🔬 **Running in Verifiable Mode**\n\n"
-                    "• Claims will be verified against evidence\n"
-                    "• Only well-supported claims will be included\n"
-                    "• Each claim shows confidence and evidence sources"
-                )
-            else:
-                st.info(
-                    "🚀 **Running in Fast Mode**\n\n"
-                    "• Quick analysis without evidence verification\n"
-                    "• All extracted content is processed\n"
-                    "• Suitable for any content type"
-                )
-            
-            progress_callback = None
-            if actual_verifiable_mode:
-                progress_callback = _create_verifiability_progress_ui()
-
-            # Process the session and store in session state
-            result, verifiable_metadata = process_session(
-                audio_file=audio_file,
-                notes_text=combined_notes,
-                equations=equations,
-                external_context=external_context,
-                session_id=session_id,
-                verifiable_mode=actual_verifiable_mode,
-                domain_profile=domain_profile if actual_verifiable_mode else "algorithms",
-                llm_provider_type=llm_type,
-                progress_callback=progress_callback,
-                debug_mode=st.session_state.debug_mode,
-                urls=valid_urls if valid_urls else None
-            )
-            
-            # Store results in session state
-            st.session_state.result = result
-            st.session_state.verifiable_metadata = verifiable_metadata
-            st.session_state.processing_complete = True
-            st.session_state.ingestion_ready = True
-            st.session_state.ingestion_payload = {
-                "notes_text": combined_notes,
-                "equations": equations,
-                "external_context": external_context,
-                "session_id": session_id,
-                "urls_text": urls_text if 'urls_text' in locals() else "",
-                "audio_present": audio_file is not None
-            }
-    
-    # ========================================================================
-    # RESULTS DISPLAY
-    # ========================================================================
-    
-    # Show ingestion error if present (takes precedence over results)
-    if st.session_state.ingestion_error:
-        st.divider()
-        with st.container(border=True):
-            st.error(
-                f"🚫 **Evidence ingestion failed** - Cannot proceed with analysis\n\n"
-                f"**Error**: {st.session_state.ingestion_error_details.get('message', 'Unknown error')}\n\n"
-                f"**Status**: Verification pipeline skipped (no usable evidence extracted)"
-            )
-            
-            if st.session_state.ingestion_error_details.get('next_steps'):
-                st.markdown("**How to fix this:**")
-                for step in st.session_state.ingestion_error_details['next_steps']:
-                    st.markdown(f"• {step}")
-        
-        st.divider()
-        st.info("🔄 Please fix the issue above and try again with different input.")
-    
-    # Display results only if processing succeeded and no ingestion error
-    elif st.session_state.processing_complete and st.session_state.result:
-        st.success("✅ Processing complete!")
-        st.divider()
-
-        notes_tab, report_tab, reports_tab = st.tabs(["Notes", "Verifiability Report", "Reports"])
-
-        with notes_tab:
-            if st.session_state.verifiable_metadata and st.session_state.verifiable_metadata.get("verification_unavailable"):
-                diagnostics = st.session_state.verifiable_metadata.get("evidence_diagnostics", {})
-                st.warning(
-                    "Verification unavailable due to insufficient evidence. "
-                    "Showing baseline study guide instead."
-                )
-                if diagnostics:
-                    st.caption(
-                        f"Extracted {diagnostics.get('extracted_text_length', 0)} chars "
-                        f"(min required: {diagnostics.get('minimum_required', 0)})."
-                    )
-                    suggestions = diagnostics.get("suggestions", [])
-                    if suggestions:
-                        st.info("How to fix:\n" + "\n".join(f"- {s}" for s in suggestions))
-
-            display_output(st.session_state.result, None)
-
-            st.divider()
-            output_obj = st.session_state.result.get('output')
-            session_id_for_export = output_obj.session_id if output_obj and hasattr(output_obj, 'session_id') else ""
-            export_data = {}
-            if output_obj is not None:
-                if hasattr(output_obj, "model_dump"):
-                    export_data = output_obj.model_dump()
-                elif hasattr(output_obj, "dict"):
-                    export_data = output_obj.dict()
-                else:
-                    export_data = output_obj
-
-                if isinstance(export_data, dict):
-                    if "summary" not in export_data and "class_summary" in export_data:
-                        export_data["summary"] = export_data["class_summary"]
-
-            notes_md = QuickExportButtons._to_markdown(export_data) if export_data else ""
-            st.download_button(
-                label="Export Notes (Markdown)",
-                data=notes_md,
-                file_name=f"notes_{session_id_for_export}.md",
-                mime="text/markdown",
-                disabled=not bool(notes_md)
-            )
-
-            with st.expander("Diagnostics", expanded=False):
-                methods = st.session_state.extraction_methods or []
-                if methods:
-                    st.write(f"Extraction methods: {', '.join(sorted(set(methods)))}")
-                st.write(f"Notes characters: {st.session_state.notes_char_count:,}")
-
-                evidence_stats = (st.session_state.verifiable_metadata or {}).get("evidence_stats")
-                if evidence_stats:
-                    st.write(f"Evidence chunks: {evidence_stats.get('num_chunks', 0)}")
-
-                metrics = (st.session_state.verifiable_metadata or {}).get("metrics", {})
-                evidence_metrics = metrics.get("evidence_metrics", {})
-                if evidence_metrics:
-                    st.write(
-                        "Retrieval stats: avg evidence/claim "
-                        f"{evidence_metrics.get('avg_evidence_per_claim', 0):.2f}, "
-                        "avg evidence quality "
-                        f"{evidence_metrics.get('avg_evidence_quality', 0):.2f}"
-                    )
-
-        with report_tab:
-            if st.session_state.verifiable_metadata and st.session_state.verifiable_metadata.get("verifiable_mode"):
-                display_verifiability_report(
-                    st.session_state.verifiable_metadata,
-                    st.session_state.result.get('output'),
-                    debug_mode=st.session_state.get("debug_mode", False)
-                )
-            else:
-                st.info("Run verification to generate the report.")
-
-        with reports_tab:
-            if st.session_state.show_loaded_run and st.session_state.loaded_run_artifacts:
-                loaded_run = st.session_state.loaded_run or {}
-                st.subheader("Loaded Run (cached)")
-                st.caption(
-                    f"Run ID: {loaded_run.get('run_id', 'unknown')} · "
-                    f"Session: {loaded_run.get('session_id', 'unknown')}"
-                )
-
-                cached = st.session_state.loaded_run_artifacts
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if cached.get("report_md"):
-                        st.download_button(
-                            label="Download Markdown",
-                            data=cached["report_md"],
-                            file_name=f"research_report_{loaded_run.get('run_id', 'run')}.md",
-                            mime="text/markdown",
-                            help="Cached markdown report"
-                        )
-                with col2:
-                    if cached.get("report_html"):
-                        st.download_button(
-                            label="Download HTML",
-                            data=cached["report_html"],
-                            file_name=f"research_report_{loaded_run.get('run_id', 'run')}.html",
-                            mime="text/html",
-                            help="Cached HTML report"
-                        )
-                with col3:
-                    if cached.get("audit_json"):
-                        st.download_button(
-                            label="Download Audit JSON",
-                            data=cached["audit_json"],
-                            file_name=f"research_report_audit_{loaded_run.get('run_id', 'run')}.json",
-                            mime="application/json",
-                            help="Cached audit JSON"
-                        )
-
-                st.divider()
-                preview_format = st.radio(
-                    "View cached report in:",
-                    ["Markdown", "HTML"],
-                    horizontal=True,
-                    label_visibility="collapsed",
-                    key="cached_report_preview"
-                )
-                if preview_format == "Markdown" and cached.get("report_md"):
-                    st.markdown(cached["report_md"])
-                elif preview_format == "HTML" and cached.get("report_html"):
-                    st.components.v1.html(cached["report_html"], height=800, scrolling=True)
-                else:
-                    st.info("Cached report preview unavailable.")
-
-            if st.session_state.verifiable_metadata and st.session_state.verifiable_metadata.get("verifiable_mode"):
-                _display_research_reports(
-                    st.session_state.verifiable_metadata,
-                    st.session_state.result.get('output')
-                )
-            else:
-                st.info("Run verification to generate research reports.")
+    # Always use redesigned UI - Classic UI removed
+    from src.ui.redesigned_app import render_redesigned_ui
+    render_redesigned_ui()
 
 
 if __name__ == "__main__":

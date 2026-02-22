@@ -7,6 +7,78 @@ import streamlit as st
 import json
 from typing import Dict, Any, Generator, Optional
 
+class OutputFormatter:
+    """Format ClassSessionOutput to various display formats."""
+    
+    def format_to_markdown(self, output) -> str:
+        """Convert ClassSessionOutput to markdown format.
+        
+        Args:
+            output: ClassSessionOutput object with session results
+            
+        Returns:
+            Formatted markdown string
+        """
+        md = []
+        
+        # Session info
+        if hasattr(output, 'session_id'):
+            md.append(f"# Study Notes - {output.session_id}\n")
+        else:
+            md.append("# Study Notes\n")
+        
+        # Summary
+        if hasattr(output, 'class_summary') and output.class_summary:
+            md.append("## 📋 Summary\n")
+            md.append(f"{output.class_summary}\n")
+        
+        # Topics
+        if hasattr(output, 'topics') and output.topics:
+            md.append(f"\n## 📚 Topics ({len(output.topics)})\n")
+            for i, topic in enumerate(output.topics, 1):
+                name = topic.name if hasattr(topic, 'name') else str(topic)
+                md.append(f"\n### {i}. {name}\n")
+                if hasattr(topic, 'summary'):
+                    md.append(f"{topic.summary}\n")
+        
+        # Concepts
+        if hasattr(output, 'key_concepts') and output.key_concepts:
+            md.append(f"\n## 💡 Key Concepts ({len(output.key_concepts)})\n")
+            for i, concept in enumerate(output.key_concepts, 1):
+                name = concept.name if hasattr(concept, 'name') else str(concept)
+                md.append(f"\n### {i}. {name}\n")
+                if hasattr(concept, 'definition'):
+                    md.append(f"{concept.definition}\n")
+        
+        # Equations
+        if hasattr(output, 'equation_explanations') and output.equation_explanations:
+            md.append(f"\n## 📐 Equations ({len(output.equation_explanations)})\n")
+            for i, eq in enumerate(output.equation_explanations, 1):
+                equation = eq.equation if hasattr(eq, 'equation') else str(eq)
+                md.append(f"\n### Equation {i}: {equation}\n")
+                if hasattr(eq, 'explanation'):
+                    md.append(f"{eq.explanation}\n")
+        
+        # Worked Examples
+        if hasattr(output, 'worked_examples') and output.worked_examples:
+            md.append(f"\n## 🎯 Worked Examples ({len(output.worked_examples)})\n")
+            for i, ex in enumerate(output.worked_examples, 1):
+                md.append(f"\n### Example {i}\n")
+                if hasattr(ex, 'problem'):
+                    md.append(f"**Problem:** {ex.problem}\n")
+                if hasattr(ex, 'solution'):
+                    md.append(f"\n**Solution:** {ex.solution}\n")
+        
+        # FAQs
+        if hasattr(output, 'faqs') and output.faqs:
+            md.append(f"\n## ❓ FAQs ({len(output.faqs)})\n")
+            for i, faq in enumerate(output.faqs, 1):
+                question = faq.question if hasattr(faq, 'question') else str(faq)
+                md.append(f"\n### Q{i}: {question}\n")
+                if hasattr(faq, 'answer'):
+                    md.append(f"**A:** {faq.answer}\n")
+        
+        return "\n".join(md)
 
 class StudentFriendlyFormatter:
     """Format output in a way that's intuitive for students."""
