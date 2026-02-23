@@ -53,8 +53,9 @@
 2. [02_architecture/system_overview.md](../02_architecture/system_overview.md) — High-level design
 3. [02_architecture/detailed_pipeline.md](../02_architecture/detailed_pipeline.md) — Stage-by-stage breakdown
 4. [03_theory_and_method/formal_problem_formulation.md](../03_theory_and_method/formal_problem_formulation.md) — Mathematical foundation
+5. [03_theory_and_method/ML_ALGORITHMS_EXPLAINED.md](../03_theory_and_method/ML_ALGORITHMS_EXPLAINED.md) ⭐ **NEW** — Complete ML algorithm reference (when/why/how)
 
-**Time investment**: ~2 hours → Full understanding
+**Time investment**: ~2.5 hours → Full understanding
 
 ---
 

@@ -48,6 +48,22 @@ All enhancements are documented across the research bundle with detailed technic
 **[03_theory_and_method/ML_OPTIMIZATION_ARCHITECTURE.md](03_theory_and_method/ML_OPTIMIZATION_ARCHITECTURE.md)** ⭐ NEW
 - **Content**: Complete technical deep-dive on 8 ML models
 - **Sections**:
+
+**[03_theory_and_method/ML_ALGORITHMS_EXPLAINED.md](03_theory_and_method/ML_ALGORITHMS_EXPLAINED.md)** ⭐ NEW (Feb 23, 2026)
+- **Content**: Comprehensive guide to WHEN, WHY, and HOW each ML algorithm is used
+- **Includes**: Algorithm comparisons, advantages/disadvantages, failure cases, alternatives
+- **Sections**: 8 detailed model analyses (50,000+ words)
+  - Cache Optimizer (Sentence-BERT)
+  - Quality Predictor (Logistic Regression)
+  - Priority Scorer (XGBoost)
+  - Type Classifier (DistilBERT)
+  - Query Expander (T5-Small)
+  - Evidence Ranker (Cross-Encoder)
+  - Semantic Deduplicator (Hierarchical Clustering)
+  - Adaptive Controller (Q-Learning)
+- **Decision trees**: When to use each model, usage flow, trade-offs
+- **Performance impact**: Speed, accuracy, cost savings per model
+- **Use case**: Technical deep-dive for ML engineers and researchers
   1. Overview & problem statement
   2. Architecture (8-model ensemble)
   3. Model-by-model specifications (algorithms, performance, examples)

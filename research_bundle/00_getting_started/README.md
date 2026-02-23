@@ -14,6 +14,7 @@ This research bundle contains **TEMPLATES, PROJECTIONS, and EXPECTED RESULTS** b
 |-------------|-------------|---------------|
 | **Performance** | 30x speedup (743s → 25s) | [PERFORMANCE_ACHIEVEMENTS.md](05_results/PERFORMANCE_ACHIEVEMENTS.md) |
 | **ML Optimization** | 8 models, 61% cost reduction | [ML_OPTIMIZATION_ARCHITECTURE.md](03_theory_and_method/ML_OPTIMIZATION_ARCHITECTURE.md) |
+| **ML Algorithms Guide** | Complete when/why/how reference | [ML_ALGORITHMS_EXPLAINED.md](03_theory_and_method/ML_ALGORITHMS_EXPLAINED.md) |
 | **Cited Generation** | User innovation, 4.5x faster | [CITED_GENERATION_INNOVATION.md](03_theory_and_method/CITED_GENERATION_INNOVATION.md) |
 | **Quality Diagnostics** | Real-time tracking & recommendations | See Implementation section |
 | **Strict Verification** | External sources only (no circular validation) | See Cited Generation doc |

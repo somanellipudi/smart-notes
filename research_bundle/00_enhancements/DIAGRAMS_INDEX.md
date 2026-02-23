@@ -92,6 +92,7 @@
 
 ### 6. ML Optimization Layer
 **File**: [03_theory_and_method/ML_OPTIMIZATION_ARCHITECTURE.md](03_theory_and_method/ML_OPTIMIZATION_ARCHITECTURE.md) (Section 2.1)
+**Related**: [ML_ALGORITHMS_EXPLAINED.md](03_theory_and_method/ML_ALGORITHMS_EXPLAINED.md) - Complete algorithm reference
 **Diagram**: 8-model ensemble with parallel execution
 
 **Key Features**:
