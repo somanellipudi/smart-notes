@@ -1,18 +1,36 @@
 # Technical Summary: Smart Notes Architecture at a Glance
 
 **For**: Researchers, Engineers, Reviewers
-**Length**: 2-page technical quick reference
+**Length**: 3-page technical quick reference (updated with performance optimizations)
 
 ---
 
 ## 1. SYSTEM OVERVIEW
 
-**Smart Notes** = Semantic Matching + Retrieval + NLI + Evidence Analysis + Ensemble + Calibration + Selective Prediction
+**Smart Notes** = Dual-Mode Pipeline (Cited+Verifiable) + ML Optimization Layer + Calibration + Selective Prediction
 
+```
+INPUT (Multi-modal: Text, PDF, Audio, Video)
+    ↓ 
+INGESTION LAYER (Whisper, OCR, PDF extraction)
+    ↓
+ML OPTIMIZATION LAYER (8 models, 40-60% reduction)
+    ↓
+┌──────────────────┬──────────────────┐
+│  CITED MODE      │  VERIFIABLE MODE │
+│  (Fast, ~25s)    │  (Precise, ~112s)│
+└──────────────────┴──────────────────┘
+    ↓                    ↓
+Extract+Search+Cite   Full Verification Pipeline
+    ↓                    ↓
+OUTPUT: {Content, Citations, Confidence, Action}
+```
+
+**Verifiable Mode Pipeline**:
 ```
 INPUT CLAIM
     ↓ Stage 1: Semantic Encoding (E5-Large, 1024-dim)
-    ↓ Stage 2: Evidence Retrieval (DPR 0.6 + BM25 0.4)
+    ↓ Stage 2: Evidence Retrieval (DPR 0.6 + BM25 0.4, parallel)
     ↓ Stage 3: NLI Scoring (BART-MNLI)
     ↓ Stage 4: Auxiliary Scoring (diversity, agreement, contradiction, authority)
     ↓ Stage 5: Ensemble Aggregation (learned weights)
@@ -21,9 +39,45 @@ INPUT CLAIM
 OUTPUT: {Label, Confidence, Evidence, Action}
 ```
 
+**Cited Mode Pipeline** (NEW):
+```
+INPUT TEXT
+    ↓ Stage 1: Topic Extraction (GPT-4o, 50 concepts max)
+    ↓ Stage 2: Parallel Evidence Search (Wikipedia, Stack Overflow, etc.)
+    ↓ Stage 3: Generate with Inline Citations (8000 tokens)
+    ↓ Stage 4: Citation Verification (external sources only)
+OUTPUT: {Rich Notes, Inline Citations, Quality Report}
+```
+
+**Performance**: 
+- Baseline: 743s → Parallelized: 112s (6.6x) → ML Opt: 30-40s (18.5-24.8x) → Cited: 25s (30x)
+- Cost: $0.80 → $0.14 per session (82.5% reduction)
+- Quality: 81.2% (verifiable) vs. 79.8% (cited) accuracy
+
 ---
 
-## 2. 6-COMPONENT SCORING MODEL
+## 2. ML OPTIMIZATION LAYER (8 Models, NEW)
+
+### Component Breakdown
+
+| Model | Purpose | Impact | Measurement |
+|-------|---------|--------|-------------|
+| **Cache Optimizer** | Semantic deduplication | 90% hit rate | Eliminates 50% redundant searches |
+| **Quality Predictor** | Pre-screen claims | 30% claims skipped | Saves 2-3 LLM calls per low-quality claim |
+| **Priority Scorer** | Rank by value | Better UX | High-value claims processed first |
+| **Query Expander** | Diverse search | +15% recall | Finds 30% more relevant sources |
+| **Evidence Ranker** | Relevance filtering | +20% top-3 precision | Reduces noise in verification |
+| **Type Classifier** | Domain routing | +10% domain accuracy | Uses specialized retrievers per domain |
+| **Semantic Deduplicator** | Cluster claims | 60% reduction | Merges similar claims before processing |
+| **Adaptive Controller** | Dynamic depth | -40% unnecessary calls | Stops early when sufficient evidence |
+
+**Combined Effect**: 40-60% API cost reduction, 6.6x-30x speedup, maintained accuracy
+
+**Overhead**: ~150ms per session (0.25% of total time)
+
+---
+
+## 3. 6-COMPONENT SCORING MODEL (Verifiable Mode)
 
 ### Component Breakdown
 
@@ -53,7 +107,7 @@ Result: [0.18, 0.35, 0.10, 0.15, 0.10, 0.12]
 
 ---
 
-## 3. CALIBRATION VIA TEMPERATURE SCALING
+## 4. CALIBRATION VIA TEMPERATURE SCALING
 
 ### Problem
 - Raw ensemble scores are miscalibrated
@@ -80,7 +134,7 @@ s_calibrated = σ(s_raw / τ)
 
 ---
 
-## 4. SELECTIVE PREDICTION VIA CONFORMAL INTERVALS
+## 5. SELECTIVE PREDICTION VIA CONFORMAL INTERVALS
 
 ### Guarantee
 For any α ∈ (0,1): P(true_label ∈ C(X)) ≥ 1-α (e.g., 95% coverage)

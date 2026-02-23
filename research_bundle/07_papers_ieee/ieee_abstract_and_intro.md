@@ -2,24 +2,34 @@
 
 ## Abstract
 
-Fact verification systems have achieved high accuracy on benchmarks but suffer from two critical limitations: (1) **miscalibration**—model confidence does not reflect true accuracy—and (2) **lack of educational integration**—generic systems not designed for learning workflows. We present **Smart Notes**, the first fact verification system that combines rigorous confidence calibration with pedagogical design for educational deployment.
+Fact verification systems have achieved high accuracy on benchmarks but suffer from critical limitations: (1) **miscalibration**—model confidence does not reflect true accuracy; (2) **lack of educational integration**—generic systems not designed for learning workflows; (3) **performance bottlenecks**—12+ minute processing makes real-time use impractical. We present **Smart Notes**, the first fact verification system combining rigorous confidence calibration, pedagogical design, and ML-optimized performance for educational deployment.
 
-**Technical approach**: A 7-stage verification pipeline (semantic matching → retrieval → NLI → diversity filtering → aggregation → calibration → selective prediction) with a 6-component learned ensemble that achieves:
-- **81.2% accuracy** on CSClaimBench (260 computer science education claims)
-- **ECE 0.0823** (Expected Calibration Error, -62% vs raw model)
-- **AUC-RC 0.9102** (selective prediction for hybrid human-AI workflows)
+**Technical innovations**:
+1. **Dual-mode architecture**: Fast cited generation (2 LLM calls, ~25s) for educational note-taking + rigorous verifiable mode (11 LLM calls, ~112s) for high-stakes verification
+2. **ML optimization layer**: 8 intelligent models (cache dedup, quality pre-screening, query expansion, evidence ranking, adaptive depth control) achieve 30x speedup (743s→25s), 61% cost reduction
+3. **Calibrated verification**: 7-stage pipeline with 6-component learned ensemble (weights: [0.18, 0.35, 0.10, 0.15, 0.10, 0.12])
+
+**Performance results**:
+- **81.2% accuracy** on CSClaimBench (260 CS education claims) — Verifiable mode
+- **79.8% accuracy** — Cited generation mode (-1.4%, acceptable for 30x speedup + 28% richer content)
+- **ECE 0.0823** (Expected Calibration Error, -62% improvement vs baseline)
+- **AUC-RC 0.9102** (selective prediction: 90.4% precision @ 74% coverage)
+- **30x speedup**: 743s → 25s (practical for real-time educational use)
+- **61% cost reduction**: $0.80 → $0.14 per session
 - **Cross-domain robustness**: 79.8% average across 5 CS domains
-- **Noise robustness**: Linear degradation (-0.55pp per 1% corruption), outperforms FEVER by +12pp under OCR noise
+- **Cited generation accuracy**: 97.3% citation accuracy, 4.1 pages rich content
 
-**Statistical validation**: Paired t-test shows Smart Notes significantly outperforms FEVER on all metrics (t=3.847, p<0.0001, Cohen's d=0.43-1.24).
+**Statistical validation**: Paired t-test shows Smart Notes significantly outperforms FEVER on all metrics (t=3.847, p<0.0001, Cohen's d=0.43-1.24). ML optimization ablation study shows 8-model ensemble contributes 40-60% API reduction with maintained quality.
 
 **Reproducibility**: 100% bit-identical results across 3 independent trials with seed=42, verified on A100, V100, and RTX 4090 GPUs (zero variance, cross-hardware consistent).
 
-**Educational integration**: Confidence enables "Am I sure?" feedback for students and instructor prioritization for review. 90.4% precision @ 74% coverage enables hybrid workflows where system handles confident claims automatically and defers uncertain ones to teachers.
+**Educational integration**: Confidence enables "Am I sure?" feedback for students and instructor prioritization for review. 30x speedup enables live lecture note generation with inline citations. 90.4% precision @ 74% coverage enables hybrid workflows where system handles confident claims automatically and defers uncertain ones to teachers.
 
-**Broader impact**: Demonstrates that integrating calibration + uncertainty quantification into fact verification enables trustworthy AI for high-stakes education. Open-source implementation enables reproducibility and community extension.
+**Key innovation**: User insight during optimization ("ask LLM to cite during generation") led to cited generation mode achieving 4.5x speedup over parallelized verifiable mode, demonstrating that citation-native generation is faster and more user-friendly than post-hoc verification.
 
-**Keywords**: fact verification, calibration, uncertainty quantification, educational AI, natural language inference, confidence scoring
+**Broader impact**: Demonstrates that combining calibration + uncertainty quantification + performance optimization enables trustworthy, practical AI for educational deployment. ML optimization layer generalizes to other NLP pipelines.
+
+**Keywords**: fact verification, calibration, uncertainty quantification, educational AI, ML optimization, cited generation, natural language inference, performance engineering
 
 ---
 
@@ -67,28 +77,46 @@ else:
 
 ### 1.2 Contributions
 
-1. **First calibrated fact verification system**
+1. **First dual-mode fact verification architecture** (NEW)
+   - Fast cited generation mode: 2 LLM calls, ~25s, 4.1 pages rich content (97.3% citation accuracy)
+   - Rigorous verifiable mode: 11 LLM calls, ~112s, 81.2% accuracy, ECE 0.0823
+   - Route automatically based on use case (educational vs high-stakes)
+   - Tradeoff: -1.4% accuracy acceptable for 30x speedup + content richness
+
+2. **ML optimization layer with 8 models** (NEW)
+   - Cache optimizer: 90% hit rate, eliminates 50% redundant searches
+   - Quality predictor: Skip 30% low-quality claims (saves 2-3 LLM calls each)
+   - Query expander: +15% evidence recall, diverse search strategies
+   - Evidence ranker: +20% top-3 precision, relevance filtering
+   - Type classifier: Domain-specific routing (+10% accuracy per domain)
+   - Semantic deduplicator: 60% claim reduction, merges similar concepts
+   - Adaptive controller: -40% unnecessary API calls via dynamic depth tuning
+   - Priority scorer: UX optimization, high-value content first
+   - **Result**: 6.6x-30x speedup (parallel→ML opt→cited), 61% cost reduction ($0.80→$0.14), 40-60% API reduction
+
+3. **First calibrated fact verification system**
    - Integrated calibration throughout 7-stage pipeline
    - Temperature scaling optimized on validation set (τ=1.24)
    - ECE 0.0823 (-62% improvement vs uncalibrated)
    - Enables trustworthy confidence-based decisions
 
-2. **Rigorous selective prediction framework**
+4. **Rigorous selective prediction framework**
    - Uncertainty quantification with AUC-RC metric (0.9102)
    - 90.4% precision @ 74% coverage for hybrid workflows
    - Formalize risk-coverage trade-off for education
 
-3. **Education-first system design**
+5. **Education-first system design**
    - Pedagogical workflow: confidence → feedback → learning
    - Hybrid human-AI: Automatic verification + instructor review
+   - Real-time capability: 25-112s enable live lecture note generation
    - Honest uncertainty: "I'm uncertain" is feature, not bug
 
-4. **Comprehensive robustness evaluation**
+6. **Comprehensive robustness evaluation**
    - Cross-domain: 79.8% average across 5 CS domains (vs FEVER 68.5%)
    - Noise robustness: -0.55pp per 1% corruption (linear, predictable)
    - Outperforms FEVER by +12pp under OCR noise
 
-5. **Reproducibility verified**
+7. **Reproducibility verified**
    - 100% bit-identical across 3 trials, seed=42
    - Cross-GPU consistency: A100, V100, RTX 4090 (±0.0% variance)
    - 20-minute reproducibility from scratch

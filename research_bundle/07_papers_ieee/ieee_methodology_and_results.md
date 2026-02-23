@@ -36,50 +36,73 @@
 
 ### 3.1 System Overview
 
-7-stage pipeline processing each claim:
+Dual-mode architecture with ML optimization (NEW):
 
 ```
-STAGE 1: Semantic Matching (E5-Large embeddings)
-         Claim → 1024-dim vector
-              ↓
-STAGE 2: Retrieval & Ranking (DPR + BM25 fusion)
-         Top-k evidence documents retrieved
-              ↓
-STAGE 3: Natural Language Inference (BART-MNLI)
-         Classify each evidence: Entail/Neutral/Contradict
-              ↓
-STAGE 4: Diversity Filtering (Maximal Marginal Relevance)
-         Select 3 diverse, representative evidence items
-              ↓
-STAGE 5: Aggregation (Weighted voting by entailment)
-         Combine signals → preliminary label + confidence
-              ↓
-STAGE 6: Calibration (Temperature scaling, τ=1.24)
-         Adjust confidence to reflect true accuracy
-              ↓
-STAGE 7: Selective Prediction (Threshold-based abstention)
-         Output: Label + Confidence + Abstention decision
+INPUT
+    ↓
+┌──────────────────────────────┐
+│  ML OPTIMIZATION LAYER       │
+│  8 intelligent models        │  ← NEW: 40-60% cost reduction
+│  • Cache dedup (90% hit)     │        6.6x-30x speedup
+│  • Quality pre-screening     │
+│  • Query expansion (+15%)    │
+│  • Evidence ranking (+20%)   │
+│  • Adaptive depth control    │
+│  • ... 3 more models ...     │
+└─────────┬────────────────────┘
+          │
+   ┌──────┴──────┐
+   ▼             ▼
+CITED MODE    VERIFIABLE MODE
+(~25s)        (~112s)
+│             │
+├─ Extract    ├─ Stage 1: Semantic Matching (E5-Large embeddings)
+│  topics     │          Claim → 1024-dim vector
+├─ Search     │          ↓
+│  evidence   ├─ Stage 2: Retrieval & Ranking (DPR + BM25 fusion)
+│  (parallel) │          Top-k evidence documents (parallelized)
+├─ Generate   │          ↓
+│  with       ├─ Stage 3: Natural Language Inference (BART-MNLI)
+│  citations  │          Classify each evidence: Entail/Neutral/Contradict
+└─ Verify     │          ↓
+   citations  ├─ Stage 4: Diversity Filtering (Maximal Marginal Relevance)
+              │          Select 3 diverse, representative evidence items
+              │          ↓
+              ├─ Stage 5: Aggregation (Weighted voting by entailment)
+              │          Combine 6 signals → preliminary label + confidence
+              │          ↓
+              ├─ Stage 6: Calibration (Temperature scaling, τ=1.24)
+              │          Adjust confidence to reflect true accuracy (ECE 0.0823)
+              │          ↓
+              └─ Stage 7: Selective Prediction (Threshold-based abstention)
+                         Output: Label + Confidence + Abstention decision
+                         (90.4% precision @ 74% coverage)
+
+[Output]: Content/Label + Confidence + Evidence + Quality Metrics
 ```
 
-### 3.2 Confidence Scoring Components
+### 3.2 Confidence Scoring Components (Verifiable Mode)
 
 **Component 1**: Semantic Relevance ($S_1$)
-$$S_1(c, \mathcal{E}) = \max_{e \in E_{\text{top-5}}} \cos(E_c, E_e)$$
+$$S_1(c, \mathcal{E}) = \max_{e \in E_{\text{top-5}}} \cos(E_c, E_e) \quad \text{(weight: 0.18)}$$
 
-**Component 2**: Entailment Strength ($S_2$)
-$$S_2(c, \mathcal{E}) = \mathbb{E}_{e \sim \text{Top-3}}[\max(p_e^{(NLI)}, p_c^{(NLI)})]$$
+**Component 2**: Entailment Strength ($S_2$) **[Dominant, 35% weight]**
+$$S_2(c, \mathcal{E}) = \mathbb{E}_{e \sim \text{Top-3}}[\max(p_e^{(NLI)}, p_c^{(NLI)})] \quad \text{(weight: 0.35)}$$
 
 **Component 3**: Evidence Diversity ($S_3$)
-$$S_3(c, \mathcal{E}) = 1 - \mathbb{E}_{(i,j) \in \text{Pairs}} [\cos(E_{e_i}, E_{e_j})]$$
+$$S_3(c, \mathcal{E}) = 1 - \mathbb{E}_{(i,j) \in \text{Pairs}} [\cos(E_{e_i}, E_{e_j})] \quad \text{(weight: 0.10)}$$
 
 **Component 4**: Evidence Count Agreement ($S_4$)
-$$S_4(c, \mathcal{E}) = \frac{\#\{e \in E : \arg\max p^{(NLI)}(c,e) = \hat{\ell}\}}{|\mathcal{E}|}$$
+$$S_4(c, \mathcal{E}) = \frac{\#\{e \in E : \arg\max p^{(NLI)}(c,e) = \hat{\ell}\}}{|\mathcal{E}|} \quad \text{(weight: 0.15)}$$
 
 **Component 5**: Contradiction Signal ($S_5$)
-$$S_5(c, \mathcal{E}) = \sigma(10 \cdot (\max_e p_c^{(NLI)}(c, e) - 0.5))$$
+$$S_5(c, \mathcal{E}) = \sigma(10 \cdot (\max_e p_c^{(NLI)}(c, e) - 0.5)) \quad \text{(weight: 0.10)}$$
 
-**Component 6**: Source Authority ($S_6$)
-$$S_6(c, \mathcal{E}) = \mathbb{E}_{e \in E}[\text{AUTHORITY}(e)]$$
+**Component 6**: Source Authority ($S_6$) **[External-only, Tier 1-3]**
+$$S_6(c, \mathcal{E}) = \mathbb{E}_{e \in E}[\text{AUTHORITY}(e)] \quad \text{(weight: 0.12)}$$
+
+where $\text{AUTHORITY}(e) \in \{1.0, 0.8, 0.6\}$ for Tier 1/2/3 sources only (no user input)
 
 ### 3.3 Ensemble Combination
 

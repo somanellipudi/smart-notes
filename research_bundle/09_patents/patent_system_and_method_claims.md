@@ -57,6 +57,7 @@ A computerized system for verifying factual claims with calibrated confidence, c
     - Apply pre-trained weights w = [0.18, 0.35, 0.10, 0.15, 0.10, 0.12]
     - Learned via logistic regression on validation set
     - Compute final score: s_raw = Σᵢ wᵢ · Sᵢ
+    - Apply ML optimization pre-filtering (deduplication, quality screening) to reduce input burden by 40-60%
     - Output: raw confidence ∈ [0, 1]
     
 (i) A **temperature-based calibration module** configured to:

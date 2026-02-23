@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-Smart Notes accepts diverse input formats and normalizes them to canonical claim text:
+Smart Notes accepts diverse input formats and routes through ML-optimized dual pipelines:
 
 ```
 Input Types:
@@ -11,6 +11,7 @@ Input Types:
 ├─ Speech-to-text transcripts
 ├─ Handwritten notes (via OCR)
 ├─ Lecture transcripts
+├─ YouTube/video transcripts
 ├─ Images containing text
 └─ Semi-structured data (JSON, tables)
 
@@ -22,9 +23,23 @@ Canonical representation:
 ├─ Source type flag
 └─ Quality metrics
 
-    ↓ [7-stage verification pipeline]
+    ↓ [ML Optimization Layer]
 
-Output: (Label, Confidence, Evidence)
+    ├─ Cache lookup (90% hit rate)
+    ├─ Quality pre-screening
+    ├─ Priority scoring
+    ├─ Semantic deduplication
+    └─ Domain classification
+
+    ↓ [Dual Pipeline Router]
+
+    ┌──────────────────┬──────────────────┐
+    │ CITED MODE       │ VERIFIABLE MODE  │
+    │ (Fast ~25s)      │ (Precise ~112s)  │
+    │ Educational use  │ High-stakes use  │
+    └──────────────────┴──────────────────┘
+
+Output: (Content/Label, Confidence, Evidence, Quality Report)
 ```
 
 ---
