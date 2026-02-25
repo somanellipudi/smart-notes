@@ -54,6 +54,7 @@ def initialize_session_state():
     defaults = {
         "active_tab": 0,
         "ui_verifiable_mode": False,
+        "ui_enable_cited_gen": True,
         "ui_notes_text": "",
         "ui_notes_images": None,
         "ui_audio_file": None,
@@ -80,7 +81,6 @@ def initialize_session_state():
         "ui_use_reranker": True,
         "ui_flag_contradictions": True,
         "ui_show_sources": True,
-        "ui_verifiable_mode": False,  # Default to Fast mode
         "show_session_loader": False,
         "show_detailed_report": False,
         "trigger_save": False,
@@ -100,7 +100,7 @@ def render_header():
     
     with col_title:
         st.markdown("# 📘 Smart Notes")
-        st.caption("AI-powered research notes with evidence validation")
+        st.caption("AI-powered research notes with evidence validation & cited generation")
     
     with col_mode:
         st.markdown("")
@@ -114,7 +114,7 @@ def render_header():
                 ["⚡ Fast", "🔬 Verifiable"],
                 index=0 if initial_mode == "⚡ Fast" else 1,
                 horizontal=True,
-                help="Fast: Quick notes generation | Verifiable: Research-grade with citations",
+                help="Fast: Quick generation | Verifiable: Research-grade with multi-source citations from Wikipedia, StackOverflow, Khan Academy, ArXiv, Python Docs, MDN, GitHub, and more",
                 label_visibility="collapsed",
                 key="header_processing_mode"
             )
@@ -171,9 +171,15 @@ def render_sidebar_settings():
         st.markdown("### 🎛️ Toggles")
         debug = st.checkbox("Debug Mode", False)
         auto_save = st.checkbox("Auto-save Sessions", True)
+        cited_gen = st.checkbox("Enable Cited Generation", value=True, help="When enabled in Verifiable mode, generate content with citations from multiple authoritative sources")
         
         st.session_state.ui_debug = debug
         st.session_state.ui_auto_save = auto_save
+        st.session_state.ui_enable_cited_gen = cited_gen
+        
+        # Show info about cited generation
+        if cited_gen and st.session_state.get("ui_verifiable_mode", False):
+            st.info("✨ Cited Generation enabled - using Wikipedia, StackOverflow, Khan Academy, ArXiv, Python Docs, MDN, GitHub Docs, and more sources")
         
         st.divider()
         
@@ -958,6 +964,91 @@ def render_results_tab():
                              help="Percentage of citations verified against online evidence")
                 else:
                     st.metric("Rejection Rate", f"{rejection_rate:.1%}" if rejection_rate > 0 else "0%")
+        
+        # Show source citations with real URLs (for cited generation mode)
+        if is_cited_mode:
+            citations = verifiable_metadata.get("citations", [])
+            if citations:
+                with st.expander("🔗 Authoritative Sources Cited", expanded=True):
+                    st.markdown("**Sources provided by the LLM during content generation:**")
+                    
+                    # Group citations by source type
+                    citations_by_type = {}
+                    for cite in citations:
+                        source_type = cite.get("source_type", "Other")
+                        if source_type not in citations_by_type:
+                            citations_by_type[source_type] = []
+                        citations_by_type[source_type].append(cite)
+                    
+                    # Display grouped citations
+                    for source_type, cites in sorted(citations_by_type.items()):
+                        st.markdown(f"**{source_type}** ({len(cites)} source{'s' if len(cites) != 1 else ''})")
+                        for cite_idx, cite in enumerate(cites, 1):
+                            resource_name = cite.get("resource_name", "Unknown")
+                            url = cite.get("url", "#")
+                            verified = cite.get("verified", False)
+                            status_icon = "✅" if verified else "❓"
+                            
+                            # Extract domain for display
+                            try:
+                                from urllib.parse import urlparse
+                                domain = urlparse(url).netloc.replace("www.", "")
+                            except:
+                                domain = "External Resource"
+                            
+                            st.markdown(f"{status_icon} **[{resource_name}]({url})**")
+                            st.caption(f"📍 {domain}")
+                        st.markdown("---")
+                    
+                    # Summary stats
+                    verified_count = sum(1 for c in citations if c.get("verified", False))
+                    total_count = len(citations)
+                    st.metric("Citations Verified", f"{verified_count}/{total_count}", 
+                             help="Percentage of citations from authoritative sources")
+        
+        # Show evidence summary for each concept (concept-to-sources mapping)
+        if is_cited_mode:
+            evidence_summary = verifiable_metadata.get("evidence_summary", {})
+            if evidence_summary:
+                with st.expander("📚 Concept-to-Sources Mapping", expanded=False):
+                    st.markdown("**Sources verified for each concept/topic:**")
+                    
+                    tabs_list = []
+                    for concept_name in sorted(evidence_summary.keys())[:15]:  # Show first 15 concepts
+                        tabs_list.append(concept_name)
+                    
+                    if tabs_list:
+                        tabs = st.tabs(tabs_list)
+                        
+                        for tab_idx, (tab, concept_name) in enumerate(zip(tabs, tabs_list)):
+                            with tab:
+                                sources = evidence_summary[concept_name]
+                                if sources:
+                                    st.markdown(f"**Sources for: {concept_name}** ({len(sources)} found)")
+                                    for src_idx, source in enumerate(sources, 1):
+                                        with st.container():
+                                            url = source.get("url", "Unknown")
+                                            domain = source.get("domain", "")
+                                            title = source.get("title", "")
+                                            snippet = source.get("snippet", "")
+                                            authority_tier = source.get("authority_tier", "")
+                                            
+                                            # Display source with authority badge
+                                            tier_label = ""
+                                            if authority_tier and "TIER_1" in str(authority_tier):
+                                                tier_label = "🏆"  # Official/Authoritative
+                                            elif authority_tier and "TIER_2" in str(authority_tier):
+                                                tier_label = "✅"  # Academic/Institutional
+                                            else:
+                                                tier_label = "📖"  # Community/General
+                                            
+                                            st.markdown(f"{src_idx}. {tier_label} **[{title or domain}]({url})**")
+                                            if snippet:
+                                                st.caption(f"📝 \"{snippet.strip()}...\"")
+                                            st.caption(f"🔗 {domain}")
+                                            st.markdown("---")
+                                else:
+                                    st.warning(f"⚠️ No sources found for {concept_name}")
         
         # Show claim details
         claim_collection = verifiable_metadata.get("claim_collection")

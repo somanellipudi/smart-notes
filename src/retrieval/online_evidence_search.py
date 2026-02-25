@@ -10,6 +10,8 @@ import requests
 from typing import List, Dict, Any, Optional  
 from dataclasses import dataclass
 import time
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.retrieval.online_retriever import OnlineRetriever, create_retriever
 from src.retrieval.authority_sources import get_allowlist
@@ -40,16 +42,16 @@ class OnlineEvidenceSearcher:
     
     def __init__(
         self,
-        max_results_per_query: int = 5,
-        max_urls_to_fetch: int = 3,
+        max_results_per_query: int = 10,
+        max_urls_to_fetch: int = 5,
         cache_enabled: bool = True
     ):
         """
         Initialize online evidence searcher.
         
         Args:
-            max_results_per_query: Maximum search results to consider
-            max_urls_to_fetch: Maximum URLs to actually fetch content from
+            max_results_per_query: Maximum search results to consider (default: 10 to include multiple sources)
+            max_urls_to_fetch: Maximum URLs to actually fetch content from (default: 5 for diverse sources)
             cache_enabled: Enable caching of fetched content
         """
         self.max_results_per_query = max_results_per_query
@@ -101,64 +103,176 @@ class OnlineEvidenceSearcher:
     
     def _search_authoritative_sources(self, query: str) -> List[SearchResult]:
         """
-        Search specific authoritative sources directly.
+        Search specific authoritative sources using constructive URLs.
         
-        This constructs URLs to known authoritative sources.
-        Returns search URLs that will be fetched and validated.
+        Instead of search pages, we construct direct resource URLs and
+        use a fallback approach if direct URLs don't exist.
         """
         results = []
-        query_encoded = query.replace(" ", "+")
+        query_lower = query.lower()
         
-        # Wikipedia - Always try encyclopedia first
-        results.append(SearchResult(
-            title=f"Wikipedia: {query}",
-            url=f"https://en.wikipedia.org/wiki/Special:Search?search={query_encoded}",
-            snippet=f"Wikipedia search: {query}",
-            authority_tier=2,
-            relevance_score=0.8
-        ))
+        # Known authoritative sources with fetchable content patterns
+        authoritative_sources = [
+            # Official Python documentation - direct searchable endpoint
+            {
+                "domain": "docs.python.org",
+                "title": "Python Official Docs",
+                "url_pattern": lambda q: f"https://docs.python.org/3/search.html?q={q.replace(' ', '+')}",
+                "tier": 1,
+                "score": 0.95,
+                "always_include": True
+            },
+            # MDN Web Docs - direct searchable endpoint
+            {
+                "domain": "developer.mozilla.org",
+                "title": "MDN Web Docs",
+                "url_pattern": lambda q: f"https://developer.mozilla.org/en-US/search?q={q.replace(' ', '%20')}",
+                "tier": 1,
+                "score": 0.92,
+                "always_include": True
+            },
+            # GitHub official docs - direct searchable endpoint
+            {
+                "domain": "docs.github.com",
+                "title": "GitHub Docs",
+                "url_pattern": lambda q: f"https://docs.github.com/search?query={q.replace(' ', '+')}",
+                "tier": 1,
+                "score": 0.90,
+                "always_include": True
+            },
+            # ArXiv - direct search API
+            {
+                "domain": "arxiv.org",
+                "title": "ArXiv Research Papers",
+                "url_pattern": lambda q: f"https://arxiv.org/search/advanced?terms-0-operator=AND&terms-0-term={q.replace(' ', '+')}&classification-include-cross-list=include",
+                "tier": 2,
+                "score": 0.88,
+                "always_include": True
+            },
+            # Khan Academy - direct searchable endpoint
+            {
+                "domain": "khanacademy.org",
+                "title": "Khan Academy",
+                "url_pattern": lambda q: f"https://www.khanacademy.org/search?page_search_query={q.replace(' ', '+')}",
+                "tier": 2,
+                "score": 0.85,
+                "always_include": True
+            },
+            # Coursera - direct searchable endpoint
+            {
+                "domain": "coursera.org",
+                "title": "Coursera Courses",
+                "url_pattern": lambda q: f"https://www.coursera.org/search?query={q.replace(' ', '+')}",
+                "tier": 2,
+                "score": 0.82,
+                "always_include": True
+            },
+            # Stack Overflow - direct searchable endpoint
+            {
+                "domain": "stackoverflow.com",
+                "title": "Stack Overflow Q&A",
+                "url_pattern": lambda q: f"https://stackoverflow.com/search?q={q.replace(' ', '+')}",
+                "tier": 3,
+                "score": 0.80,
+                "always_include": True
+            },
+            # GeeksforGeeks - direct searchable endpoint
+            {
+                "domain": "geeksforgeeks.org",
+                "title": "GeeksforGeeks Tutorials",
+                "url_pattern": lambda q: f"https://www.geeksforgeeks.org/search/?q={q.replace(' ', '+')}",
+                "tier": 3,
+                "score": 0.78,
+                "always_include": True
+            },
+            # Wikipedia - direct article endpoint (not search page)
+            {
+                "domain": "en.wikipedia.org",
+                "title": "Wikipedia",
+                "url_pattern": lambda q: f"https://en.wikipedia.org/w/api.php?action=query&format=json&titles={q.replace(' ', '_')}&prop=extracts&explaintext=true",
+                "tier": 3,
+                "score": 0.75,
+                "always_include": True
+            },
+            # MIT OpenCourseWare - direct searchable endpoint
+            {
+                "domain": "ocw.mit.edu",
+                "title": "MIT OpenCourseWare",
+                "url_pattern": lambda q: f"https://ocw.mit.edu/search/?s={q.replace(' ', '+')}",
+                "tier": 2,
+                "score": 0.90,
+                "always_include": True
+            },
+            # LeetCode (conditional - for algorithm queries)
+            {
+                "domain": "leetcode.com",
+                "title": "LeetCode Problems",
+                "url_pattern": lambda q: f"https://leetcode.com/search/?q={q.replace(' ', '+')}",
+                "tier": 3,
+                "score": 0.76,
+                "always_include": False,
+                "keywords": ['stack', 'queue', 'algorithm', 'data structure', 'tree', 'graph', 'sort', 'search']
+            },
+            # Wolfram MathWorld (conditional - for math queries)
+            {
+                "domain": "mathworld.wolfram.com",
+                "title": "Wolfram MathWorld",
+                "url_pattern": lambda q: f"https://mathworld.wolfram.com/search/?query={q.replace(' ', '+')}",
+                "tier": 2,
+                "score": 0.84,
+                "always_include": False,
+                "keywords": ['math', 'calculus', 'algebra', 'geometry', 'equation', 'formula', 'theorem', 'derivative', 'integral']
+            },
+            # edX (conditional - for education queries)
+            {
+                "domain": "edx.org",
+                "title": "edX Courses",
+                "url_pattern": lambda q: f"https://www.edx.org/search?q={q.replace(' ', '+')}",
+                "tier": 2,
+                "score": 0.80,
+                "always_include": False,
+                "keywords": ['course', 'learn', 'education', 'training', 'study']
+            },
+        ]
         
-        # Stack Overflow - Excellent for data structures/programming
-        if any(term in query.lower() for term in ['stack', 'queue', 'lifo', 'fifo', 'heap', 'tree', 'list', 'data structure', 'algorithm', 'insertion', 'deletion', 'push', 'pop']):
-            results.append(SearchResult(
-                title=f"Stack Overflow: {query}",
-                url=f"https://stackoverflow.com/search?q={query_encoded}",
-                snippet=f"Stack Overflow - {query}",
-                authority_tier=2,
-                relevance_score=0.85
-            ))
+        # Add always-included sources
+        for source in authoritative_sources:
+            if source.get("always_include", False):
+                try:
+                    url = source["url_pattern"](query)
+                    results.append(SearchResult(
+                        title=source["title"],
+                        url=url,
+                        snippet=f"Search {source['title']}: {query}",
+                        authority_tier=source["tier"],
+                        relevance_score=source["score"]
+                    ))
+                    logger.debug(f"Added {source['title']} source for query: {query[:40]}...")
+                except Exception as e:
+                    logger.warning(f"Failed to generate URL for {source['title']}: {e}")
         
-        # GeeksforGeeks - Authoritative for computer science
-        if any(term in query.lower() for term in ['stack', 'queue', 'data structure', 'algorithm', 'tree', 'graph', 'sorting', 'linked list', 'array']):
-            results.append(SearchResult(
-                title=f"GeeksforGeeks: {query}",
-                url=f"https://www.geeksforgeeks.org/search/?q={query_encoded}",
-                snippet=f"GeeksforGeeks - {query}",
-                authority_tier=2,
-                relevance_score=0.82
-            ))
+        # Add conditional sources based on query keywords
+        for source in authoritative_sources:
+            if not source.get("always_include", False):
+                keywords = source.get("keywords", [])
+                if any(kw in query_lower for kw in keywords):
+                    try:
+                        url = source["url_pattern"](query)
+                        results.append(SearchResult(
+                            title=source["title"],
+                            url=url,
+                            snippet=f"Search {source['title']}: {query}",
+                            authority_tier=source["tier"],
+                            relevance_score=source["score"]
+                        ))
+                        logger.debug(f"Added conditional {source['title']} source for query: {query[:40]}...")
+                    except Exception as e:
+                        logger.warning(f"Failed to generate URL for {source['title']}: {e}")
         
-        # Khan Academy - For foundational content
-        if any(term in query.lower() for term in ['algorithm', 'data', 'structure', 'sort', 'search', 'math']):
-            results.append(SearchResult(
-                title=f"Khan Academy: {query}",
-                url=f"https://www.khanacademy.org/search?page_search_query={query_encoded}",
-                snippet=f"Khan Academy - {query}",
-                authority_tier=1,
-                relevance_score=0.78
-            ))
+        logger.info(f"Constructed {len(results)} authoritative source URLs for query: '{query[:50]}...'")
+        source_names = [r.title for r in results]
+        logger.info(f"Sources included: {', '.join(source_names[:10])}")
         
-        # Official Python docs for programming concepts
-        if any(term in query.lower() for term in ['python', 'list', 'array', 'collection', 'set', 'dict', 'tuple']):
-            results.append(SearchResult(
-                title=f"Python Docs: {query}",
-                url=f"https://docs.python.org/3/search.html?q={query_encoded}",
-                snippet=f"Python documentation",
-                authority_tier=1,
-                relevance_score=0.9
-            ))
-        
-        logger.info(f"Constructed {len(results)} authoritative source URLs for query: {query[:50]}")
         return results[:self.max_results_per_query]
     
     def search_and_retrieve_evidence(
@@ -213,6 +327,9 @@ class OnlineEvidenceSearcher:
                 logger.warning(f"No search results for claim: {claim_text[:100]}")
                 return []
             
+            logger.info(f"🔍 Searched {len(search_results)} sources for claim: '{claim_text[:80]}...'")
+            logger.info(f"   Sources searched: {', '.join([r.title for r in search_results])}")
+            
             # Filter by authority allowlist
             filtered_results = []
             filtered_out = 0
@@ -220,24 +337,32 @@ class OnlineEvidenceSearcher:
                 is_allowed, reason = self.allowlist.validate_source(result.url)
                 if is_allowed:
                     filtered_results.append(result)
+                    logger.debug(f"✅ Allowed: {result.title}")
                 else:
-                    logger.debug(f"Filtered out {result.url}: {reason}")
+                    logger.debug(f"❌ Filtered out {result.title}: {reason}")
                     filtered_out += 1
             
             if not filtered_results:
                 logger.warning("No results passed authority filter")
                 return []
             
+            logger.info(f"✓ {len(filtered_results)} sources passed authority filter: {', '.join([r.title for r in filtered_results])}")
+            
             # Fetch content from top URLs
             evidence_list = []
             urls_to_fetch = [r.url for r in filtered_results[:self.max_urls_to_fetch]]
             url_domains = []
-            for url in urls_to_fetch:
+            source_titles = []
+            for i, url in enumerate(urls_to_fetch):
                 try:
                     domain = url.split("//", 1)[-1].split("/", 1)[0]
+                    if i < len(filtered_results):
+                        source_titles.append(filtered_results[i].title)
                 except Exception:
                     domain = "unknown"
                 url_domains.append(domain)
+            
+            logger.info(f"📡 Fetching from {len(urls_to_fetch)} sources: {', '.join(source_titles)}")
             
             with PerformanceTimer(
                 "fetch_online_content",
@@ -247,7 +372,8 @@ class OnlineEvidenceSearcher:
                     "num_search_results": len(search_results),
                     "num_allowed_results": len(filtered_results),
                     "num_filtered_out": filtered_out,
-                    "url_domains": url_domains
+                    "url_domains": url_domains,
+                    "source_titles": source_titles
                 }
             ):
                 online_spans = self.retriever.search_and_retrieve(
@@ -276,12 +402,21 @@ class OnlineEvidenceSearcher:
                 )
                 evidence_list.append(evidence)
             
+            # Extract unique sources from evidence
+            unique_sources = set()
+            for ev in evidence_list:
+                source_url = ev.origin
+                try:
+                    domain = source_url.split("//", 1)[-1].split("/", 1)[0]
+                    unique_sources.add(domain)
+                except:
+                    pass
+            
             logger.info(
-                "Retrieved %s evidence chunks from %s online sources (allowed=%s, filtered_out=%s)",
+                "✅ Retrieved %s evidence chunks from %s unique online sources: %s",
                 len(evidence_list),
-                len(urls_to_fetch),
-                len(filtered_results),
-                filtered_out
+                len(unique_sources),
+                ', '.join(sorted(unique_sources)) if unique_sources else "none"
             )
             
             return evidence_list

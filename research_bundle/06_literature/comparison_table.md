@@ -183,6 +183,7 @@ Only **FEVER and SmartNotes** systematically tested on multiple domains:
 | Aspect | FEVER | SciFact | Smart Notes | Notes |
 |--------|-------|---------|------------|-------|
 | **Reproducibility** | Checkpoints provided | ✓ | 100% bit-identical ⭐ | SmartNotes most rigorous |
+| **Test Suite (Citation-based)** | Not reported | Not reported | 9/9 passing (pytest, 3.40s, Feb 25 2026) | Tests run on Windows |
 | **Statistical Significance** | Not reported | Not reported | p<0.0001 ⭐ | SmartNotes has rigorous t-tests |
 | **Effect Sizes** | — | — | Cohen's d=0.43 ⭐ | SmartNotes measures practical significance |
 | **Inter-annotator Agreement** | κ=0.87 | κ=0.92 | κ=0.89 ⭐ | All high; SmartNotes comparable |

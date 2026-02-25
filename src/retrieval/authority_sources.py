@@ -294,6 +294,112 @@ class AuthorityAllowlist:
                 category="community",
                 description="DEV Community"
             ),
+            # Additional educational and reference sources
+            AuthoritySource(
+                domain="khanacademy.org",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.88,
+                category="educational",
+                description="Khan Academy - educational video platform"
+            ),
+            AuthoritySource(
+                domain="www.khanacademy.org",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.88,
+                category="educational",
+                description="Khan Academy - educational video platform"
+            ),
+            AuthoritySource(
+                domain="geeksforgeeks.org",
+                tier=AuthorityTier.TIER_3,
+                authority_weight=0.72,
+                category="computer_science",
+                description="GeeksforGeeks - CS tutorials and DSA"
+            ),
+            AuthoritySource(
+                domain="www.geeksforgeeks.org",
+                tier=AuthorityTier.TIER_3,
+                authority_weight=0.72,
+                category="computer_science",
+                description="GeeksforGeeks - CS tutorials and DSA"
+            ),
+            AuthoritySource(
+                domain="coursera.org",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.82,
+                category="educational",
+                description="Coursera - online learning platform"
+            ),
+            AuthoritySource(
+                domain="www.coursera.org",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.82,
+                category="educational",
+                description="Coursera - online learning platform"
+            ),
+            AuthoritySource(
+                domain="leetcode.com",
+                tier=AuthorityTier.TIER_3,
+                authority_weight=0.70,
+                category="coding_practice",
+                description="LeetCode - coding interview problems"
+            ),
+            AuthoritySource(
+                domain="www.leetcode.com",
+                tier=AuthorityTier.TIER_3,
+                authority_weight=0.70,
+                category="coding_practice",
+                description="LeetCode - coding interview problems"
+            ),
+            AuthoritySource(
+                domain="mathworld.wolfram.com",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.80,
+                category="mathematics",
+                description="Wolfram MathWorld - comprehensive math reference"
+            ),
+            AuthoritySource(
+                domain="phys.org",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.75,
+                category="physics_science",
+                description="PhysicsWorld - physics and science news"
+            ),
+            AuthoritySource(
+                domain="docs.github.com",
+                tier=AuthorityTier.TIER_1,
+                authority_weight=0.95,
+                category="github_official",
+                description="GitHub official documentation"
+            ),
+            AuthoritySource(
+                domain="edx.org",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.85,
+                category="educational",
+                description="edX - university online education"
+            ),
+            AuthoritySource(
+                domain="www.edx.org",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.85,
+                category="educational",
+                description="edX - university online education"
+            ),
+            AuthoritySource(
+                domain="sciencedirect.com",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.85,
+                category="academic_journal",
+                description="ScienceDirect - scientific research and journals"
+            ),
+            AuthoritySource(
+                domain="www.sciencedirect.com",
+                tier=AuthorityTier.TIER_2,
+                authority_weight=0.85,
+                category="academic_journal",
+                description="ScienceDirect - scientific research and journals"
+            ),
         ]
         
         for source in tier_3_sources:
