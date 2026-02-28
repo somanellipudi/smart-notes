@@ -1,0 +1,9 @@
+threshold,coverage_pct,accuracy_pct,risk_pct,precision_pct,use_case
+0.00,100.0,81.2,18.8,81.2,All claims predicted
+0.30,98.0,82.1,17.9,82.1,Minimal abstention
+0.50,95.0,92.2,7.8,92.2,Minimal abstention
+0.60,74.0,90.4,9.6,90.4,Hybrid workflow
+0.70,60.0,92.8,7.2,92.8,Conservative
+0.75,50.0,94.1,5.9,94.1,High-stakes decisions
+0.80,40.0,95.8,4.2,95.8,Stricter threshold
+0.90,25.0,98.0,2.0,98.0,Expert verification only
