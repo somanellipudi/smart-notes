@@ -10,6 +10,9 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 import logging
+import argparse
+from src.evaluation.runner import run as run_eval
+from src.config.verification_config import VerificationConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +40,12 @@ def run_command(cmd, description):
 
 def main():
     """Run all evaluations."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", default="verifiable_full", choices=["baseline_retriever","baseline_nli","baseline_rag_nli","verifiable_full","all"], help="Evaluation mode to run")
+    args = parser.parse_args()
+
+    cfg = VerificationConfig.from_env()
+
     logger.info(f"Smart Notes Evaluation Suite")
     logger.info(f"Results Directory: {RESULTS_DIR}")
     logger.info(f"Start Time: {datetime.now().isoformat()}")
@@ -96,6 +105,12 @@ def main():
         passed = run_command(cmd, f"Smoke test: {test}")
         all_smoke_passed = all_smoke_passed and passed
     
+    # Run selected evaluation mode(s)
+    modes_to_run = [args.mode] if args.mode != "all" else ["baseline_retriever","baseline_nli","baseline_rag_nli","verifiable_full"]
+    for m in modes_to_run:
+        logger.info(f"Running evaluation mode: {m}")
+        run_eval(mode=m, output_dir=str(Path("outputs") / "benchmark_results" / "latest"))
+
     # Generate Summary Report
     logger.info("\n" + "="*80)
     logger.info("GENERATING SUMMARY REPORT")

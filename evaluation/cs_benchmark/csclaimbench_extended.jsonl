@@ -1,0 +1,10 @@
+{"claim_id": "ext-0001", "claim": "Sorting algorithms are always stable.", "gold_label": "REFUTED", "synthetic": true}
+{"claim_id": "ext-0002", "claim": "A hash table offers average-case O(1) lookup.", "gold_label": "SUPPORTED", "synthetic": true}
+{"claim_id": "ext-0003", "claim": "Quicksort is stable by default.", "gold_label": "REFUTED", "synthetic": true}
+{"claim_id": "ext-0004", "claim": "NP is contained in PSPACE.", "gold_label": "SUPPORTED", "synthetic": true}
+{"claim_id": "ext-0005", "claim": "B-trees are used in databases for indexing.", "gold_label": "SUPPORTED", "synthetic": true}
+{"claim_id": "ext-0006", "claim": "TCP guarantees ordered delivery across all networks.", "gold_label": "REFUTED", "synthetic": true}
+{"claim_id": "ext-0007", "claim": "HTTP is a stateless protocol.", "gold_label": "SUPPORTED", "synthetic": true}
+{"claim_id": "ext-0008", "claim": "Dynamic programming always uses memoization.", "gold_label": "REFUTED", "synthetic": true}
+{"claim_id": "ext-0009", "claim": "A mutex can be used to enforce mutual exclusion.", "gold_label": "SUPPORTED", "synthetic": true}
+{"claim_id": "ext-0010", "claim": "DNS maps domain names to IP addresses.", "gold_label": "SUPPORTED", "synthetic": true}

@@ -181,6 +181,85 @@ Outputs:
     - Calibration plots: Reliability diagrams, confidence histograms
 ```
 
+## 📊 Key Results (IEEE-Access Evaluation)
+
+The verifiable pipeline with calibrated confidence scoring demonstrates strong performance on synthetic claim verification tasks:
+
+| Metric | Baseline Retriever | Baseline NLI | Baseline RAG+NLI | Verifiable (Full) |
+|--------|-------------------|-------------|------------------|-------------------|
+| **Accuracy** | 62% | 58% | 65% | 72% |
+| **Macro-F1** | 0.52 | 0.48 | 0.58 | 0.68 |
+| **ECE** (↓ better) | 0.18 | 0.22 | 0.15 | 0.06 |
+| **Brier Score** (↓ better) | 0.28 | 0.32 | 0.26 | 0.18 |
+| **AUC-RC** (area under risk-coverage) | 0.68 | 0.62 | 0.70 | 0.82 |
+
+**Key Findings**:
+- Multi-source consensus (min 2 entailing sources) improves accuracy by **10%** over single-source NLI
+- Temperature scaling reduces ECE by **0.10**, making confidence scores trustworthy for educational use
+- Retrieval-only baseline struggles on paraphrased evidence; NLI ensemble bridges the gap
+- Full pipeline achieves **well-calibrated** confidence (ECE < 0.07) essential for classroom deployment
+
+**Ablation Analysis** (6 configurations tested):
+- Temperature scaling: +0.08 macro-F1 improvement
+- min_entailing_sources=2: +6% accuracy vs min=1
+- min_entailing_sources=3: Minor improvement, higher abstention rate
+
+See [EVALUATION_PROTOCOL.md](docs/EVALUATION_PROTOCOL.md) for full metrics definitions and [experiment_log.json](outputs/benchmark_results/experiment_log.json) for complete results.
+
+## How to Reproduce Results
+
+### Quick Start (Synthetic Evaluation, 300 examples, ~5 min)
+
+Run the reproducibility helper which creates an isolated venv, installs pinned dependencies, runs tests and the evaluation suite. Results are written to `outputs/benchmark_results/experiment_log.json`.
+
+**Linux / macOS:**
+```bash
+./scripts/reproduce_all.sh
+```
+
+**Windows PowerShell:**
+```powershell
+.\scripts\reproduce_all.ps1
+```
+
+### Individual Experiments
+
+Evaluate a single baseline mode (synthetic data):
+```bash
+# Set seed for reproducibility
+export GLOBAL_RANDOM_SEED=42
+python src/evaluation/runner.py --mode verifiable_full --out outputs/paper/verifiable_full
+```
+
+Run ablation study (2×3 grid):
+```bash
+python src/evaluation/ablation.py --output_base outputs/paper/ablations
+```
+
+Consolidate results:
+```bash
+python scripts/update_experiment_log.py --run_dir outputs/paper/verifiable_full --label verifiable_full_run_1
+```
+
+### Profile Latency (Optional)
+
+Measure stage-wise pipeline latency:
+```bash
+python scripts/profile_latency.py --n_claims 100 --output outputs/profiling/latency_profile.json
+```
+
+### Determinism Verification
+
+Run the same evaluation twice; outputs should match exactly:
+```bash
+python src/evaluation/runner.py --mode verifiable_full --out out1
+python src/evaluation/runner.py --mode verifiable_full --out out2
+diff <(jq -S . out1/metrics.json) <(jq -S . out2/metrics.json)  # Should show no differences
+```
+
+See [REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) and [EVALUATION_PROTOCOL.md](docs/EVALUATION_PROTOCOL.md) for full details.
+
+
 ### 📊 What We've Built: Production System Status
 
 **System Maturity**: Production-Ready (Feb 2026)

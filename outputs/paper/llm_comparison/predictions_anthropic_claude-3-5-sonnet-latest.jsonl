@@ -1,0 +1,1 @@
+{"index": 1, "doc_id": "algo_001", "domain_topic": "Algorithms", "gold_label": "VERIFIED", "pred_label": "LOW_CONFIDENCE", "confidence": 0.5, "correct": 0, "latency_ms": null, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0, "rationale": "ERROR: NotFoundError"}

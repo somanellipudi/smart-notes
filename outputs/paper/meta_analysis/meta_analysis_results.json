@@ -1,0 +1,62 @@
+{
+  "meta_analysis": {
+    "accuracy": {
+      "pooled_estimate": 0.7925760434620871,
+      "ci_lower": 0.7677332476868304,
+      "ci_upper": 0.8174188392373438,
+      "se": 0.012674895803702381,
+      "I_squared": 39.74181611181015,
+      "p_heterogeneity": 0.19022919955615603
+    },
+    "ece": {
+      "pooled_estimate": 0.0946,
+      "ci_lower": 0.07196786944776667,
+      "ci_upper": 0.11723213055223333,
+      "se": 0.011547005383792516,
+      "I_squared": 0.0,
+      "p_heterogeneity": 0.5363464311060948
+    },
+    "auc_ac": {
+      "pooled_estimate": 0.8767666666666667,
+      "ci_lower": 0.8541345361144334,
+      "ci_upper": 0.8993987972189,
+      "se": 0.011547005383792516,
+      "I_squared": 81.66452498132074,
+      "p_heterogeneity": 0.004279546070389051
+    }
+  },
+  "power_analysis": {
+    "total_n": 1020.0,
+    "pooled_accuracy": 0.7925760434620871,
+    "baseline_accuracy": 0.721,
+    "effect_size_h": 0.16724052405356904,
+    "statistical_power": 0.9653806319578498,
+    "mde_percentage_points": 5.379915685927161,
+    "n_for_80_power": 562.0,
+    "ci_width_pp": 4.976636365334461,
+    "se": 0.012695500931975667
+  },
+  "datasets": {
+    "CSClaimBench (Primary)": {
+      "n": 260,
+      "accuracy": 0.812,
+      "ece": 0.0823,
+      "auc_ac": 0.9102,
+      "description": "Expert-annotated CS claims (primary test set)"
+    },
+    "CSClaimBench-Extended": {
+      "n": 560,
+      "accuracy": 0.798,
+      "ece": 0.0891,
+      "auc_ac": 0.8967,
+      "description": "Extended CS claims (single-annotator)"
+    },
+    "FEVER Transfer": {
+      "n": 200,
+      "accuracy": 0.743,
+      "ece": 0.1124,
+      "auc_ac": 0.8234,
+      "description": "Wikipedia claims (zero-shot transfer)"
+    }
+  }
+}

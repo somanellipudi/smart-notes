@@ -175,7 +175,15 @@ class AblationRunner:
                 "use_cleaning": True,
                 "use_artifact_persistence": False,
                 "use_batch_nli": True,
-                "use_online_authority": False
+                "use_online_authority": False,
+                "domain_agnostic_weighting": True,
+                "quality_predictor_enabled": True,
+                "non_cs_entail_weight": 0.85,
+                "non_cs_similarity_weight": 0.15,
+                "enable_calibration_checkpoint": True,
+                "calibration_target_ece": 0.10,
+                "enable_research_logging": True,
+                "research_log_dir": "evaluation/results/research_logs"
             },
             
             # Feature toggles

@@ -1,0 +1,42 @@
+{
+  "ece": 0.05865315451852554,
+  "brier_score": 0.16524447598223346,
+  "accuracy": 0.7466666666666667,
+  "n_samples": 300,
+  "auc_ac": -0.995,
+  "mode": "verifiable",
+  "seed": 42,
+  "config": {
+    "verified_confidence_threshold": 0.7,
+    "rejected_confidence_threshold": 0.3,
+    "low_confidence_range": [
+      0.3,
+      0.7
+    ],
+    "min_entailing_sources_for_verified": 2,
+    "top_k_retrieval": 20,
+    "top_k_rerank": 5,
+    "mmr_lambda": 0.5,
+    "temperature_scaling_enabled": true,
+    "temperature_init": 1.0,
+    "temperature_grid_min": 0.8,
+    "temperature_grid_max": 2.0,
+    "temperature_grid_steps": 100,
+    "calibration_split": "validation",
+    "random_seed": 42,
+    "retriever_threshold": 0.7,
+    "nli_positive_threshold": 0.6,
+    "nli_negative_threshold": 0.4,
+    "rag_positive_threshold": 0.65,
+    "rag_negative_threshold": 0.35,
+    "deployment_mode": "verifiable",
+    "enable_result_cache": false,
+    "enable_quality_screening": false,
+    "enable_query_expansion": false,
+    "enable_evidence_ranker": false,
+    "enable_type_classifier": false,
+    "enable_semantic_deduplicator": false,
+    "enable_adaptive_depth": false,
+    "enable_priority_scorer": false
+  }
+}

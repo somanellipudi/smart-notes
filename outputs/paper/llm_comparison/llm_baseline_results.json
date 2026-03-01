@@ -1,0 +1,61 @@
+{
+  "dataset": "evaluation\\cs_benchmark\\csclaimbench_v1.jsonl",
+  "n": 185,
+  "timestamp_unix": 1772391598.6105845,
+  "results": [
+    {
+      "model": "gpt-4o",
+      "provider": "openai",
+      "status": "ok",
+      "n": 185,
+      "accuracy": 0.9243243243243243,
+      "macro_f1": 0.7878959276018099,
+      "ece": 0.057027027027027055,
+      "brier": 0.0783918918918919,
+      "auc_ac": 0.9745733803150246,
+      "avg_latency_ms": 857.6872567580132,
+      "p95_latency_ms": 1288.8643600163043,
+      "total_prompt_tokens": 26979,
+      "total_completion_tokens": 7720,
+      "total_cost_usd": 0.2506950000000001,
+      "avg_cost_usd_per_claim": 0.0013551081081081087,
+      "predictions_path": "outputs\\paper\\llm_comparison\\predictions_openai_gpt-4o.jsonl"
+    },
+    {
+      "model": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "status": "ok",
+      "n": 185,
+      "accuracy": 0.9459459459459459,
+      "macro_f1": 0.8647221919533132,
+      "ece": 0.0470270270270272,
+      "brier": 0.07310810810810811,
+      "auc_ac": 0.9869714210468278,
+      "avg_latency_ms": 2160.96628865139,
+      "p95_latency_ms": 3104.1616800357588,
+      "total_prompt_tokens": 28310,
+      "total_completion_tokens": 10359,
+      "total_cost_usd": 0.0,
+      "avg_cost_usd_per_claim": 0.0,
+      "predictions_path": "outputs\\paper\\llm_comparison\\predictions_anthropic_claude-sonnet-4-20250514.jsonl"
+    },
+    {
+      "model": "llama3.2:3b",
+      "provider": "ollama",
+      "status": "ok",
+      "n": 185,
+      "accuracy": 0.7783783783783784,
+      "macro_f1": 0.5374010180995475,
+      "ece": 0.2981621621621622,
+      "brier": 0.32538054054054055,
+      "auc_ac": 0.8293600201763782,
+      "avg_latency_ms": 2766.907407024976,
+      "p95_latency_ms": 2918.7901599798342,
+      "total_prompt_tokens": 29402,
+      "total_completion_tokens": 6862,
+      "total_cost_usd": 0.0,
+      "avg_cost_usd_per_claim": 0.0,
+      "predictions_path": "outputs\\paper\\llm_comparison\\predictions_ollama_llama3.2_3b.jsonl"
+    }
+  ]
+}

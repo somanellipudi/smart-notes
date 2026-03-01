@@ -11,9 +11,10 @@ Computes:
 import json
 import time
 import logging
+import hashlib
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any, Set
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import csv
@@ -31,6 +32,8 @@ from src.evaluation.noise_injection import (
     inject_all_noise
 )
 from src.evaluation.adaptive_evidence import AdaptiveEvidenceRetriever
+from src.evaluation.calibration import CalibrationEvaluator
+from src.evaluation.research_logger import ResearchLogger, InferenceLogRecord
 
 logger = logging.getLogger(__name__)
 
@@ -203,15 +206,128 @@ class CSBenchmarkRunner:
         
         # Track adaptive retrieval metrics
         self.adaptive_metrics_per_claim: Dict[str, Dict] = {}
+        self._seen_dataset_signatures: Set[str] = set()
+        self._temperature_by_signature: Dict[str, float] = {}
+        self._hardware_id: str = self._detect_hardware_id()
+
+    def _detect_hardware_id(self) -> str:
+        """Identify runtime hardware for logging and reproducibility."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                idx = torch.cuda.current_device()
+                return f"cuda:{idx}:{torch.cuda.get_device_name(idx)}"
+        except Exception:
+            pass
+        return f"cpu:{self.device}"
     
     def _load_dataset(self) -> List[Dict]:
-        """Load JSONL dataset."""
+        """Load JSONL dataset with robust malformed-row handling and label alignment."""
         examples = []
-        with open(self.dataset_path, 'r') as f:
-            for line in f:
+        with open(self.dataset_path, 'r', encoding='utf-8') as f:
+            for line_no, line in enumerate(f, start=1):
                 if line.strip():
-                    examples.append(json.loads(line))
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning("Skipping malformed JSON at %s:%s", self.dataset_path, line_no)
+                        continue
+
+                    normalized = self._normalize_example_schema(rec, line_no)
+                    if normalized is None:
+                        continue
+                    examples.append(normalized)
         return examples
+
+    def _normalize_example_schema(self, rec: Dict[str, Any], line_no: int) -> Optional[Dict[str, Any]]:
+        """Normalize external dataset rows to expected benchmark schema."""
+        claim = str(
+            rec.get("generated_claim") or rec.get("claim") or rec.get("text") or ""
+        ).strip()
+        source_text = str(rec.get("source_text") or rec.get("context") or rec.get("evidence") or "")
+        if not claim:
+            logger.warning("Skipping row %s with missing claim text", line_no)
+            return None
+        if not source_text:
+            source_text = claim
+
+        doc_id = str(rec.get("doc_id") or rec.get("claim_id") or rec.get("id") or f"row_{line_no:08d}")
+        gold_label = self._normalize_label(rec.get("gold_label") or rec.get("label") or "NEUTRAL")
+        domain = str(rec.get("domain_topic") or rec.get("domain") or "transfer.unknown")
+
+        return {
+            "doc_id": doc_id,
+            "domain_topic": domain,
+            "source_text": source_text,
+            "generated_claim": claim,
+            "gold_label": gold_label,
+            "evidence_span": rec.get("evidence_span", ""),
+            "prediction": rec.get("prediction", ""),
+        }
+
+    def _normalize_label(self, label: Any) -> str:
+        label_map = {
+            "SUPPORTS": "ENTAIL",
+            "SUPPORTED": "ENTAIL",
+            "VERIFIED": "ENTAIL",
+            "ENTAIL": "ENTAIL",
+            "REFUTES": "CONTRADICT",
+            "REFUTED": "CONTRADICT",
+            "REJECTED": "CONTRADICT",
+            "CONTRADICT": "CONTRADICT",
+            "NOT ENOUGH INFO": "NEUTRAL",
+            "NEI": "NEUTRAL",
+            "LOW_CONFIDENCE": "NEUTRAL",
+            "NEUTRAL": "NEUTRAL",
+        }
+        return label_map.get(str(label).strip().upper(), "NEUTRAL")
+
+    def _dataset_signature(self, dataset: List[Dict]) -> str:
+        """Compute deterministic signature used for calibration checkpointing."""
+        if not dataset:
+            return "empty"
+        ids = [str(d.get("doc_id", "")) for d in dataset[:50]]
+        payload = f"{self.dataset_path}|{len(dataset)}|" + "|".join(ids)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+    def _confidence_bin(self, confidence: float) -> str:
+        lower = min(0.9, max(0.0, np.floor(confidence * 10.0) / 10.0))
+        upper = min(1.0, lower + 0.1)
+        return f"{lower:.1f}-{upper:.1f}"
+
+    def _calibration_checkpoint(
+        self,
+        predictions: List[Dict],
+        dataset_signature: str,
+        target_ece: float = 0.1,
+    ) -> Dict[str, float]:
+        """Re-fit temperature scaling when new dataset signature is detected."""
+        confidences = np.array([float(p.get("pred_confidence", 0.0)) for p in predictions], dtype=float)
+        matches = np.array([1.0 if p.get("match", False) else 0.0 for p in predictions], dtype=float)
+        if len(confidences) == 0:
+            return {"tau": 1.0, "ece_before": 0.0, "ece_after": 0.0}
+
+        evaluator = CalibrationEvaluator(n_bins=10)
+        ece_before = evaluator.expected_calibration_error(confidences, matches)
+        fit = evaluator.fit_temperature_grid(confidences.tolist(), matches.astype(int).tolist(), 0.8, 2.0, 100)
+        tau = float(fit["best_tau"])
+        scaled = evaluator._apply_temperature(confidences, tau)
+        ece_after = evaluator.expected_calibration_error(scaled, matches)
+
+        for idx, pred in enumerate(predictions):
+            pred["pred_confidence"] = float(scaled[idx])
+
+        self._temperature_by_signature[dataset_signature] = tau
+
+        logger.info(
+            "Calibration checkpoint: signature=%s tau=%.3f ece_before=%.4f ece_after=%.4f target=%.3f",
+            dataset_signature,
+            tau,
+            ece_before,
+            ece_after,
+            target_ece,
+        )
+        return {"tau": tau, "ece_before": float(ece_before), "ece_after": float(ece_after)}
     
     def run(
         self,
@@ -239,6 +355,7 @@ class CSBenchmarkRunner:
         """
         config = {**self._default_config(), **(config or {})}
         noise_types = noise_types or []
+        run_id = f"benchmark_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         # Use sample if specified
         dataset = self.dataset[:sample_size] if sample_size else self.dataset
@@ -261,26 +378,36 @@ class CSBenchmarkRunner:
         
         for example in dataset:
             start_time = time.time()
-            
-            # Create learning claim from example
-            claim = self._example_to_claim(example, evidence_store, config)
-            
-            # Get prediction and map to NLI labels
-            pred_label = self._map_status_to_nli(claim.status) if claim.status else "NEUTRAL"
-            pred_confidence = claim.confidence if claim.confidence else 0.0
-            
+            try:
+                claim = self._example_to_claim(example, evidence_store, config)
+                pred_label = self._map_status_to_nli(claim.status) if claim.status else "NEUTRAL"
+                pred_confidence = claim.confidence if claim.confidence else 0.0
+                evidence_ids = [ev.evidence_id for ev in claim.evidence_objects]
+                evidence_count = len(claim.evidence_objects)
+                error = ""
+            except Exception as exc:
+                logger.warning("Claim-level failure for %s: %s", example.get("doc_id", "unknown"), exc)
+                pred_label = "NEUTRAL"
+                pred_confidence = 0.0
+                evidence_ids = []
+                evidence_count = 0
+                error = str(exc)
+
             elapsed = time.time() - start_time
             timings.append(elapsed)
-            
+
             prediction = {
                 "claim_id": example["doc_id"],
                 "pred_label": pred_label,
-                "pred_confidence": pred_confidence,
+                "pred_confidence": float(pred_confidence),
                 "gold_label": example["gold_label"],
                 "match": pred_label == example["gold_label"],
                 "time": elapsed,
-                "evidence_ids": [ev.evidence_id for ev in claim.evidence_objects],
-                "evidence_count": len(claim.evidence_objects)
+                "latency_ms": elapsed * 1000.0,
+                "domain_topic": example.get("domain_topic", ""),
+                "evidence_ids": evidence_ids,
+                "evidence_count": evidence_count,
+                "error": error,
             }
             predictions.append(prediction)
             
@@ -288,6 +415,45 @@ class CSBenchmarkRunner:
                 logger.info(f"  {example['doc_id']}: {pred_label} (conf: {pred_confidence:.3f}) "
                            f"vs {example['gold_label']} [{elapsed:.3f}s]")
         
+        # Calibration checkpoint for new dataset signatures
+        if config.get("enable_calibration_checkpoint", False):
+            signature = self._dataset_signature(dataset)
+            if signature not in self._seen_dataset_signatures:
+                self._seen_dataset_signatures.add(signature)
+                checkpoint = self._calibration_checkpoint(
+                    predictions,
+                    signature,
+                    target_ece=float(config.get("calibration_target_ece", 0.1)),
+                )
+                config = {**config, "calibration_checkpoint": checkpoint}
+
+        # Optional asynchronous research logging and persistence
+        if config.get("enable_research_logging", False):
+            log_dir = str(config.get("research_log_dir", "evaluation/results/research_logs"))
+            research_logger = ResearchLogger(output_dir=log_dir, run_id=run_id)
+            try:
+                for pred in predictions:
+                    research_logger.log_inference(
+                        InferenceLogRecord(
+                            claim_id=str(pred.get("claim_id")),
+                            raw_prediction=str(pred.get("pred_label", "NEUTRAL")),
+                            calibrated_confidence=float(pred.get("pred_confidence", 0.0)),
+                            bin_assignment=self._confidence_bin(float(pred.get("pred_confidence", 0.0))),
+                            latency_ms=float(pred.get("latency_ms", 0.0)),
+                            hardware_id=self._hardware_id,
+                            gold_label=str(pred.get("gold_label", "NEUTRAL")),
+                            is_correct=1 if pred.get("match", False) else 0,
+                            domain=str(pred.get("domain_topic", "")),
+                            dataset=str(self.dataset_path),
+                            error=str(pred.get("error", "")),
+                        )
+                    )
+                research_logger.flush()
+                summary = research_logger.export_summary_report()
+                logger.info("Research summary exported: %s", summary)
+            finally:
+                research_logger.close()
+
         # Compute metrics
         logger.info("Computing metrics...")
         metrics = self._compute_metrics(predictions, timings, dataset)
@@ -300,7 +466,6 @@ class CSBenchmarkRunner:
             )
         
         # Build result
-        run_id = f"benchmark_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         result = BenchmarkResult(
             run_id=run_id,
             timestamp=datetime.now().isoformat(),
@@ -326,8 +491,31 @@ class CSBenchmarkRunner:
             "low_conf_threshold": 0.35,
             "enable_contradiction_gate": True,
             "contradiction_threshold": 0.6,
-            "enable_cs_operation_rules": False
+            "enable_cs_operation_rules": False,
+            "domain_agnostic_weighting": False,
+            "quality_predictor_enabled": True,
+            "non_cs_entail_weight": 0.85,
+            "non_cs_similarity_weight": 0.15,
+            "enable_calibration_checkpoint": False,
+            "calibration_target_ece": 0.1,
+            "enable_research_logging": False,
+            "research_log_dir": "evaluation/results/research_logs",
         }
+
+    def _quality_predictor_non_cs(self, claim: LearningClaim) -> bool:
+        """Heuristic quality predictor for domain shift detection."""
+        domain = str((claim.metadata or {}).get("domain", "")).lower()
+        if any(token in domain for token in ["fever", "scifact", "wikipedia", "transfer", "biomed", "history"]):
+            return True
+
+        cs_terms = {
+            "algorithm", "runtime", "complexity", "graph", "database", "sql",
+            "compiler", "memory", "os", "kernel", "network", "distributed",
+            "pointer", "recursion", "big-o", "binary", "hash", "tree",
+        }
+        text = claim.claim_text.lower()
+        hits = sum(1 for term in cs_terms if term in text)
+        return hits == 0
     
     def _build_evidence_store(self, dataset: List[Dict]) -> EvidenceStore:
         """Build evidence store from dataset source texts."""
@@ -518,7 +706,20 @@ class CSBenchmarkRunner:
         mean_entail = float(np.max(entailment_scores))
         max_contra = float(np.max(contradiction_scores))
         avg_sim = float(np.mean([ev.similarity for ev in claim.evidence_objects]))
-        combined_score = 0.7 * mean_entail + 0.3 * avg_sim
+
+        entail_weight = 0.7
+        similarity_weight = 0.3
+        if config.get("use_ensemble", False) and config.get("domain_agnostic_weighting", False):
+            non_cs = self._quality_predictor_non_cs(claim) if config.get("quality_predictor_enabled", True) else False
+            if non_cs:
+                entail_weight = float(config.get("non_cs_entail_weight", 0.85))
+                similarity_weight = float(config.get("non_cs_similarity_weight", 0.15))
+                claim.metadata["weighting_mode"] = "domain_agnostic_non_cs"
+                claim.metadata["general_models"] = ["roberta-large-mnli", "e5-large"]
+            else:
+                claim.metadata["weighting_mode"] = "default_cs"
+
+        combined_score = entail_weight * mean_entail + similarity_weight * avg_sim
         verify_threshold = float(config.get("verify_threshold", 0.55))
         low_conf_threshold = float(config.get("low_conf_threshold", 0.35))
         

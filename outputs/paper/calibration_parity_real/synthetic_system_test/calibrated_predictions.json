@@ -1,0 +1,72 @@
+[
+  {
+    "claim_id": "ext-0001",
+    "pred_confidence": 0.75,
+    "pred_label": "REFUTED",
+    "gold_label": "REFUTED",
+    "calibrated_confidence": 0.7487570455887363
+  },
+  {
+    "claim_id": "ext-0002",
+    "pred_confidence": 0.82,
+    "pred_label": "SUPPORTED",
+    "gold_label": "SUPPORTED",
+    "calibrated_confidence": 0.818647786356295
+  },
+  {
+    "claim_id": "ext-0003",
+    "pred_confidence": 0.55,
+    "pred_label": "REFUTED",
+    "gold_label": "SUPPORTED",
+    "calibrated_confidence": 0.5497007891974683
+  },
+  {
+    "claim_id": "ext-0004",
+    "pred_confidence": 0.48,
+    "pred_label": "SUPPORTED",
+    "gold_label": "REFUTED",
+    "calibrated_confidence": 0.48012035453083296
+  },
+  {
+    "claim_id": "ext-0005",
+    "pred_confidence": 0.92,
+    "pred_label": "SUPPORTED",
+    "gold_label": "SUPPORTED",
+    "calibrated_confidence": 0.9189104146980425
+  },
+  {
+    "claim_id": "ext-0006",
+    "pred_confidence": 0.35,
+    "pred_label": "REFUTED",
+    "gold_label": "REFUTED",
+    "calibrated_confidence": 0.3508488558908206
+  },
+  {
+    "claim_id": "ext-0007",
+    "pred_confidence": 0.58,
+    "pred_label": "SUPPORTED",
+    "gold_label": "SUPPORTED",
+    "calibrated_confidence": 0.5795262662272812
+  },
+  {
+    "claim_id": "ext-0008",
+    "pred_confidence": 0.22,
+    "pred_label": "REFUTED",
+    "gold_label": "REFUTED",
+    "calibrated_confidence": 0.22131115633424128
+  },
+  {
+    "claim_id": "ext-0009",
+    "pred_confidence": 0.68,
+    "pred_label": "SUPPORTED",
+    "gold_label": "SUPPORTED",
+    "calibrated_confidence": 0.6790111166700743
+  },
+  {
+    "claim_id": "ext-0010",
+    "pred_confidence": 0.62,
+    "pred_label": "SUPPORTED",
+    "gold_label": "SUPPORTED",
+    "calibrated_confidence": 0.6193049499426126
+  }
+]

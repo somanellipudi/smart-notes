@@ -1,0 +1,26 @@
+[
+  {
+    "profile": "full_default",
+    "accuracy": 0.35,
+    "macro_f1": 0.2727231433113786,
+    "ece": 0.44297026326258976,
+    "brier_score": 0.43655563413546805,
+    "risk_coverage_auc": 0.3360882754215318
+  },
+  {
+    "profile": "minimal_deployment",
+    "accuracy": 0.35,
+    "macro_f1": 0.2727231433113786,
+    "ece": 0.44297026326258976,
+    "brier_score": 0.43655563413546805,
+    "risk_coverage_auc": 0.3360882754215318
+  },
+  {
+    "profile": "minimal_plus_opt_ablation",
+    "accuracy": 0.35,
+    "macro_f1": 0.2727231433113786,
+    "ece": 0.44297026326258976,
+    "brier_score": 0.43655563413546805,
+    "risk_coverage_auc": 0.3360882754215318
+  }
+]

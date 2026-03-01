@@ -353,8 +353,45 @@ NLI_CACHE_ENABLED = os.getenv("NLI_CACHE_ENABLED", "false").lower() == "true"
 # Random seed for reproducibility
 GLOBAL_RANDOM_SEED = int(os.getenv("GLOBAL_RANDOM_SEED", "42"))
 
+# Centralized verification configuration (keeps legacy names for backward compat)
+try:
+    from src.config.verification_config import VerificationConfig
+
+    VERIFICATION_CONFIG = VerificationConfig.from_env()
+
+    # Backwards-compatible aliases (old names kept for older modules/tests)
+    VERIFIED_CONFIDENCE_THRESHOLD = VERIFICATION_CONFIG.verified_confidence_threshold
+    REJECTED_CONFIDENCE_THRESHOLD = VERIFICATION_CONFIG.rejected_confidence_threshold
+    LOW_CONFIDENCE_RANGE = tuple(VERIFICATION_CONFIG.low_confidence_range)
+    MIN_ENTAILING_SOURCES_FOR_VERIFIED = VERIFICATION_CONFIG.min_entailing_sources_for_verified
+    TOP_K_RETRIEVAL = VERIFICATION_CONFIG.top_k_retrieval
+    TOP_K_RERANK = VERIFICATION_CONFIG.top_k_rerank
+    MMR_LAMBDA = VERIFICATION_CONFIG.mmr_lambda
+    TEMPERATURE_SCALING_ENABLED = VERIFICATION_CONFIG.temperature_scaling_enabled
+    TEMPERATURE_INIT = VERIFICATION_CONFIG.temperature_init
+    TEMPERATURE_GRID_MIN = VERIFICATION_CONFIG.temperature_grid_min
+    TEMPERATURE_GRID_MAX = VERIFICATION_CONFIG.temperature_grid_max
+    TEMPERATURE_GRID_STEPS = VERIFICATION_CONFIG.temperature_grid_steps
+except Exception:  # pragma: no cover - fail safe for environments without src import
+    VERIFICATION_CONFIG = None
+
+
 
 # ==================== ONLINE EVIDENCE AUGMENTATION ====================
+
+# Minimal deployment and optimization ablation flags
+# Use `MINIMAL_DEPLOYMENT` to enable a light-weight pipeline for quick runs
+# `ENABLE_OPTIMIZATION_ABLATION` toggles whether performance optimizations
+# (batching, early-exit heuristics) are applied; useful for ablation studies.
+MINIMAL_DEPLOYMENT = os.getenv("MINIMAL_DEPLOYMENT", "false").lower() == "true"
+ENABLE_OPTIMIZATION_ABLATION = os.getenv("ENABLE_OPTIMIZATION_ABLATION", "false").lower() == "true"
+
+# Small dictionary of optimization knobs that can be overridden via env for ablation.
+OPTIMIZATION_FLAGS = {
+    "verify_top_n_claims": int(os.getenv("ABLA_T_VERIFY_TOP_N_CLAIMS", str(VERIFY_TOP_N_CLAIMS if 'VERIFY_TOP_N_CLAIMS' in globals() else "250"))),
+    "nli_batch_size": int(os.getenv("ABLA_T_NLI_BATCH_SIZE", str(NLI_BATCH_SIZE if 'NLI_BATCH_SIZE' in globals() else "32")))
+}
+
 
 # Enable online authority verification for evidence augmentation
 ENABLE_ONLINE_VERIFICATION = os.getenv("ENABLE_ONLINE_VERIFICATION", "false").lower() == "true"

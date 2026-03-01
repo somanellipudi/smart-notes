@@ -1,0 +1,12 @@
+{"id": 1, "claim": "Synthetic FEVER claim 1", "label": "REFUTES", "evidence": [["doc", 0, "Synthetic evidence for claim 1"]]}
+{"id": 2, "claim": "Synthetic FEVER claim 2", "label": "NOT ENOUGH INFO", "evidence": [["doc", 0, "Synthetic evidence for claim 2"]]}
+{"id": 3, "claim": "Synthetic FEVER claim 3", "label": "SUPPORTS", "evidence": [["doc", 0, "Synthetic evidence for claim 3"]]}
+{"id": 4, "claim": "Synthetic FEVER claim 4", "label": "REFUTES", "evidence": [["doc", 0, "Synthetic evidence for claim 4"]]}
+{"id": 5, "claim": "Synthetic FEVER claim 5", "label": "NOT ENOUGH INFO", "evidence": [["doc", 0, "Synthetic evidence for claim 5"]]}
+{"id": 6, "claim": "Synthetic FEVER claim 6", "label": "SUPPORTS", "evidence": [["doc", 0, "Synthetic evidence for claim 6"]]}
+{"id": 7, "claim": "Synthetic FEVER claim 7", "label": "REFUTES", "evidence": [["doc", 0, "Synthetic evidence for claim 7"]]}
+{"id": 8, "claim": "Synthetic FEVER claim 8", "label": "NOT ENOUGH INFO", "evidence": [["doc", 0, "Synthetic evidence for claim 8"]]}
+{"id": 9, "claim": "Synthetic FEVER claim 9", "label": "SUPPORTS", "evidence": [["doc", 0, "Synthetic evidence for claim 9"]]}
+{"id": 10, "claim": "Synthetic FEVER claim 10", "label": "REFUTES", "evidence": [["doc", 0, "Synthetic evidence for claim 10"]]}
+{"id": 11, "claim": "Synthetic FEVER claim 11", "label": "NOT ENOUGH INFO", "evidence": [["doc", 0, "Synthetic evidence for claim 11"]]}
+{"id": 12, "claim": "Synthetic FEVER claim 12", "label": "SUPPORTS", "evidence": [["doc", 0, "Synthetic evidence for claim 12"]]}

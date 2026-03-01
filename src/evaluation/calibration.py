@@ -258,6 +258,58 @@ class CalibrationEvaluator:
             Sharpness value
         """
         return float(np.var(predictions))
+
+    # -----------------
+    # Temperature scaling
+    # -----------------
+    def _apply_temperature(self, probs: np.ndarray, tau: float) -> np.ndarray:
+        """
+        Apply temperature scaling to probabilities via logits.
+        If inputs are probabilities p in (0,1), we compute logits = logit(p)
+        and return sigmoid(logits / tau).
+        """
+        eps = 1e-12
+        p = np.clip(probs, eps, 1 - eps)
+        logits = np.log(p / (1 - p))
+        scaled = 1.0 / (1.0 + np.exp(-logits / float(tau)))
+        return scaled
+
+    def fit_temperature_grid(
+        self,
+        val_probs: List[float],
+        val_labels: List[int],
+        grid_min: float = 0.8,
+        grid_max: float = 2.0,
+        grid_steps: int = 100
+    ) -> Dict[str, float]:
+        """
+        Fit a temperature parameter on validation probabilities by minimizing ECE.
+
+        Args:
+            val_probs: Validation predicted probabilities (or correctness proxies)
+            val_labels: Validation binary labels (1=correct, 0=incorrect)
+            grid_min: minimum tau
+            grid_max: maximum tau
+            grid_steps: number of grid points
+
+        Returns:
+            Dict with keys: best_tau, best_ece, ece_grid (list)
+        """
+        probs = np.array(val_probs)
+        labels = np.array(val_labels)
+
+        taus = np.linspace(grid_min, grid_max, grid_steps)
+        ece_values = []
+        for tau in taus:
+            scaled = self._apply_temperature(probs, tau)
+            ece = self.expected_calibration_error(scaled, labels)
+            ece_values.append(float(ece))
+
+        best_idx = int(np.argmin(ece_values))
+        best_tau = float(taus[best_idx])
+        best_ece = float(ece_values[best_idx])
+
+        return {"best_tau": best_tau, "best_ece": best_ece, "taus": taus.tolist(), "ece_grid": ece_values}
     
     def plot_confidence_by_correctness(
         self,
