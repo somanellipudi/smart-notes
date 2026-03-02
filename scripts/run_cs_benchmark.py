@@ -24,8 +24,21 @@ from datetime import datetime
 
 from src.evaluation.cs_benchmark_runner import CSBenchmarkRunner
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging: INFO for our code, WARNING for noisy third-party libs
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Suppress verbose third-party library logs
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
+logging.getLogger('transformers').setLevel(logging.WARNING)
+logging.getLogger('sentence_transformers').setLevel(logging.WARNING)
+logging.getLogger('torch').setLevel(logging.WARNING)
 
 
 class AblationRunner:
