@@ -1,301 +1,326 @@
-"""
-Unified metric computation module for CalibraTeach.
+"""Authoritative metric definitions for calibration and selective prediction.
 
-This module ensures all reported metrics use a single, authoritative definition:
-- ECE (Expected Calibration Error): Confidence vs. correctness bins
-- AUC-AC (Area Under Accuracy-Coverage Curve): Confidence-based abstention
-- Selective prediction metrics: Coverage, accuracy, precision
+This module is the single source of truth for:
+- ECE (10 equal-width bins over confidence in [0,1])
+- Accuracy-Coverage curve (confidence thresholding)
+- AUC-AC (trapezoidal integration over coverage)
 
-Single source of truth for all paper metrics.
+Confidence mode:
+- predicted_class (recommended): confidence = max(p, 1-p)
+- max_prob: alias of predicted_class for binary probabilities
 """
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
-from typing import Dict, Tuple, List, Optional
-import logging
-
-logger = logging.getLogger(__name__)
 
 
+ArrayLike = Union[np.ndarray, Sequence[float], Sequence[int]]
+
+
+def _to_numpy_1d(values: ArrayLike, dtype: np.dtype) -> np.ndarray:
+    arr = np.asarray(values, dtype=dtype)
+    if arr.ndim != 1:
+        raise ValueError("Expected 1D array")
+    return arr
+
+
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def _ensure_probs(probs_or_logits: ArrayLike) -> np.ndarray:
+    x = _to_numpy_1d(probs_or_logits, np.float64)
+    if np.any(np.isnan(x)):
+        raise ValueError("Input contains NaN")
+    if np.any((x < 0.0) | (x > 1.0)):
+        x = _sigmoid(x)
+    return np.clip(x, 0.0, 1.0)
+
+
+def _confidence_from_probs(probs: np.ndarray, confidence_mode: str) -> np.ndarray:
+    mode = confidence_mode.strip().lower()
+    if mode in {"predicted_class", "max_prob"}:
+        return np.maximum(probs, 1.0 - probs)
+    raise ValueError(f"Unsupported confidence_mode: {confidence_mode}")
+
+
+def _predictions_from_probs(probs: np.ndarray) -> np.ndarray:
+    return (probs >= 0.5).astype(np.int64)
+
+
+def _macro_f1_binary(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    f1_values: List[float] = []
+    for klass in (0, 1):
+        tp = int(np.sum((y_pred == klass) & (y_true == klass)))
+        fp = int(np.sum((y_pred == klass) & (y_true != klass)))
+        fn = int(np.sum((y_pred != klass) & (y_true == klass)))
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        if precision + recall == 0:
+            f1_values.append(0.0)
+        else:
+            f1_values.append(2.0 * precision * recall / (precision + recall))
+    return float(np.mean(f1_values))
+
+
+def compute_ece(
+    y_true: ArrayLike,
+    probs_or_logits: ArrayLike,
+    n_bins: int = 10,
+    scheme: str = "equal_width",
+    confidence_mode: str = "predicted_class",
+) -> Dict[str, object]:
+    """Compute Expected Calibration Error (ECE).
+
+    ECE = sum_k (n_k / N) * |acc_k - conf_k|
+
+    Returns dict with:
+    - ece: float
+    - bins: per-bin statistics for reliability diagrams
+    - confidence: list[float]
+    - correctness: list[int]
+    """
+    if n_bins <= 0:
+        raise ValueError("n_bins must be > 0")
+    if scheme != "equal_width":
+        raise ValueError("Only scheme='equal_width' is supported")
+
+    y = _to_numpy_1d(y_true, np.int64)
+    if not np.all(np.isin(y, [0, 1])):
+        raise ValueError("y_true must be binary (0/1)")
+
+    probs = _ensure_probs(probs_or_logits)
+    if len(y) != len(probs):
+        raise ValueError("y_true and probs_or_logits must have same length")
+
+    conf = _confidence_from_probs(probs, confidence_mode)
+    pred = _predictions_from_probs(probs)
+    correct = (pred == y).astype(np.int64)
+
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    n_total = len(y)
+    ece = 0.0
+    bins: List[Dict[str, object]] = []
+
+    for i in range(n_bins):
+        lo = edges[i]
+        hi = edges[i + 1]
+        if i == n_bins - 1:
+            in_bin = (conf >= lo) & (conf <= hi)
+        else:
+            in_bin = (conf >= lo) & (conf < hi)
+
+        count = int(np.sum(in_bin))
+        if count == 0:
+            bins.append(
+                {
+                    "bin_id": i,
+                    "bin_lower": float(lo),
+                    "bin_upper": float(hi),
+                    "count": 0,
+                    "accuracy": 0.0,
+                    "confidence": 0.0,
+                    "abs_difference": 0.0,
+                }
+            )
+            continue
+
+        acc_k = float(np.mean(correct[in_bin]))
+        conf_k = float(np.mean(conf[in_bin]))
+        abs_diff = abs(acc_k - conf_k)
+        ece += (count / n_total) * abs_diff
+
+        bins.append(
+            {
+                "bin_id": i,
+                "bin_lower": float(lo),
+                "bin_upper": float(hi),
+                "count": count,
+                "accuracy": acc_k,
+                "confidence": conf_k,
+                "abs_difference": float(abs_diff),
+            }
+        )
+
+    return {
+        "ece": float(ece),
+        "bins": bins,
+        "confidence": conf.tolist(),
+        "correctness": correct.tolist(),
+    }
+
+
+def compute_accuracy_coverage_curve(
+    y_true: ArrayLike,
+    probs_or_logits: ArrayLike,
+    confidence_mode: str = "predicted_class",
+    thresholds: Union[str, ArrayLike] = "unique",
+) -> Dict[str, List[float]]:
+    """Compute accuracy-coverage curve via confidence thresholding.
+
+    Coverage(tau) = fraction kept where confidence >= tau
+    Accuracy(tau) = accuracy among kept predictions
+    """
+    y = _to_numpy_1d(y_true, np.int64)
+    if not np.all(np.isin(y, [0, 1])):
+        raise ValueError("y_true must be binary (0/1)")
+
+    probs = _ensure_probs(probs_or_logits)
+    if len(y) != len(probs):
+        raise ValueError("y_true and probs_or_logits must have same length")
+
+    conf = _confidence_from_probs(probs, confidence_mode)
+    pred = _predictions_from_probs(probs)
+    correct = (pred == y).astype(np.int64)
+
+    if isinstance(thresholds, str):
+        if thresholds != "unique":
+            raise ValueError("thresholds must be 'unique' or array-like")
+        unique = np.unique(conf)
+        tau_values = np.concatenate(([1.0 + 1e-12], unique[::-1]))
+    else:
+        tau_values = _to_numpy_1d(thresholds, np.float64)
+
+    coverage_list: List[float] = []
+    accuracy_list: List[float] = []
+    threshold_list: List[float] = []
+
+    for tau in tau_values:
+        keep = conf >= tau
+        coverage = float(np.mean(keep))
+        if np.any(keep):
+            accuracy = float(np.mean(correct[keep]))
+        else:
+            accuracy = 1.0
+        threshold_list.append(float(tau))
+        coverage_list.append(coverage)
+        accuracy_list.append(accuracy)
+
+    order = np.argsort(np.asarray(coverage_list))
+    coverage_sorted = np.asarray(coverage_list)[order]
+    accuracy_sorted = np.asarray(accuracy_list)[order]
+    threshold_sorted = np.asarray(threshold_list)[order]
+
+    return {
+        "thresholds": threshold_sorted.tolist(),
+        "coverage": coverage_sorted.tolist(),
+        "accuracy": accuracy_sorted.tolist(),
+    }
+
+
+def compute_auc_ac(coverage: ArrayLike, accuracy: ArrayLike) -> float:
+    """Compute AUC-AC as trapezoidal integral of accuracy over coverage in [0,1]."""
+    cov = _to_numpy_1d(coverage, np.float64)
+    acc = _to_numpy_1d(accuracy, np.float64)
+    if len(cov) != len(acc):
+        raise ValueError("coverage and accuracy must have same length")
+
+    order = np.argsort(cov)
+    cov = cov[order]
+    acc = acc[order]
+
+    cov = np.clip(cov, 0.0, 1.0)
+    acc = np.clip(acc, 0.0, 1.0)
+
+    return float(np.trapezoid(acc, cov))
+
+
+@dataclass
 class MetricsComputer:
-    """Unified metrics computation with single definitions."""
-    
-    # CRITICAL: These definitions are authoritative and used everywhere
-    ECE_N_BINS = 10
-    ECE_BINNING_SCHEME = "equal_width"  # Equal-width (not equal-frequency)
-    ECE_CONFIDENCE_DEF = "predicted_class"  # max(p, 1-p) for binary classification
-    
-    def __init__(self, n_bins: int = 10):
-        """
-        Initialize metrics computer.
-        
-        Args:
-            n_bins: Number of bins for ECE (default 10 per Guo et al.)
-        """
-        self.n_bins = n_bins
-        logger.info(f"MetricsComputer initialized: {n_bins} equal-width bins, "
-                   f"confidence_def={self.ECE_CONFIDENCE_DEF}")
-    
-    @staticmethod
-    def compute_confidence(probabilities: np.ndarray) -> np.ndarray:
-        """
-        Compute confidence = max(p, 1-p) for binary classification.
-        
-        This is the probability of the predicted class.
-        
-        Args:
-            probabilities: Array of shape (n,) with p(SUPPORTED in [0,1])
-        
-        Returns:
-            Confidence array of shape (n,) with max(p, 1-p)
-        """
-        return np.maximum(probabilities, 1.0 - probabilities)
-    
-    def compute_ece(
-        self,
-        probabilities: np.ndarray,
-        labels: np.ndarray,
-        return_bins: bool = False
-    ) -> Dict:
-        """
-        Compute Expected Calibration Error (ECE).
-        
-        DEFINITION:
-        ECE = sum_k (n_k / N) * |accuracy_k - confidence_k|
-        
-        where:
-        - k indexes bins of equal width [0, 0.1], [0.1, 0.2], ..., [0.9, 1.0]
-        - confidence_k = max(p, 1-p) for predicted class
-        - accuracy_k = fraction of correct predictions in bin k
-        - n_k = count of examples in bin k
-        - N = total samples
-        
-        Args:
-            probabilities: Shape (n,), probability of SUPPORTED class
-            labels: Shape (n,), 1=SUPPORTED, 0=REFUTED
-            return_bins: If True, return per-bin statistics
-        
-        Returns:
-            Dict with 'ece' and optional bin statistics
-        """
-        probabilities = np.asarray(probabilities, dtype=np.float64)
-        labels = np.asarray(labels, dtype=np.int64)
-        
-        assert len(probabilities) == len(labels)
-        assert np.all((probabilities >= 0.0) & (probabilities <= 1.0))
-        assert np.all((labels == 0) | (labels == 1))
-        
-        # Compute confidence (max prob)
-        confidence = self.compute_confidence(probabilities)
-        
-        # Compute predicted labels (threshold 0.5)
-        predictions = (probabilities >= 0.5).astype(np.int64)
-        
-        # Compute correctness
-        correctness = (predictions == labels).astype(np.int64)
-        
-        # Create equal-width bins: [0, 0.1), [0.1, 0.2), ..., [0.9, 1.0]
-        bin_edges = np.linspace(0.0, 1.0, self.n_bins + 1)
-        
-        ece = 0.0
-        bin_stats = []
-        n_total = len(probabilities)
-        
-        for i in range(self.n_bins):
-            bin_lower = bin_edges[i]
-            bin_upper = bin_edges[i + 1]
-            
-            # Bin membership (include upper edge only for last bin)
-            if i == self.n_bins - 1:
-                in_bin = (confidence >= bin_lower) & (confidence <= bin_upper)
-            else:
-                in_bin = (confidence >= bin_lower) & (confidence < bin_upper)
-            
-            n_k = np.sum(in_bin)
-            
-            if n_k > 0:
-                acc_k = np.mean(correctness[in_bin])
-                conf_k = np.mean(confidence[in_bin])
-                ece += (n_k / n_total) * np.abs(acc_k - conf_k)
-                
-                bin_stats.append({
-                    'bin_id': i,
-                    'bin_lower': float(bin_lower),
-                    'bin_upper': float(bin_upper),
-                    'count': int(n_k),
-                    'accuracy': float(acc_k),
-                    'confidence': float(conf_k),
-                    'abs_difference': float(np.abs(acc_k - conf_k))
-                })
-        
-        result = {'ece': float(ece)}
-        if return_bins:
-            result['bins'] = bin_stats
-        
-        return result
-    
+    """Compatibility wrapper exposing prior class-based API."""
+
+    n_bins: int = 10
+
+    def compute_ece(self, probabilities: ArrayLike, labels: ArrayLike, return_bins: bool = False) -> Dict[str, object]:
+        result = compute_ece(
+            y_true=labels,
+            probs_or_logits=probabilities,
+            n_bins=self.n_bins,
+            scheme="equal_width",
+            confidence_mode="predicted_class",
+        )
+        if not return_bins:
+            return {"ece": result["ece"]}
+        return {"ece": result["ece"], "bins": result["bins"]}
+
     def compute_accuracy_coverage_curve(
         self,
-        confidences: np.ndarray,
-        correctness: np.ndarray,
-        thresholds: Optional[np.ndarray] = None
-    ) -> Dict:
-        """
-        Compute accuracy-coverage curve by varying abstention threshold τ.
-        
-        DEFINITION:
-        For each threshold τ:
-        - coverage(τ) = fraction of examples with confidence ≥ τ
-        - selective_accuracy(τ) = accuracy among predictions with confidence ≥ τ
-        
-        Args:
-            confidences: Shape (n,), confidence scores in [0, 1]
-            correctness: Shape (n,), 1=correct, 0=incorrect
-            thresholds: If None, use linspace(0.5, 1.0, 51)
-        
-        Returns:
-            Dict with 'thresholds', 'coverage', 'accuracy' arrays
-        """
-        confidences = np.asarray(confidences, dtype=np.float64)
-        correctness = np.asarray(correctness, dtype=np.int64)
-        
-        assert len(confidences) == len(correctness)
-        assert np.all((confidences >= 0.0) & (confidences <= 1.0))
-        
-        if thresholds is None:
-            thresholds = np.linspace(0.5, 1.0, 51)
-        
-        thresholds = np.asarray(thresholds, dtype=np.float64)
-        
-        coverage_list = []
-        accuracy_list = []
-        
-        for tau in thresholds:
-            # Predictions with confidence >= tau
-            keep_mask = confidences >= tau
-            coverage = np.mean(keep_mask)  # Fraction kept
-            
-            if coverage > 0:
-                accuracy = np.mean(correctness[keep_mask])
-            else:
-                accuracy = 1.0  # No predictions made, no errors
-            
-            coverage_list.append(float(coverage))
-            accuracy_list.append(float(accuracy))
-        
+        confidences: ArrayLike,
+        correctness: ArrayLike,
+        thresholds: Optional[ArrayLike] = None,
+    ) -> Dict[str, List[float]]:
+        conf = _to_numpy_1d(confidences, np.float64)
+        corr = _to_numpy_1d(correctness, np.int64)
+        if len(conf) != len(corr):
+            raise ValueError("confidences and correctness must have same length")
+
+        tau_values = np.unique(conf)[::-1] if thresholds is None else _to_numpy_1d(thresholds, np.float64)
+        cov_list: List[float] = []
+        acc_list: List[float] = []
+        thr_list: List[float] = []
+        for tau in tau_values:
+            keep = conf >= tau
+            cov = float(np.mean(keep))
+            acc = float(np.mean(corr[keep])) if np.any(keep) else 1.0
+            thr_list.append(float(tau))
+            cov_list.append(cov)
+            acc_list.append(acc)
+
+        order = np.argsort(np.asarray(cov_list))
         return {
-            'thresholds': thresholds.tolist(),
-            'coverage': coverage_list,
-            'accuracy': accuracy_list
+            "thresholds": np.asarray(thr_list)[order].tolist(),
+            "coverage": np.asarray(cov_list)[order].tolist(),
+            "accuracy": np.asarray(acc_list)[order].tolist(),
         }
-    
-    def compute_auc_ac(
-        self,
-        coverage: np.ndarray,
-        accuracy: np.ndarray,
-        normalize: bool = True
-    ) -> float:
-        """
-        Compute Area Under Accuracy-Coverage Curve.
-        
-        DEFINITION:
-        AUC-AC = integral of accuracy(coverage) from coverage=0 to coverage=1
-                via trapezoidal integration
-        
-        Normalized: AUC-AC in [0, 1] where 0.5 = random, 1.0 = perfect
-        
-        Args:
-            coverage: Shape (n,), coverage fraction in [0, 1]
-            accuracy: Shape (n,), selective accuracy in [0, 1]
-            normalize: If True, normalize to [0, 1] range
-        
-        Returns:
-            AUC-AC value
-        """
-        coverage = np.asarray(coverage, dtype=np.float64)
-        accuracy = np.asarray(accuracy, dtype=np.float64)
-        
-        assert len(coverage) == len(accuracy)
-        
-        # Sort by coverage for integration
-        sort_idx = np.argsort(coverage)
-        coverage_sorted = coverage[sort_idx]
-        accuracy_sorted = accuracy[sort_idx]
-        
-        # Trapezoidal integration
-        auc = float(np.trapz(accuracy_sorted, coverage_sorted))
-        
-        if normalize:
-            # Normalize to [0, 1]: random selective prediction has AUC-AC ≈ 0.5
-            # (since random coverage × random accuracy ≈ 0.5)
-            # Perfect has 1.0, worst has 0.0
-            auc = auc  # Already in [0, 1] when coverage sorted from 0 to 1
-        
-        return auc
-    
+
+    def compute_auc_ac(self, coverage: ArrayLike, accuracy: ArrayLike, normalize: bool = True) -> float:
+        return compute_auc_ac(coverage, accuracy)
+
     def compute_all_metrics(
         self,
-        probabilities: np.ndarray,
-        labels: np.ndarray,
-        thresholds: Optional[np.ndarray] = None
-    ) -> Dict:
-        """
-        Compute all metrics at once.
-        
-        Args:
-            probabilities: Shape (n,), p(SUPPORTED)
-            labels: Shape (n,), 1=SUPPORTED, 0=REFUTED
-            thresholds: Optional thresholds for accuracy-coverage curve
-        
-        Returns:
-            Dict with ece, auc_ac, and per-bin statistics
-        """
-        # Compute ECE
-        ece_result = self.compute_ece(probabilities, labels, return_bins=True)
-        ece = ece_result['ece']
-        
-        # Compute confidence and correctness
-        confidence = self.compute_confidence(probabilities)
-        predictions = (probabilities >= 0.5).astype(np.int64)
-        correctness = (predictions == labels).astype(np.int64)
-        
-        # Compute accuracy-coverage curve
-        curve_result = self.compute_accuracy_coverage_curve(
-            confidence, correctness, thresholds
+        probabilities: ArrayLike,
+        labels: ArrayLike,
+        thresholds: Optional[ArrayLike] = None,
+    ) -> Dict[str, object]:
+        y = _to_numpy_1d(labels, np.int64)
+        probs = _ensure_probs(probabilities)
+
+        ece_result = compute_ece(
+            y_true=y,
+            probs_or_logits=probs,
+            n_bins=self.n_bins,
+            scheme="equal_width",
+            confidence_mode="predicted_class",
         )
-        
-        # Compute AUC-AC
-        auc_ac = self.compute_auc_ac(
-            np.array(curve_result['coverage']),
-            np.array(curve_result['accuracy'])
+        curve = compute_accuracy_coverage_curve(
+            y_true=y,
+            probs_or_logits=probs,
+            confidence_mode="predicted_class",
+            thresholds="unique" if thresholds is None else thresholds,
         )
-        
-        # Compute base accuracy
-        accuracy = np.mean(correctness)
-        
-        # Compute macro-F1 (binary case)
-        from sklearn.metrics import f1_score
-        macro_f1 = f1_score(labels, predictions, average='binary')
-        
+
+        pred = _predictions_from_probs(probs)
+        correct = (pred == y).astype(np.int64)
+
         return {
-            'accuracy': float(accuracy),
-            'ece': float(ece),
-            'auc_ac': float(auc_ac),
-            'macro_f1': float(macro_f1),
-            'ece_bins': ece_result['bins'],
-            'accuracy_coverage_curve': {
-                'thresholds': curve_result['thresholds'],
-                'coverage': curve_result['coverage'],
-                'accuracy': curve_result['accuracy']
+            "accuracy": float(np.mean(correct)),
+            "ece": float(ece_result["ece"]),
+            "auc_ac": float(compute_auc_ac(curve["coverage"], curve["accuracy"])),
+            "macro_f1": _macro_f1_binary(y, pred),
+            "ece_bins": ece_result["bins"],
+            "accuracy_coverage_curve": curve,
+            "metadata": {
+                "n_samples": int(len(y)),
+                "ece_n_bins": int(self.n_bins),
+                "ece_binning": "equal_width",
+                "confidence_definition": "predicted_class",
             },
-            'metadata': {
-                'n_samples': len(probabilities),
-                'ece_n_bins': self.n_bins,
-                'ece_binning': self.ECE_BINNING_SCHEME,
-                'confidence_definition': self.ECE_CONFIDENCE_DEF
-            }
         }
 
 
 def create_metrics_computer(n_bins: int = 10) -> MetricsComputer:
-    """Factory function to create metrics computer."""
     return MetricsComputer(n_bins=n_bins)

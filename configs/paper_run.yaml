@@ -1,0 +1,26 @@
+# Official paper run configuration (single source of truth)
+# This configuration defines the authoritative run for the research paper.
+#
+# SEED POLICY:
+# - Official paper-run seed: 42 (pre-declared below)
+# - Multi-seed robustness check: [0, 1, 2, 3, 4]
+# - Justification: seed=42 is pre-registered in this config as the official run.
+#   Table II reports seed=42 results. Table III shows multi-seed mean±std across [0,1,2,3,4]
+#   to demonstrate robustness and that seed=42 is not cherry-picked relative to this distribution.
+
+split_name: CSClaimBench_test
+model_name: CalibraTeach
+seed: 42  # Official paper-run seed (pre-declared)
+
+# Prediction artifacts
+predictions_file: artifacts/preds/CalibraTeach.npz
+preds_dir: artifacts/preds
+
+# Output paths
+metrics_file: artifacts/metrics_summary.json
+output_dir: artifacts
+figures_dir: submission_bundle/figures
+tex_template: submission_bundle/OVERLEAF_TEMPLATE.tex
+
+# Multi-seed seeds for robustness evaluation
+multiseed_seeds: [0, 1, 2, 3, 4]

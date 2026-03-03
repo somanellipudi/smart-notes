@@ -26,11 +26,11 @@ authors:
     
   - name: "Soma Kiran Kumar Nellipudi"
     ieee_membership: "Senior IEEE Member"
-    current_affiliation: "Senior Software Engineer, Incomm Payments"
+    current_affiliation: "Senior Technology Leader, Incomm Payments"
     research_affiliation: "Computer Science Education Technology Lab, Kennesaw State University"
     email: "snellipudi@kennesaw.edu"
     role: "Co-First Author"
-    contribution: "ML optimization, latency engineering, reproducibility, infrastructure"
+    contribution: "ML optimization, latency engineering, reproducibility, infrastructure, distributed transaction systems"
     contributed_equally: true
     
   - name: "Selena He"

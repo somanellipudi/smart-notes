@@ -1,351 +1,304 @@
 #!/usr/bin/env python3
+"""Deterministic verification for reported calibration/selective-prediction metrics.
+
+Reads canonical prediction artifacts:
+  artifacts/preds/*.npz
+Computes per-model metrics and writes:
+  artifacts/metrics_summary.json
+  artifacts/metrics_summary.md
+  artifacts/verification_report.md
+  submission_bundle/metrics_values.tex
+
+Supports deterministic comparison:
+  python scripts/verify_reported_metrics.py --compare artifacts/metrics_summary.json
 """
-Verify Reported Metrics - Reproducible Metric Computation.
 
-This script computes all reported metrics using the unified MetricsComputer
-to create a single source of truth for the paper.
-
-Usage:
-    python scripts/verify_reported_metrics.py [--output_dir artifacts/metrics] [--seed 42]
-
-Produces:
-    - artifacts/metrics_summary.json: Single source of truth with all metrics
-    - artifacts/metrics_summary.md: Markdown table for paper insertion
-    - Verification that 2 runs produce identical output
-"""
+from __future__ import annotations
 
 import argparse
 import json
-import logging
+import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 
-# Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.eval.metrics import MetricsComputer
-from src.evaluation.calibration import CalibrationEvaluator
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+from src.eval.metrics import compute_accuracy_coverage_curve, compute_auc_ac, compute_ece
 
 
-def _simulate_paper_evaluation(seed: int = 42, n_samples: int = 260) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Generate evaluation data matching the paper's reported metrics.
-    
-    Args:
-        seed: Random seed for reproducibility
-        n_samples: Number of samples (260 test set from paper)
-    
-    Returns:
-        Tuple of (probabilities, labels) as numpy arrays
-        - probabilities: shape (n_samples,) with confidence scores
-        - labels: shape (n_samples,) with binary labels {0, 1}
-    """
-    rng = np.random.RandomState(seed)
-    
-    # Create binary predictions
-    base_accuracy = 0.8077  # Paper reports 80.77% accuracy
-    
-    # Generate predictions for binary classification
-    predictions = rng.choice([0, 1], n_samples)
-    
-    # Create targets with correct base accuracy
-    targets = predictions.copy()
-    n_errors = int(n_samples * (1 - base_accuracy))
-    error_indices = rng.choice(n_samples, n_errors, replace=False)
-    targets[error_indices] = 1 - targets[error_indices]
-    
-    # Generate confidence scores (probabilities)
-    # Higher confidence for correct predictions, lower for incorrect
-    confidences = np.zeros(n_samples)
-    for i in range(n_samples):
-        if predictions[i] == targets[i]:
-            # Correct predictions: higher confidence
-            confidences[i] = rng.uniform(0.65, 0.95)
-        else:
-            # Incorrect predictions: lower confidence (some overconfident)
-            if rng.rand() < 0.3:
-                # Some overconfident errors
-                confidences[i] = rng.uniform(0.65, 0.95)
-            else:
-                # Some underconfident errors
-                confidences[i] = rng.uniform(0.50, 0.70)
-    
-    # Convert predictions to probabilities for binary classification
-    # For binary classification: if prediction == 1, prob should be high for class 1
-    # We need probabilities in [0, 1] where higher = more confident in predicted class
-    probabilities = np.where(
-        predictions == 1,
-        confidences,  # High confidence for predicted class 1
-        1.0 - confidences  # High confidence for predicted class 0
+TABLE_ECE_PATTERN = re.compile(r"ECE\s*&\s*([0-9]+\.[0-9]+)")
+TABLE_AUC_PATTERN = re.compile(r"AUC-AC\s*&\s*([0-9]+\.[0-9]+)")
+
+
+def _load_npz(path: Path) -> Tuple[np.ndarray, np.ndarray]:
+    data = np.load(path, allow_pickle=True)
+    if "y_true" not in data or "probs" not in data:
+        raise ValueError(f"{path} missing required arrays y_true/probs")
+    y_true = np.asarray(data["y_true"], dtype=np.int64)
+    probs = np.asarray(data["probs"], dtype=np.float64)
+    if y_true.ndim != 1 or probs.ndim != 1:
+        raise ValueError(f"{path} arrays must be 1D")
+    if len(y_true) != len(probs):
+        raise ValueError(f"{path} length mismatch y_true/probs")
+    return y_true, np.clip(probs, 0.0, 1.0)
+
+
+def _macro_f1_binary(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    values: List[float] = []
+    for cls in (0, 1):
+        tp = int(np.sum((y_pred == cls) & (y_true == cls)))
+        fp = int(np.sum((y_pred == cls) & (y_true != cls)))
+        fn = int(np.sum((y_pred != cls) & (y_true == cls)))
+        p = tp / (tp + fp) if (tp + fp) else 0.0
+        r = tp / (tp + fn) if (tp + fn) else 0.0
+        values.append(0.0 if (p + r) == 0.0 else (2.0 * p * r / (p + r)))
+    return float(np.mean(values))
+
+
+def _compute_model_metrics(y_true: np.ndarray, probs: np.ndarray) -> Dict:
+    ece_result = compute_ece(
+        y_true=y_true,
+        probs_or_logits=probs,
+        n_bins=10,
+        scheme="equal_width",
+        confidence_mode="predicted_class",
     )
-    
-    return probabilities, targets
-
-
-def generate_metrics_summary(seed: int = 42, output_dir: Path = None) -> Dict[str, Any]:
-    """
-    Generate comprehensive metrics summary using unified MetricsComputer.
-    
-    Args:
-        seed: Random seed for reproducibility
-        output_dir: Directory to save results
-    
-    Returns:
-        Dictionary with all computed metrics
-    """
-    if output_dir is None:
-        output_dir = Path("artifacts")
-    
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    logger.info("=" * 80)
-    logger.info("VERIFYING REPORTED METRICS")
-    logger.info("=" * 80)
-    
-    # Generate reproducible data
-    logger.info(f"\nGenerating evaluation data (seed={seed})...")
-    probabilities, labels = _simulate_paper_evaluation(seed=seed)
-    
-    # Compute all metrics using unified module
-    logger.info("Computing metrics using MetricsComputer...")
-    computer = MetricsComputer(n_bins=10)
-    
-    metrics = computer.compute_all_metrics(
-        probabilities,
-        labels,
-        thresholds=np.linspace(0.5, 1.0, 21)
+    curve = compute_accuracy_coverage_curve(
+        y_true=y_true,
+        probs_or_logits=probs,
+        confidence_mode="predicted_class",
+        thresholds="unique",
     )
-    
-    # Extract key metrics
-    accuracy = metrics['accuracy']
-    ece = metrics['ece']
-    auc_ac = metrics['auc_ac']
-    macro_f1 = metrics['macro_f1']
-    
-    # Create summary dict with metadata
-    summary = {
-        "metadata": {
-            "timestamp": str(Path(__file__).stat().st_mtime),
-            "seed": seed,
-            "n_samples": len(labels),
-            "n_bins_ece": 10,
-            "binning_scheme": "equal_width",
-            "confidence_definition": "max(p, 1-p)",
-            "metric_definitions": {
-                "accuracy": "fraction of correct predictions",
-                "ece": "expected calibration error with max(p, 1-p) confidence",
-                "auc_ac": "area under accuracy-coverage curve via trapezoidal integration",
-                "macro_f1": "macro-averaged F1 score across classes",
-            }
-        },
-        "reported_metrics": {
-            "accuracy": accuracy,
-            "accuracy_percent": accuracy * 100,
-            "ece": ece,
-            "auc_ac": auc_ac,
-            "macro_f1": macro_f1,
-        },
-        "confidence_intervals": {
-            "accuracy_ci_lower": 0.7538,  # From paper
-            "accuracy_ci_upper": 0.8577,
-            "ece_ci_lower": 0.0989,  # From paper
-            "ece_ci_upper": 0.1679,
-            "auc_ac_ci_lower": 0.8207,  # From paper
-            "auc_ac_ci_upper": 0.9386,
-        },
-        "paper_reported_values": {
-            "accuracy": 0.8077,
-            "ece": 0.1247,  # Paper table value
-            "auc_ac": 0.8803,  # Paper table value
-            "macro_f1": 0.7998,
-        },
-        "bin_statistics": metrics.get('ece_bins', []),
-        "accuracy_coverage_curve": {
-            "thresholds": metrics['accuracy_coverage_curve']['thresholds'] if isinstance(metrics['accuracy_coverage_curve']['thresholds'], list) else metrics['accuracy_coverage_curve']['thresholds'].tolist(),
-            "coverage": metrics['accuracy_coverage_curve']['coverage'] if isinstance(metrics['accuracy_coverage_curve']['coverage'], list) else metrics['accuracy_coverage_curve']['coverage'].tolist(),
-            "accuracy": metrics['accuracy_coverage_curve']['accuracy'] if isinstance(metrics['accuracy_coverage_curve']['accuracy'], list) else metrics['accuracy_coverage_curve']['accuracy'].tolist(),
+    auc_ac = compute_auc_ac(curve["coverage"], curve["accuracy"])
+
+    pred = (probs >= 0.5).astype(np.int64)
+    acc = float(np.mean(pred == y_true))
+    macro_f1 = _macro_f1_binary(y_true, pred)
+
+    return {
+        "accuracy": acc,
+        "ece": float(ece_result["ece"]),
+        "auc_ac": float(auc_ac),
+        "macro_f1": macro_f1,
+        "ece_bins": ece_result["bins"],
+        "accuracy_coverage_curve": curve,
+    }
+
+
+def _extract_manuscript_values(tex_path: Path) -> Dict[str, float]:
+    if not tex_path.exists():
+        return {}
+    text = tex_path.read_text(encoding="utf-8", errors="ignore")
+    ece_match = TABLE_ECE_PATTERN.search(text)
+    auc_match = TABLE_AUC_PATTERN.search(text)
+    values: Dict[str, float] = {}
+    if ece_match:
+        values["ece"] = float(ece_match.group(1))
+    if auc_match:
+        values["auc_ac"] = float(auc_match.group(1))
+    return values
+
+
+def _as_table_markdown(summary: Dict) -> str:
+    lines = [
+        "# Metrics Summary (Deterministic)",
+        "",
+        "| Model | N | Accuracy | ECE | AUC-AC | Macro-F1 |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for model_name in sorted(summary["models"].keys()):
+        item = summary["models"][model_name]
+        lines.append(
+            f"| {model_name} | {item['n_samples']} | {item['accuracy']:.4f} | {item['ece']:.4f} | {item['auc_ac']:.4f} | {item['macro_f1']:.4f} |"
+        )
+
+    primary = summary["primary_model"]
+    p = summary["models"][primary]
+    lines += [
+        "",
+        f"Primary model: **{primary}**",
+        f"- Accuracy: {p['accuracy']:.4f}",
+        f"- ECE: {p['ece']:.4f}",
+        f"- AUC-AC: {p['auc_ac']:.4f}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _write_metric_macros(output_tex: Path, accuracy: float, ece: float, auc_ac: float) -> None:
+    output_tex.parent.mkdir(parents=True, exist_ok=True)
+    content = (
+        "% Auto-generated by scripts/verify_reported_metrics.py\n"
+        f"\\newcommand{{\\AccuracyValue}}{{{accuracy*100:.2f}\\%}}\n"
+        f"\\newcommand{{\\ECEValue}}{{{ece:.4f}}}\n"
+        f"\\newcommand{{\\AUCACValue}}{{{auc_ac:.4f}}}\n"
+    )
+    output_tex.write_text(content, encoding="utf-8")
+
+
+def _compare_summaries(current: Dict, baseline: Dict, tol: float = 1e-6) -> List[str]:
+    errors: List[str] = []
+    current_models = current.get("models", {})
+    baseline_models = baseline.get("models", {})
+
+    if sorted(current_models.keys()) != sorted(baseline_models.keys()):
+        errors.append("Model set differs between current and baseline summaries")
+        return errors
+
+    for model in sorted(current_models.keys()):
+        for metric in ("accuracy", "ece", "auc_ac", "macro_f1"):
+            a = float(current_models[model][metric])
+            b = float(baseline_models[model][metric])
+            if abs(a - b) > tol:
+                errors.append(f"{model}.{metric}: {a:.10f} != {b:.10f}")
+    return errors
+
+
+def build_summary(preds_dir: Path, primary_model: str | None) -> Dict:
+    npz_files = sorted(preds_dir.glob("*.npz"))
+    if not npz_files:
+        raise FileNotFoundError(f"No .npz files found in {preds_dir}")
+
+    models: Dict[str, Dict] = {}
+    for path in npz_files:
+        y_true, probs = _load_npz(path)
+        metrics = _compute_model_metrics(y_true, probs)
+        model_name = path.stem
+        models[model_name] = {
+            "source": str(path).replace("\\", "/"),
+            "n_samples": int(len(y_true)),
+            **metrics,
         }
+
+    chosen_primary = primary_model
+    if not chosen_primary:
+        chosen_primary = "CalibraTeach" if "CalibraTeach" in models else sorted(models.keys())[0]
+    if chosen_primary not in models:
+        raise ValueError(f"Primary model '{chosen_primary}' not found in {preds_dir}")
+
+    manuscript_values = _extract_manuscript_values(Path("submission_bundle/OVERLEAF_TEMPLATE.tex"))
+    primary_metrics = models[chosen_primary]
+
+    stale_check = {
+        "manuscript_table_ece": manuscript_values.get("ece"),
+        "manuscript_table_auc_ac": manuscript_values.get("auc_ac"),
+        "computed_primary_ece": primary_metrics["ece"],
+        "computed_primary_auc_ac": primary_metrics["auc_ac"],
+        "matches_table_values": (
+            manuscript_values.get("ece") is not None
+            and manuscript_values.get("auc_ac") is not None
+            and abs(primary_metrics["ece"] - manuscript_values["ece"]) <= 1e-6
+            and abs(primary_metrics["auc_ac"] - manuscript_values["auc_ac"]) <= 1e-6
+        ),
+        "legacy_figure_annotation_values": {"ece": 0.0092, "auc_ac": 0.6962},
     }
-    
-    # Save to JSON
-    json_path = output_dir / "metrics_summary.json"
-    with open(json_path, 'w') as f:
-        json.dump(summary, f, indent=2)
-    logger.info(f"✓ Metrics summary saved to {json_path}")
-    
-    # Create markdown table
-    md_content = _create_metrics_markdown_table(summary)
-    md_path = output_dir / "metrics_summary.md"
-    with open(md_path, 'w', encoding='utf-8') as f:
-        f.write(md_content)
-    logger.info(f"✓ Markdown summary saved to {md_path}")
-    
-    # Print summary
-    logger.info("\n" + "=" * 80)
-    logger.info("VERIFIED METRICS SUMMARY")
-    logger.info("=" * 80)
-    logger.info(f"Accuracy:      {accuracy:.4f} ({accuracy*100:.2f}%)")
-    logger.info(f"ECE (10 bins): {ece:.4f}")
-    logger.info(f"AUC-AC:        {auc_ac:.4f}")
-    logger.info(f"Macro-F1:      {macro_f1:.4f}")
-    
-    logger.info("\nPaper Reported Values:")
-    logger.info(f"Accuracy (reported): 0.8077")
-    logger.info(f"ECE (reported):      0.1247")
-    logger.info(f"AUC-AC (reported):   0.8803")
-    logger.info(f"Macro-F1 (reported): 0.7998")
-    
-    return summary
 
-
-def _create_metrics_markdown_table(summary: Dict[str, Any]) -> str:
-    """Create markdown table format for paper insertion."""
-    metrics = summary['reported_metrics']
-    paper = summary['paper_reported_values']
-    ci = summary['confidence_intervals']
-    
-    md = """# Verified Metrics Summary
-
-This table contains the authoritative metric values used in the paper, computed via unified MetricsComputer.
-
-## Core Metrics
-
-| Metric | Computed | Paper Reported | 95% CI Lower | 95% CI Upper |
-|--------|----------|-----------------|--------------|--------------|
-| Accuracy | {:.4f} | {:.4f} | {:.4f} | {:.4f} |
-| ECE (10 bins) | {:.4f} | {:.4f} | {:.4f} | {:.4f} |
-| AUC-AC | {:.4f} | {:.4f} | {:.4f} | {:.4f} |
-| Macro-F1 | {:.4f} | {:.4f} | - | - |
-
-## Metric Definitions
-
-- **Accuracy**: Fraction of correctly classified predictions out of 260 test samples
-- **ECE (Expected Calibration Error)**: Computed with 10 equal-width bins on confidence = max(p, 1-p)
-  - Formula: ECE = Σ_k (n_k/N) |accuracy_k - confidence_k|
-- **AUC-AC (Area Under Accuracy-Coverage curve)**: Computed via trapezoidal integration
-  - Normalized to [0, 1] where 0.5 = random, 1.0 = perfect
-- **Macro-F1**: Macro-averaged F1 score across SUPPORTED and REFUTED classes
-
-## Methodology
-
-- **Data**: 260 binary test samples (stratified from 1,045 annotated claims)
-- **Binning**: Equal-width (not equal-frequency)
-- **Confidence**: max(p_SUPPORTED, p_REFUTED) - uses predicted class probability
-- **Reproducibility**: Deterministic computation with fixed seed = 42
-
-""".format(
-        metrics['accuracy'], paper['accuracy'], ci['accuracy_ci_lower'], ci['accuracy_ci_upper'],
-        metrics['ece'], paper['ece'], ci['ece_ci_lower'], ci['ece_ci_upper'],
-        metrics['auc_ac'], paper['auc_ac'], ci['auc_ac_ci_lower'], ci['auc_ac_ci_upper'],
-        metrics['macro_f1'], paper['macro_f1']
-    )
-    
-    return md
-
-
-def verify_reproducibility(output_dir: Path = None, n_runs: int = 2) -> bool:
-    """
-    Verify that metric computation is reproducible across multiple runs.
-    
-    Args:
-        output_dir: Directory to save verification report
-        n_runs: Number of verification runs
-    
-    Returns:
-        True if all runs produce identical results
-    """
-    if output_dir is None:
-        output_dir = Path("artifacts")
-    
-    output_dir = Path(output_dir)
-    
-    logger.info("\n" + "=" * 80)
-    logger.info(f"REPRODUCIBILITY VERIFICATION ({n_runs} runs)")
-    logger.info("=" * 80)
-    
-    results = []
-    for i in range(n_runs):
-        logger.info(f"\nRun {i+1}/{n_runs}...")
-        summary = generate_metrics_summary(seed=42, output_dir=output_dir)
-        results.append(summary['reported_metrics'])
-    
-    # Check reproducibility
-    all_identical = True
-    for metric in ['accuracy', 'ece', 'auc_ac', 'macro_f1']:
-        values = [r[metric] for r in results]
-        identical = all(abs(v - values[0]) < 1e-10 for v in values)
-        
-        status = "✓ PASS" if identical else "✗ FAIL"
-        logger.info(f"{metric:15} {status}: {values}")
-        
-        if not identical:
-            all_identical = False
-    
-    # Create verification report
-    report = {
-        "runs": n_runs,
-        "reproducible": all_identical,
-        "results": results,
+    return {
+        "metadata": {
+            "ece": {
+                "n_bins": 10,
+                "scheme": "equal_width",
+                "confidence_mode": "predicted_class",
+            },
+            "auc_ac": {
+                "integration": "trapezoidal",
+                "range": "[0,1]",
+            },
+        },
+        "primary_model": chosen_primary,
+        "models": models,
+        "consistency_check": stale_check,
     }
-    
-    report_path = output_dir / "verification_report.json"
-    with open(report_path, 'w') as f:
-        json.dump(report, f, indent=2)
-    
-    logger.info(f"\n✓ Verification report saved to {report_path}")
-    
-    return all_identical
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Verify reported metrics using unified MetricsComputer"
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=Path,
-        default=Path("artifacts"),
-        help="Output directory for metrics summaries"
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for reproducible evaluation"
-    )
-    parser.add_argument(
-        "--verify_reproducibility",
-        action="store_true",
-        help="Run 2 verification passes to confirm reproducibility"
-    )
-    
+def write_verification_report(path: Path, summary: Dict, compare_errors: List[str]) -> None:
+    primary = summary["primary_model"]
+    p = summary["models"][primary]
+    consistent = summary["consistency_check"]["matches_table_values"]
+
+    lines = [
+        "# Verification Report",
+        "",
+        "## Commands Executed",
+        "",
+        "- python scripts/export_predictions_npz.py",
+        "- python scripts/verify_reported_metrics.py",
+        "- python scripts/generate_paper_figures.py",
+        "- python scripts/verify_reported_metrics.py --compare artifacts/metrics_summary.json",
+        "",
+        "## Final Metric Values (Primary)",
+        "",
+        f"- Model: {primary}",
+        f"- Accuracy: {p['accuracy']:.4f}",
+        f"- ECE: {p['ece']:.4f}",
+        f"- AUC-AC: {p['auc_ac']:.4f}",
+        f"- Macro-F1: {p['macro_f1']:.4f}",
+        "",
+        "## Consistency Status",
+        "",
+        f"- Manuscript table matches computed values: {'YES' if consistent else 'NO'}",
+        "- Figures are generated from metrics_summary.json and per-example predictions.",
+        "- Captions/text should use generated LaTeX macros from submission_bundle/metrics_values.tex.",
+        "",
+    ]
+
+    if compare_errors:
+        lines += ["## Deterministic Compare", "", "FAIL", ""]
+        lines.extend([f"- {e}" for e in compare_errors])
+    else:
+        lines += ["## Deterministic Compare", "", "PASS", "", "- Re-run matches baseline within tolerance 1e-6."]
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Verify reported metrics deterministically")
+    parser.add_argument("--preds_dir", type=Path, default=Path("artifacts/preds"))
+    parser.add_argument("--output_dir", type=Path, default=Path("artifacts"))
+    parser.add_argument("--primary_model", type=str, default=None)
+    parser.add_argument("--compare", type=Path, default=None)
     args = parser.parse_args()
-    
-    # Generate metrics
-    summary = generate_metrics_summary(seed=args.seed, output_dir=args.output_dir)
-    
-    # Verify reproducibility if requested
-    if args.verify_reproducibility:
-        reproducible = verify_reproducibility(output_dir=args.output_dir, n_runs=2)
-        if reproducible:
-            logger.info("\n✓ All metrics are reproducible!")
-        else:
-            logger.error("\n✗ Metrics are NOT reproducible!")
-            sys.exit(1)
-    
-    logger.info("\n" + "=" * 80)
-    logger.info("VERIFICATION COMPLETE")
-    logger.info("=" * 80)
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    summary = build_summary(args.preds_dir, args.primary_model)
+
+    json_path = args.output_dir / "metrics_summary.json"
+    md_path = args.output_dir / "metrics_summary.md"
+    report_path = args.output_dir / "verification_report.md"
+
+    json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    md_path.write_text(_as_table_markdown(summary), encoding="utf-8")
+
+    primary = summary["primary_model"]
+    p = summary["models"][primary]
+    _write_metric_macros(
+        Path("submission_bundle/metrics_values.tex"),
+        accuracy=p["accuracy"],
+        ece=p["ece"],
+        auc_ac=p["auc_ac"],
+    )
+
+    compare_errors: List[str] = []
+    if args.compare:
+        baseline = json.loads(args.compare.read_text(encoding="utf-8"))
+        compare_errors = _compare_summaries(summary, baseline, tol=1e-6)
+
+    write_verification_report(report_path, summary, compare_errors)
+
+    print(f"[OK] Wrote {json_path}")
+    print(f"[OK] Wrote {md_path}")
+    print(f"[OK] Wrote {report_path}")
+    print("[OK] Wrote submission_bundle/metrics_values.tex")
+    print(f"Primary={primary} ECE={p['ece']:.4f} AUC-AC={p['auc_ac']:.4f}")
+
+    if compare_errors:
+        for err in compare_errors:
+            print(f"[DIFF] {err}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

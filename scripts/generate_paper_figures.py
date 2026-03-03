@@ -1,296 +1,204 @@
 #!/usr/bin/env python3
+"""Generate manuscript figures from computed metrics (single source of truth).
+
+This script reads metrics_summary.json and the official per-example predictions,
+recomputes ECE/AUC-AC via src.eval.metrics for safety, validates agreement, and
+renders Figure 2/3 annotations from the validated values.
 """
-Generate Paper Figures - Regenerate figures with verified metrics.
 
-This script regenerates the reliability diagram and accuracy-coverage curve
-figures using the verified metrics from metrics_summary.json to ensure
-consistency across all paper visualizations.
-
-Usage:
-    python scripts/generate_paper_figures.py [--metrics_file artifacts/metrics_summary.json]
-
-Produces:
-    - figures/reliability_diagram_verified.pdf
-    - figures/accuracy_coverage_verified.pdf
-    - With auto-filled annotations showing verified metric values
-"""
+from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict
 
-import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.patches import Rectangle
+import numpy as np
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+from src.eval.metrics import compute_accuracy_coverage_curve, compute_auc_ac, compute_ece
 
 
-def load_metrics_summary(metrics_file: Path) -> Dict[str, Any]:
-    """Load verified metrics from JSON."""
-    with open(metrics_file, 'r') as f:
-        return json.load(f)
+def _load_summary(path: Path) -> dict:
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
 
 
-def generate_reliability_diagram(
-    summary: Dict[str, Any],
-    output_path: Path,
-    dpi: int = 300,
-    figsize: tuple = (8, 6)
-):
-    """
-    Generate reliability diagram showing calibration analysis.
-    
-    Uses verified ECE value from metrics_summary.json
-    """
-    logger.info("Generating reliability diagram...")
-    
-    ece = summary['reported_metrics']['ece']
-    bin_stats = summary['bin_statistics']
-    
-    # Extract bin data
-    confidences = []
-    accuracies = []
-    bin_sizes = []
-    
-    for bin_info in bin_stats:
-        confidences.append(bin_info['confidence'])
-        accuracies.append(bin_info['accuracy'])
-        bin_sizes.append(bin_info['count'])
-    
-    confidences = np.array(confidences)
-    accuracies = np.array(accuracies)
-    bin_sizes = np.array(bin_sizes)
-    
-    # Create figure
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    
-    # Plot reliability diagram
-    # Diagonal line (perfect calibration)
-    ax.plot([0, 1], [0, 1], 'k--', linewidth=1.5, label='Perfect Calibration', alpha=0.5)
-    
-    # Plot bins
-    bin_width = 0.1  # 10 bins
-    for i, (conf, acc, size) in enumerate(zip(confidences, accuracies, bin_sizes)):
-        # Size of marker proportional to bin size
-        marker_size = max(50, (size / len(bin_sizes)) * 300)
-        ax.scatter(conf, acc, s=marker_size, alpha=0.7, edgecolors='black', linewidth=0.5)
-    
-    # Plot ECE as shaded area
-    ax.fill_between([0, 1], 0, 1, alpha=0.05, color='red', label=f'ECE = {ece:.4f}')
-    
-    # Formatting
-    ax.set_xlabel('Confidence (predicted probability)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
-    ax.set_title('Reliability Diagram - CalibraTeach System', fontsize=13, fontweight='bold')
-    ax.set_xlim([0, 1])
-    ax.set_ylim([0, 1])
-    ax.grid(True, alpha=0.3, linestyle='--')
-    
-    # Add ECE annotation
-    textstr = f'ECE (10 bins) = {ece:.4f}'
-    ax.text(0.98, 0.05, textstr, transform=ax.transAxes, fontsize=11,
-            verticalalignment='bottom', horizontalalignment='right',
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-    
-    ax.legend(loc='upper left', fontsize=10)
-    ax.set_aspect('equal')
-    
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
-    logger.info(f"✓ Reliability diagram saved to {output_path}")
-    plt.close()
+def _load_simple_yaml(path: Path) -> Dict[str, str]:
+    data: Dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        data[key.strip()] = value.strip().strip('"').strip("'")
+    return data
 
 
-def generate_accuracy_coverage_curve(
-    summary: Dict[str, Any],
-    output_path: Path,
-    dpi: int = 300,
-    figsize: tuple = (8, 6)
-):
-    """
-    Generate accuracy-coverage curve showing selective prediction performance.
-    
-    Uses verified AUC-AC value from metrics_summary.json
-    """
-    logger.info("Generating accuracy-coverage curve...")
-    
-    auc_ac = summary['reported_metrics']['auc_ac']
-    curve_data = summary['accuracy_coverage_curve']
-    
-    thresholds = np.array(curve_data['thresholds'])
-    coverage = np.array(curve_data['coverage'])
-    accuracy = np.array(curve_data['accuracy'])
-    
-    # Create figure
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    
-    # Plot ACC-AUC curve
-    ax.plot(coverage, accuracy, 'b-', linewidth=2.5, marker='o', markersize=6, label='CalibraTeach')
-    
-    # Plot random baseline (50% accuracy)
-    ax.axhline(y=0.5, color='gray', linestyle='--', linewidth=1.5, label='Random Baseline (50%)', alpha=0.7)
-    
-    # Fill area under curve
-    ax.fill_between(coverage, 0.5, accuracy, alpha=0.2, color='blue')
-    
-    # Formatting
-    ax.set_xlabel('Coverage (fraction of predictions)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Selective Accuracy', fontsize=12, fontweight='bold')
-    ax.set_title('Accuracy-Coverage Curve - Selective Prediction', fontsize=13, fontweight='bold')
-    ax.set_xlim([0, 1.05])
-    ax.set_ylim([0.4, 1.05])
-    ax.grid(True, alpha=0.3, linestyle='--')
-    
-    # Add AUC-AC annotation
-    textstr = f'AUC-AC = {auc_ac:.4f}'
-    ax.text(0.98, 0.05, textstr, transform=ax.transAxes, fontsize=11,
-            verticalalignment='bottom', horizontalalignment='right',
-            bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
-    
-    ax.legend(loc='lower left', fontsize=10)
-    
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
-    logger.info(f"✓ Accuracy-coverage curve saved to {output_path}")
-    plt.close()
+def _load_npz(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    data = np.load(path, allow_pickle=True)
+    y_true = np.asarray(data["y_true"], dtype=np.int64)
+    probs = np.asarray(data["probs"], dtype=np.float64)
+    if y_true.ndim != 1 or probs.ndim != 1 or len(y_true) != len(probs):
+        raise ValueError(f"Invalid prediction artifact: {path}")
+    return y_true, np.clip(probs, 0.0, 1.0)
 
 
-def create_metrics_comparison_table(
-    summary: Dict[str, Any],
-    output_path: Path
-):
-    """Create comparison table showing verified vs paper-reported metrics."""
-    logger.info("Creating metrics comparison table...")
-    
-    computed = summary['reported_metrics']
-    reported = summary['paper_reported_values']
-    ci = summary['confidence_intervals']
-    
-    table_data = {
-        'Metric': ['Accuracy', 'ECE (10 bins)', 'AUC-AC', 'Macro-F1'],
-        'Computed': [
-            f"{computed['accuracy']:.4f}",
-            f"{computed['ece']:.4f}",
-            f"{computed['auc_ac']:.4f}",
-            f"{computed['macro_f1']:.4f}",
-        ],
-        'Paper Reported': [
-            f"{reported['accuracy']:.4f}",
-            f"{reported['ece']:.4f}",
-            f"{reported['auc_ac']:.4f}",
-            f"{reported['macro_f1']:.4f}",
-        ],
-        'Difference': [
-            f"{abs(computed['accuracy'] - reported['accuracy']):.4f}",
-            f"{abs(computed['ece'] - reported['ece']):.4f}",
-            f"{abs(computed['auc_ac'] - reported['auc_ac']):.4f}",
-            f"{abs(computed['macro_f1'] - reported['macro_f1']):.4f}",
-        ],
-        '95% CI': [
-            f"[{ci['accuracy_ci_lower']:.4f}, {ci['accuracy_ci_upper']:.4f}]",
-            f"[{ci['ece_ci_lower']:.4f}, {ci['ece_ci_upper']:.4f}]",
-            f"[{ci['auc_ac_ci_lower']:.4f}, {ci['auc_ac_ci_upper']:.4f}]",
-            "—",
-        ]
+def _recompute_from_predictions(y_true: np.ndarray, probs: np.ndarray) -> dict:
+    ece_result = compute_ece(
+        y_true=y_true,
+        probs_or_logits=probs,
+        n_bins=10,
+        scheme="equal_width",
+        confidence_mode="predicted_class",
+    )
+    curve = compute_accuracy_coverage_curve(
+        y_true=y_true,
+        probs_or_logits=probs,
+        confidence_mode="predicted_class",
+        thresholds="unique",
+    )
+    auc_ac = compute_auc_ac(curve["coverage"], curve["accuracy"])
+    return {
+        "ece": float(ece_result["ece"]),
+        "ece_bins": ece_result["bins"],
+        "accuracy_coverage_curve": curve,
+        "auc_ac": float(auc_ac),
     }
-    
-    # Create markdown table
-    md_content = "# Metrics Comparison Table\n\n"
-    md_content += "Comparison of verified metrics (MetricsComputer) vs paper-reported values.\n\n"
-    md_content += "| " + " | ".join(table_data.keys()) + " |\n"
-    md_content +=  "|" + "|".join(["---" for _ in table_data.keys()]) + "|\n"
-    
-    for i in range(len(table_data['Metric'])):
-        row = " | ".join([table_data[k][i] for k in table_data.keys()])
-        md_content += f"| {row} |\n"
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(md_content)
-    
-    logger.info(f"✓ Metrics comparison table saved to {output_path}")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Generate paper figures with verified metrics"
+def _assert_summary_match(summary: dict, primary: str, recomputed: dict, tol: float = 1e-6) -> None:
+    model = summary["models"][primary]
+    diff_ece = abs(float(model["ece"]) - float(recomputed["ece"]))
+    diff_auc = abs(float(model["auc_ac"]) - float(recomputed["auc_ac"]))
+    if diff_ece > tol or diff_auc > tol:
+        raise SystemExit(
+            "Metric mismatch between metrics_summary.json and recomputation from predictions: "
+            f"ECE diff={diff_ece:.10f}, AUC-AC diff={diff_auc:.10f}. "
+            "Check split/run/configuration drift."
+        )
+
+
+def generate_reliability_diagram(primary: str, bins: list[dict], ece: float, output_path: Path) -> None:
+    xs = np.array([(b["bin_lower"] + b["bin_upper"]) / 2.0 for b in bins], dtype=np.float64)
+    ys = np.array([b["accuracy"] for b in bins], dtype=np.float64)
+    counts = np.array([b["count"] for b in bins], dtype=np.float64)
+
+    plt.figure(figsize=(7, 6), dpi=300)
+    plt.plot([0, 1], [0, 1], "k--", linewidth=1.2, alpha=0.7, label="Perfect calibration")
+
+    if np.max(counts) > 0:
+        size = 40 + 260 * (counts / np.max(counts))
+    else:
+        size = np.full_like(counts, 40)
+
+    plt.scatter(xs, ys, s=size, alpha=0.8, edgecolors="black", linewidth=0.6, label=primary)
+    plt.xlabel("Confidence")
+    plt.ylabel("Accuracy")
+    plt.xlim(0, 1)
+    plt.ylim(0, 1)
+    plt.grid(alpha=0.25, linestyle="--")
+    plt.title("Reliability Diagram")
+
+    plt.text(
+        0.98,
+        0.03,
+        f"ECE (10 bins) = {ece:.4f}",
+        transform=plt.gca().transAxes,
+        ha="right",
+        va="bottom",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
     )
-    parser.add_argument(
-        "--metrics_file",
-        type=Path,
-        default=Path("artifacts/metrics_summary.json"),
-        help="Path to verified metrics JSON file"
+    plt.legend(loc="upper left")
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+
+
+def generate_accuracy_coverage_curve(primary: str, curve: dict, auc_ac: float, output_path: Path) -> None:
+    coverage = np.asarray(curve["coverage"], dtype=np.float64)
+    accuracy = np.asarray(curve["accuracy"], dtype=np.float64)
+
+    order = np.argsort(coverage)
+    coverage = coverage[order]
+    accuracy = accuracy[order]
+
+    plt.figure(figsize=(7, 6), dpi=300)
+    plt.plot(coverage, accuracy, color="#1f77b4", linewidth=2.2, label=primary)
+    plt.fill_between(coverage, 0.0, accuracy, color="#1f77b4", alpha=0.18)
+    plt.xlabel("Coverage")
+    plt.ylabel("Selective Accuracy")
+    plt.xlim(0, 1)
+    plt.ylim(0, 1.05)
+    plt.grid(alpha=0.25, linestyle="--")
+    plt.title("Accuracy-Coverage Curve")
+
+    plt.text(
+        0.98,
+        0.03,
+        f"AUC-AC = {auc_ac:.4f}",
+        transform=plt.gca().transAxes,
+        ha="right",
+        va="bottom",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
     )
-    parser.add_argument(
-        "--output_dir",
-        type=Path,
-        default=Path("figures"),
-        help="Output directory for generated figures"
-    )
-    parser.add_argument(
-        "--dpi",
-        type=int,
-        default=300,
-        help="DPI for figure output"
-    )
-    
+    plt.legend(loc="lower left")
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate paper figures from unified metrics")
+    parser.add_argument("--config", type=Path, default=None, help="Path to configs/paper_run.yaml")
+    parser.add_argument("--metrics_file", type=Path, default=Path("artifacts/metrics_summary.json"))
+    parser.add_argument("--predictions_file", type=Path, default=None)
+    parser.add_argument("--output_dir", type=Path, default=Path("submission_bundle/figures"))
+    parser.add_argument("--primary_model", type=str, default=None)
     args = parser.parse_args()
-    
-    # Verify metrics file exists
-    if not args.metrics_file.exists():
-        logger.error(f"Metrics file not found: {args.metrics_file}")
-        logger.info("Run: python scripts/verify_reported_metrics.py first")
-        sys.exit(1)
-    
-    # Create output directory
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Load metrics
-    logger.info(f"Loading metrics from {args.metrics_file}...")
-    summary = load_metrics_summary(args.metrics_file)
-    
-    logger.info("\n" + "=" * 80)
-    logger.info("GENERATING PAPER FIGURES WITH VERIFIED METRICS")
-    logger.info("=" * 80)
-    
-    # Generate figures
+
+    if args.config:
+        cfg = _load_simple_yaml(args.config)
+        args.metrics_file = Path(cfg.get("metrics_file", str(args.metrics_file)))
+        args.output_dir = Path(cfg.get("figures_dir", str(args.output_dir)))
+        if args.predictions_file is None and cfg.get("predictions_file"):
+            args.predictions_file = Path(cfg["predictions_file"])
+        if args.primary_model is None and cfg.get("model_name"):
+            args.primary_model = cfg["model_name"]
+
+    summary = _load_summary(args.metrics_file)
+    primary = args.primary_model or summary["primary_model"]
+    if primary not in summary["models"]:
+        raise SystemExit(f"Primary model '{primary}' not found in {args.metrics_file}")
+
+    if args.predictions_file is None:
+        source = summary["models"][primary].get("source")
+        if not source:
+            raise SystemExit("predictions_file missing and no source field in metrics summary")
+        args.predictions_file = Path(source)
+
+    y_true, probs = _load_npz(args.predictions_file)
+    recomputed = _recompute_from_predictions(y_true, probs)
+    _assert_summary_match(summary, primary, recomputed, tol=1e-6)
+
     generate_reliability_diagram(
-        summary,
-        args.output_dir / "reliability_diagram_verified.pdf",
-        dpi=args.dpi
+        primary=primary,
+        bins=recomputed["ece_bins"],
+        ece=recomputed["ece"],
+        output_path=args.output_dir / "reliability_diagram_verified.pdf",
     )
-    
     generate_accuracy_coverage_curve(
-        summary,
-        args.output_dir / "accuracy_coverage_verified.pdf",
-        dpi=args.dpi
+        primary=primary,
+        curve=recomputed["accuracy_coverage_curve"],
+        auc_ac=recomputed["auc_ac"],
+        output_path=args.output_dir / "accuracy_coverage_verified.pdf",
     )
-    
-    # Create comparison table
-    create_metrics_comparison_table(
-        summary,
-        args.output_dir / "metrics_comparison.md"
-    )
-    
-    logger.info("\n" + "=" * 80)
-    logger.info("FIGURE GENERATION COMPLETE")
-    logger.info("=" * 80)
-    logger.info(f"✓ Reliability diagram: {args.output_dir / 'reliability_diagram_verified.pdf'}")
-    logger.info(f"✓ Accuracy-coverage curve: {args.output_dir / 'accuracy_coverage_verified.pdf'}")
-    logger.info(f"✓ Metrics comparison: {args.output_dir / 'metrics_comparison.md'}")
-    logger.info(f"\nAll figures use verified metrics from {args.metrics_file}")
+
+    print(f"[OK] Wrote {args.output_dir / 'reliability_diagram_verified.pdf'}")
+    print(f"[OK] Wrote {args.output_dir / 'accuracy_coverage_verified.pdf'}")
+    print(f"[OK] Annotation values: ECE={recomputed['ece']:.4f} AUC-AC={recomputed['auc_ac']:.4f}")
 
 
 if __name__ == "__main__":

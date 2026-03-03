@@ -26,7 +26,7 @@
 
 ### 2. Soma Kiran Kumar Nellipudi (Co-First Author)
 
-**Title**: Senior Software Engineer  
+**Title**: Senior Technology Leader  
 **Membership**: Senior IEEE Member  
 **Current Affiliation**: Incomm Payments  
 **Research Affiliation**: Computer Science Education Technology Lab, Kennesaw State University  
@@ -34,7 +34,7 @@
 **Phone**: [Contact]  
 **ORCID**: [If available]  
 
-**Bio**: Soma is a Senior Software Engineer at Incomm Payments specializing in machine learning optimization and systems engineering. He conducted this research while affiliated with KSU's Computer Science Education Technology Lab, where he led the system optimization, latency engineering, and reproducibility protocols with equal contribution across all major research components.
+**Bio**: Soma is a Senior Technology Leader at Incomm Payments specializing in high-volume distributed transaction systems, cloud-scale platform engineering, and applied AI security. He conducted this research while affiliated with KSU's Computer Science Education Technology Lab, where he led system optimization, latency engineering, and reproducibility protocols with equal contribution across all major research components.
 
 **Contributions** (Equal/Primary):
 - System architecture design and integration
@@ -43,6 +43,7 @@
 - Cross-GPU reproducibility validation and infrastructure scaling
 - Multi-seed stability testing and bootstrap confidence interval computation
 - Paper composition and technical documentation
+- FinTech and healthcare payments engineering perspective for production-grade deployment
 
 ---
 
