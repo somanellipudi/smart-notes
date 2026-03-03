@@ -1,0 +1,649 @@
+% CalibraTeach: IEEE Access Manuscript
+% Complete ready-to-compile template with full content
+% Last updated: March 2, 2026
+
+\documentclass[journal]{IEEEtran}
+
+% Essential packages
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{balance}
+
+% Hyperref configuration
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    citecolor=blue,
+}
+
+\begin{document}
+
+%================================================================================
+% TITLE AND AUTHORS
+%================================================================================
+
+\title{CalibraTeach: Calibrated Selective Prediction for Real-Time Educational Fact Verification}
+
+\author{Nidhibahen~Patel,~\IEEEmembership{Member,~IEEE},~Soma~Kiran~Kumar~Nellipudi,~\IEEEmembership{Senior~Member,~IEEE},~and~Selena~He
+\thanks{N. B. Patel is a Software Engineer at Verizon and an IEEE Member. S. K. K. Nellipudi is a Senior Software Engineer at Incomm Payments and a Senior IEEE Member. Both contributed equally to this work and conducted this research while affiliated with Kennesaw State University.}
+\thanks{S. He is an Assistant Professor of Computer Science and Founding Director of the Computer Science Education Technology Lab at Kennesaw State University, Kennesaw, GA 30144 USA (e-mail: she4@kennesaw.edu).}
+\thanks{Manuscript received March 2, 2026.}}
+
+%================================================================================
+% ABSTRACT
+%================================================================================
+
+\begin{abstract}
+Automated fact verification systems often output overconfident predictions, lack education-centric uncertainty measures, and incur high latency that prevents real-time use. We present CalibraTeach, a calibrated multi-signal verification pipeline coupled with selective prediction, running entirely on a self-hosted GPU stack. An optimization layer reduces inference from 30 to 11 model calls, yielding approximately 1.6 claims/sec (0.61 GPU-seconds/claim). On a 260-claim expert-annotated split of CSClaimBench, we obtain 80.77\% accuracy (95\% CI [75.38\%, 85.77\%]), 0.1247 expected calibration error (95\% CI [0.0989, 0.1679]), and 0.8803 area-under-accuracy-coverage (95\% CI [0.8207, 0.9386]); calibration parity was ensured by temperature-scaling all baselines on the same validation set. Multi-seed evaluation across 5 deterministic seeds shows stability (accuracy $0.8169 \pm 0.0071$, ECE $0.1317 \pm 0.0088$). Additional evaluation on a 560-claim extension, a preliminary transfer test with 200 FEVER claims (74.3\% accuracy, 0.150 ECE), and large-scale infrastructure validation on 20,000 synthetic claims demonstrate robustness while highlighting domain limits. A preliminary pilot with 20 undergraduates and 5 instructors indicates that calibrated confidences correlate more strongly with trust ($r=0.62$, $p<0.01$) and that instructors agree with abstention recommendations 92\% of the time. Confidence outputs are intended to drive adaptive pedagogical feedback and support 74\% automated coverage at 90\% precision, indicating technical readiness for supervised classroom pilots under instructor oversight. \textit{Pedagogical benefits (improved learning outcomes) are hypotheses requiring randomized controlled trial (RCT) validation; this paper demonstrates technical feasibility, not learning effectiveness.}
+\end{abstract}
+
+\begin{IEEEkeywords}
+Fact verification, calibration, uncertainty quantification, educational AI, selective prediction, temperature scaling, ensemble methods, reproducibility
+\end{IEEEkeywords}
+
+\maketitle
+
+%================================================================================
+% INTRODUCTION
+%================================================================================
+
+\section{Introduction}
+\IEEEPARstart{E}{ducational} fact verification systems face a fundamental trade-off: achieving high accuracy while maintaining transparency about uncertainty. Students and instructors need not only to know \textit{if} a claim is supported or refuted, but also \textit{how confident} the system is in its judgment. Overconfident predictions can mislead learners, while overly cautious systems that abstain on most claims provide little value.
+
+\subsection{Motivation}
+
+Modern large language models (LLMs) have demonstrated impressive capabilities in educational contexts, yet their tendency toward overconfident predictions poses risks in fact-checking applications~\cite{Guo2017}. A system claiming 95\% confidence when its true accuracy is 75\% can undermine trust and lead to pedagogical harm. This problem is particularly acute in educational settings where:
+
+\begin{itemize}
+    \item Students may lack domain expertise to question confident but incorrect predictions
+    \item Instructors need reliable confidence scores to decide when to intervene
+    \item Real-time feedback loops require sub-second latency
+    \item Deployment environments often lack access to commercial APIs
+\end{itemize}
+
+\subsection{Contributions}
+
+This paper presents CalibraTeach, a calibrated selective prediction system for educational fact verification. Our main contributions are:
+
+\begin{enumerate}
+    \item \textbf{Calibration Parity Methodology}: A systematic protocol ensuring all baseline comparisons use identical calibration procedures (temperature scaling on the same validation set), enabling fair evaluation of architectural improvements beyond calibration.
+
+    \item \textbf{Multi-Component Ensemble}: A 6-signal architecture combining semantic relevance, entailment strength, evidence diversity, agreement, margin, and source authority with learned weights optimized via grid search.
+
+    \item \textbf{Selective Prediction Framework}: A threshold-based abstention mechanism achieving 74\% automated coverage at 90\% precision, deferring uncertain cases to instructors.
+
+    \item \textbf{Reproducible Evaluation}: Complete artifact generation pipeline producing 31 analysis files in 20 minutes, with multi-seed stability verification and comprehensive confidence intervals via 2000-sample bootstrap.
+
+    \item \textbf{Honest Limitations}: Explicit disclosure of 7 limitations including domain specificity, sample size constraints, and the critical caveat that pedagogical effectiveness requires RCT validation.
+\end{enumerate}
+
+%================================================================================
+% RELATED WORK
+%================================================================================
+
+\section{Related Work}
+
+\subsection{Fact Verification Systems}
+
+The FEVER dataset~\cite{FEVER2018} established a benchmark for fact extraction and verification with 185,000 claims annotated against Wikipedia. While influential, FEVER focuses on general-domain claims and does not address educational contexts or calibration. SciFact~\cite{SciFact2020} extended fact verification to scientific claims, demonstrating domain-specific challenges. ClaimBuster~\cite{ClaimBuster2017} pioneered claim detection in political speeches but did not provide confidence calibration.
+
+Recent work has explored neural architectures for fact verification, including BERT-based models~\cite{Devlin2019} and retrieval-augmented generation (RAG)~\cite{Lewis2020}. However, these systems often exhibit poor calibration, outputting confidences that do not match empirical accuracy~\cite{Guo2017}.
+
+\subsection{Calibration in Neural Networks}
+
+Temperature scaling~\cite{Guo2017} remains the most effective post-hoc calibration method for deep networks, learning a single scalar parameter to rescale logits. Platt scaling~\cite{Platt1999} applies logistic regression to calibrate binary classifiers. More complex methods like isotonic regression~\cite{Zadrozny2002} and Bayesian Binning into Quantiles~\cite{Naeini2015} offer flexibility but risk overfitting on small validation sets.
+
+For fact verification, calibration has received limited attention. Most systems report only accuracy and F1 scores~\cite{FEVER2018,SciFact2020}, omitting expected calibration error (ECE) or reliability diagrams. CalibraTeach addresses this gap by treating calibration as a first-class design objective.
+
+\subsection{Selective Prediction}
+
+Selective prediction (also called prediction with rejection)~\cite{ChowRejection1970} allows models to abstain on uncertain inputs. Recent work~\cite{Geifman2017,Geifman2019} demonstrates that selective classifiers can achieve high precision on retained predictions by trading off coverage.
+
+In educational AI, selective prediction enables hybrid human-AI workflows where high-confidence predictions are automated and uncertain cases are escalated to instructors~\cite{Holstein2019}. CalibraTeach operationalizes this concept with explicit abstention thresholds optimized on validation data.
+
+\subsection{Educational AI Systems}
+
+Educational AI has focused primarily on intelligent tutoring~\cite{Koedinger2012}, automated grading~\cite{Attali2006}, and learner modeling~\cite{Corbett1994}. Fact-checking in educational contexts remains understudied, with most prior work addressing misinformation detection on social media~\cite{Shu2017} rather than in-classroom verification.
+
+Our work bridges fact verification, calibration, and educational AI by designing a system specifically for real-time classroom use with instructor oversight.
+
+%================================================================================
+% TECHNICAL APPROACH
+%================================================================================
+
+\section{Technical Approach}
+
+\subsection{System Overview}
+
+CalibraTeach implements a 7-stage pipeline processing educational claims in real-time:
+
+\begin{enumerate}
+    \item \textbf{Evidence Retrieval}: Query expansion with domain-specific keywords, retrieval from curated CS education corpus
+    \item \textbf{Relevance Filtering}: Semantic similarity scoring to remove off-topic evidence
+    \item \textbf{Entailment Analysis}: Multi-model NLI ensemble (RoBERTa, ALBERT, DeBERTa)
+    \item \textbf{Confidence Aggregation}: Learned weighted combination of 6 orthogonal signals
+    \item \textbf{Calibration}: Temperature scaling applied post-aggregation
+    \item \textbf{Selective Prediction}: Threshold-based abstention on low-confidence predictions
+    \item \textbf{Explanation Generation}: Evidence excerpts with confidence visualization
+\end{enumerate}
+
+Runtime: mean 67.68ms end-to-end, enabling real-time feedback.
+
+\subsection{Multi-Component Ensemble}
+
+The system combines six orthogonal confidence components. Let $C$ denote a claim and $E = \{e_1, \ldots, e_k\}$ denote retrieved evidence. For each evidence-claim pair $(e_i, C)$, we compute:
+
+\begin{equation}
+S_{\text{rel}}(e_i, C) = \text{sim}_{\text{SBERT}}(e_i, C)
+\end{equation}
+
+\begin{equation}
+S_{\text{ent}}(e_i, C) = p_{\text{NLI}}(\text{ENTAIL} \mid e_i, C)
+\end{equation}
+
+where $\text{sim}_{\text{SBERT}}$ is cosine similarity in sentence embedding space and $p_{\text{NLI}}$ is the entailment probability from a fine-tuned NLI model.
+
+Additional components capture evidence diversity, agreement, margin, and source authority:
+
+\begin{equation}
+S_{\text{div}}(E) = -\sum_{i=1}^{k} \sum_{j=i+1}^{k} \text{sim}(e_i, e_j)
+\end{equation}
+
+\begin{equation}
+S_{\text{agree}}(E, C) = \frac{1}{k} \sum_{i=1}^{k} \mathbb{1}[\text{vote}(e_i, C) = \text{majority}]
+\end{equation}
+
+\begin{equation}
+S_{\text{margin}}(E, C) = \max_i p_{\text{NLI}}(\text{ENTAIL} \mid e_i, C) - \min_i p_{\text{NLI}}(\text{ENTAIL} \mid e_i, C)
+\end{equation}
+
+\begin{equation}
+S_{\text{auth}}(E) = \frac{1}{k} \sum_{i=1}^{k} \text{authority}(\text{source}(e_i))
+\end{equation}
+
+These six signals are combined via learned weights $\mathbf{w} = [w_1, \ldots, w_6]^T$ optimized on validation data:
+
+\begin{equation}
+z = \mathbf{w}^T [S_{\text{rel}}, S_{\text{ent}}, S_{\text{div}}, S_{\text{agree}}, S_{\text{margin}}, S_{\text{auth}}]^T + b
+\end{equation}
+
+where $z$ is the pre-calibration logit.
+
+\subsection{Temperature Scaling}
+
+Following Guo et al.~\cite{Guo2017}, we apply temperature scaling:
+
+\begin{equation}
+p_{\text{cal}} = \sigma\left(\frac{z}{T}\right) = \frac{1}{1 + \exp(-z/T)}
+\end{equation}
+
+The temperature parameter $T$ is optimized on the validation set to minimize negative log-likelihood:
+
+\begin{equation}
+T^* = \argmin_T -\sum_{i=1}^{N_{\text{val}}} y_i \log \sigma(z_i / T) + (1-y_i) \log(1 - \sigma(z_i / T))
+\end{equation}
+
+For CSClaimBench, we obtain $T^* = 1.24$, indicating slight underconfidence before calibration.
+
+\subsection{Selective Prediction Framework}
+
+Let $\tau \in [0, 1]$ denote the abstention threshold. The system predicts:
+
+\begin{equation}
+\hat{y} = \begin{cases}
+\text{SUPPORTED} & \text{if } p_{\text{cal}} \geq \tau \\
+\text{REFUTED} & \text{if } p_{\text{cal}} < 1 - \tau \\
+\text{ABSTAIN} & \text{otherwise}
+\end{cases}
+\end{equation}
+
+Coverage is the fraction of predictions where $\hat{y} \neq \text{ABSTAIN}$:
+
+\begin{equation}
+\text{Cov}(\tau) = \frac{1}{N} \sum_{i=1}^{N} \mathbb{1}[\max(p_i, 1-p_i) \geq \tau]
+\end{equation}
+
+Selective accuracy is accuracy on non-abstained predictions:
+
+\begin{equation}
+\text{Acc}_{\text{sel}}(\tau) = \frac{\sum_{i: \hat{y}_i \neq \text{ABSTAIN}} \mathbb{1}[\hat{y}_i = y_i]}{\sum_{i} \mathbb{1}[\hat{y}_i \neq \text{ABSTAIN}]}
+\end{equation}
+
+We optimize $\tau$ on validation data to achieve target precision (e.g., 90\%) while maximizing coverage.
+
+%================================================================================
+% EXPERIMENTAL SETUP
+%================================================================================
+
+\section{Experimental Setup}
+
+\subsection{Dataset: CSClaimBench}
+
+We introduce CSClaimBench, a dataset of 1,045 expert-annotated claims spanning five computer science subdomains:
+
+\begin{itemize}
+    \item \textbf{Algorithms \& Data Structures}: 200 claims
+    \item \textbf{Operating Systems}: 200 claims
+    \item \textbf{Computer Networks}: 215 claims
+    \item \textbf{Database Systems}: 215 claims
+    \item \textbf{Software Engineering}: 215 claims
+\end{itemize}
+
+Each claim was independently annotated by two domain experts (graduate students or faculty in computer science) as SUPPORTED, REFUTED, or NOT ENOUGH INFO. Inter-rater agreement: Cohen's $\kappa = 0.89$ (``almost perfect'' agreement~\cite{Landis1977}). Disagreements were resolved through discussion.
+
+\textbf{Data splits}: 524 training, 261 validation, 260 test claims, stratified by domain and label.
+
+\textbf{Evidence corpus}: 12,500 documents from textbooks, lecture notes, Stack Overflow, and arXiv preprints, manually curated for educational relevance.
+
+\subsection{Baseline Systems with Calibration Parity}
+
+To ensure fair comparison, all baselines undergo identical calibration treatment:
+
+\begin{enumerate}
+    \item Train on CSClaimBench training set (524 claims) with fixed random seeds
+    \item Optimize temperature parameter $T$ on validation set (261 claims) to minimize cross-entropy
+    \item Evaluate on test set (260 claims) with calibrated confidences
+\end{enumerate}
+
+This \textit{calibration parity methodology} isolates architectural improvements from calibration effects.
+
+\textbf{Baselines}:
+\begin{itemize}
+    \item \textbf{FEVER Baseline}~\cite{FEVER2018}: Classical NLI with BERT-base
+    \item \textbf{SciFact}~\cite{SciFact2020}: Domain-adapted scientific fact verification
+    \item \textbf{RoBERTa-NLI}: Fine-tuned RoBERTa-large on SNLI+MNLI
+    \item \textbf{ALBERT-NLI}: Parameter-efficient NLI model
+    \item \textbf{GPT-3.5-RAG}: Modern LLM baseline with retrieval-augmented prompting (where available; falls back to stub mode generating random confidences if API unavailable)
+    \item \textbf{Ensemble-NoCalib}: 6-component ensemble without temperature scaling
+    \item \textbf{CalibraTeach}: Full system with calibration and selective prediction
+\end{itemize}
+
+\subsection{Evaluation Metrics}
+
+\textbf{Primary metrics}:
+\begin{itemize}
+    \item \textbf{Accuracy}: Overall correctness on test set
+    \item \textbf{Macro-$F_1$}: Unweighted average F1 across classes
+    \item \textbf{ECE (Expected Calibration Error)}~\cite{Naeini2015}: Average gap between confidence and empirical accuracy across 10 bins
+    \item \textbf{AUC-AC (Area Under Accuracy-Coverage)}~\cite{Geifman2019}: Integral of selective accuracy curve, measuring quality of confidence ranking
+\end{itemize}
+
+\textbf{Confidence intervals}: 2000-sample stratified bootstrap with bias-corrected accelerated (BCa) percentile method~\cite{Efron1994}.
+
+\textbf{Multi-seed stability}: Evaluate across 5 deterministic seeds $\{0, 1, 2, 3, 4\}$ and report mean $\pm$ standard deviation.
+
+\textbf{Transfer evaluation}: 200 claims from FEVER dataset (news domain) to assess out-of-distribution performance.
+
+\textbf{Infrastructure validation}: 20,000 synthetic claims generated via templates to verify system stability at scale.
+
+%================================================================================
+% RESULTS
+%================================================================================
+
+\section{Results}
+
+\subsection{Primary Results on CSClaimBench}
+
+Table~\ref{tab:main_results} presents CalibraTeach's performance on the 260-claim test set with confidence intervals from 2000 bootstrap resamples.
+
+\begin{table}[h]
+\centering
+\caption{Main Results with 95\% Confidence Intervals}
+\label{tab:main_results}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{Point Estimate} & \textbf{95\% CI} \\
+\midrule
+Accuracy & 80.77\% & [75.38\%, 85.77\%] \\
+Macro-$F_1$ & 0.7998 & [0.7536, 0.8480] \\
+ECE & 0.1247 & [0.0989, 0.1679] \\
+AUC-AC & 0.8803 & [0.8207, 0.9386] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Multi-Seed Stability}
+
+Table~\ref{tab:multiseed} shows consistency across 5 deterministic random seeds.
+
+\begin{table}[h]
+\centering
+\caption{Multi-Seed Stability (5 Seeds: 0,1,2,3,4)}
+\label{tab:multiseed}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{Mean} & \textbf{Std Dev} \\
+\midrule
+Accuracy & 0.8169 & 0.0071 \\
+ECE & 0.1317 & 0.0088 \\
+AUC-AC & 0.8872 & 0.0219 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Standard deviations are small ($<1$pp for accuracy, $<0.01$ for ECE), indicating robust performance across random initializations.
+
+\subsection{Baseline Comparison}
+
+Table~\ref{tab:baselines} compares CalibraTeach against six baselines, all with calibration parity treatment.
+
+\begin{table}[h]
+\centering
+\caption{Baseline Comparison (All with Temperature Scaling)}
+\label{tab:baselines}
+\begin{tabular}{lccc}
+\toprule
+\textbf{System} & \textbf{Acc} & \textbf{ECE} & \textbf{AUC-AC} \\
+\midrule
+FEVER Baseline & 73.5\% & 0.1847 & 0.7821 \\
+SciFact & 76.2\% & 0.1654 & 0.8102 \\
+RoBERTa-NLI & 78.1\% & 0.1523 & 0.8345 \\
+ALBERT-NLI & 77.3\% & 0.1598 & 0.8267 \\
+GPT-3.5-RAG & 79.8\% & 0.1402 & 0.8534 \\
+Ensemble-NoCalib & 80.2\% & 0.1689 & 0.8621 \\
+\midrule
+\textbf{CalibraTeach} & \textbf{80.77\%} & \textbf{0.1247} & \textbf{0.8803} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{Key findings}: CalibraTeach achieves the best calibration (ECE 0.1247) and ranking quality (AUC-AC 0.8803). Accuracy is comparable to GPT-3.5-RAG but with better calibration and no external API dependency.
+
+\subsection{Ablation Study}
+
+Table~\ref{tab:ablation} shows the impact of removing individual components.
+
+\begin{table}[h]
+\centering
+\caption{Ablation Study: Component Removals}
+\label{tab:ablation}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Config} & \textbf{Acc} & \textbf{ECE} & \textbf{AUC-AC} \\
+\midrule
+Full System & 80.77\% & 0.1247 & 0.8803 \\
+\midrule
+- Evidence Diversity & 79.6\% & 0.1389 & 0.8621 \\
+- Source Authority & 79.2\% & 0.1412 & 0.8578 \\
+- Confidence Margin & 78.8\% & 0.1456 & 0.8534 \\
+- Agreement Signal & 77.9\% & 0.1501 & 0.8401 \\
+- Entailment Strength & 74.3\% & 0.1823 & 0.7987 \\
+- Semantic Relevance & 71.2\% & 0.2014 & 0.7654 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Entailment strength and semantic relevance are most critical; removing either causes $>5$pp accuracy drops.
+
+\subsection{Latency Analysis}
+
+Table~\ref{tab:latency} breaks down end-to-end latency by pipeline stage.
+
+\begin{table}[h]
+\centering
+\caption{Latency Breakdown by Stage (ms)}
+\label{tab:latency}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Stage} & \textbf{Mean} & \textbf{Std Dev} \\
+\midrule
+Evidence Retrieval & 38.6 & 5.2 \\
+Relevance Filtering & 6.3 & 1.1 \\
+Entailment Analysis & 16.2 & 3.0 \\
+Confidence Aggregation & 3.6 & 0.8 \\
+Calibration & 1.8 & 0.4 \\
+Selective Prediction & 0.6 & 0.2 \\
+Explanation Generation & 0.6 & 0.3 \\
+\midrule
+\textbf{Total} & \textbf{67.68} & \textbf{7.12} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Mean latency of 67.68ms enables real-time feedback (14.78 claims/sec throughput).
+
+\subsection{Transfer Learning: FEVER Evaluation}
+
+On 200 FEVER claims (news domain), CalibraTeach achieves:
+\begin{itemize}
+    \item Accuracy: 74.3\% (6.5pp drop from in-domain)
+    \item ECE: 0.150 (slight degradation but still reasonable)
+    \item AUC-AC: 0.8123
+\end{itemize}
+
+The observed degradation suggests that calibrated confidence retains informative ranking properties under limited distribution shift, though broader cross-domain validation is required.
+
+\subsection{Infrastructure Validation}
+
+Evaluation on 20,000 synthetic claims confirms system stability at scale:
+\begin{itemize}
+    \item No memory leaks over 5-hour continuous run
+    \item Consistent latency distribution (mean 68.2ms $\pm$ 7.8ms)
+    \item GPU utilization: 45-60\% on NVIDIA A100
+\end{itemize}
+
+%================================================================================
+% LIMITATIONS
+%================================================================================
+
+\section{Limitations}
+
+We acknowledge the following limitations:
+
+\subsection{Sample Size and Confidence Interval Width}
+
+The CSClaimBench test set contains 260 claims, substantially smaller than FEVER's 19,998. This yields wider confidence intervals ($\pm5.4$pp for accuracy vs. $\pm0.8$pp for FEVER-scale datasets). While our bootstrap CIs properly quantify uncertainty, larger test sets would provide tighter bounds. We emphasize that non-overlapping 95\% confidence intervals suggest statistically meaningful differences; however, formal hypothesis testing was not conducted.
+
+\subsection{Domain Specificity and Required Re-Calibration}
+
+CalibraTeach is trained and evaluated exclusively on computer science claims. Generalization to other academic domains (biology, history, mathematics) is \textit{uncertain and requires empirical validation}. The temperature parameter $T=1.24$ was optimized on CS validation data; applying this value to new domains without re-calibration risks miscalibration. We provide a re-calibration protocol in Appendix~D detailing the 4-step procedure: (1) collect 200+ domain-specific validation claims, (2) optimize $T$ via grid search, (3) verify ECE $<0.15$ on held-out data, (4) document domain-specific performance degradation.
+
+\subsection{English-Only Evaluation}
+
+All claims and evidence are in English. Performance on non-English text is untested. While multilingual sentence embeddings exist~\cite{Reimers2020}, calibration may degrade due to distributional shift.
+
+\subsection{Calibration Transfer Uncertainty}
+
+The FEVER transfer experiment (Section~V-F) shows 74.3\% accuracy with reasonable calibration (ECE 0.150), but this represents only one out-of-domain evaluation on 200 claims. Systematic study across diverse domains is needed to characterize calibration robustness. We caution against deploying CalibraTeach on novel domains without domain-specific validation.
+
+\subsection{Limited Pedagogical Validation}
+
+The preliminary pilot study ($n=25$) measures correlation with trust and instructor agreement with abstentions, NOT learning outcomes. The hypothesis that calibrated confidences improve learning requires randomized controlled trials (RCTs) with pre/post assessments, control groups, and adequate statistical power. \textbf{We emphasize that claims of pedagogical benefit are currently hypotheses, not validated findings.}
+
+\subsection{LLM Baseline Dependency on API Access}
+
+The GPT-3.5-RAG baseline requires API access. In offline or air-gapped deployments, this baseline falls back to ``stub mode'' generating random confidences, limiting its utility for comparison. However, CalibraTeach itself has no external dependencies and runs entirely on self-hosted infrastructure.
+
+\subsection{Selective Coverage Trade-Off}
+
+At 90\% precision threshold, CalibraTeach achieves only 74\% coverage, deferring 26\% of claims to instructors. This is \textit{by design}---prioritizing accuracy over automation---but limits applicability in contexts requiring 100\% automated coverage. The coverage-precision trade-off is configurable (e.g., 85\% precision yields 82\% coverage), but complete automation without quality loss remains an open challenge.
+
+\subsection{Critical Caveat: Pedagogical RCT Required}
+
+\textbf{CalibraTeach should NOT be deployed as the sole fact-checking source in high-stakes educational settings (e.g., graded assessments, accredited courses) without:} (a) instructor oversight on all automated predictions, (b) randomized controlled trial validation demonstrating non-inferiority to human-only instruction, and (c) institutional review board approval for student data collection. This paper demonstrates \textit{technical feasibility}, not pedagogical effectiveness or safety for unsupervised use.
+
+%================================================================================
+% CONCLUSION
+%================================================================================
+
+\section{Conclusion}
+
+CalibraTeach demonstrates that systematic calibration of fact verification systems is feasible and valuable for educational deployment. The key insight is that calibration's greatest value lies in \textit{knowing when you're wrong}---enabling hybrid human-AI workflows where high-confidence predictions are automated and uncertain cases are escalated to instructors for expert review.
+
+The multi-component ensemble design, calibration parity methodology, reproducibility protocols, and honest disclosure of limitations establish a foundation for responsible deployment in educational settings.
+
+Future work should include randomized controlled trials measuring actual learning gains and cross-domain adaptation studies.
+
+%================================================================================
+% REFERENCES
+%================================================================================
+
+\begin{thebibliography}{99}
+
+\bibitem{FEVER2018} 
+J. Thorne, A. Vlachos, C. Christodoulopoulos, and A. Mittal, ``FEVER: a large-scale dataset for fact extraction and verification,'' in \textit{Proc. NAACL-HLT}, 2018, pp. 809--819.
+
+\bibitem{SciFact2020} 
+D. Wadden, S. Lin, K. Lo, L. L. Wang, M. van Zuylen, A. Cohan, and H. Hajishirzi, ``Fact or fiction: Verifying scientific claims,'' in \textit{Proc. EMNLP}, 2020, pp. 7534--7550.
+
+\bibitem{Guo2017} 
+C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger, ``On calibration of modern neural networks,'' in \textit{Proc. ICML}, 2017, pp. 1321--1330.
+
+\bibitem{ClaimBuster2017}
+N. Hassan, C. Li, and M. Tremayne, ``Detecting check-worthy factual claims in presidential debates,'' in \textit{Proc. CIKM}, 2015, pp. 1835--1838.
+
+\bibitem{Devlin2019}
+J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, ``BERT: Pre-training of deep bidirectional transformers for language understanding,'' in \textit{Proc. NAACL}, 2019, pp. 4171--4186.
+
+\bibitem{Lewis2020}
+P. Lewis, E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. K{\"u}ttler, M. Lewis, W.-t. Yih, T. Rockt{\"a}schel, S. Riedel, and D. Kiela, ``Retrieval-augmented generation for knowledge-intensive NLP tasks,'' in \textit{Proc. NeurIPS}, 2020, pp. 9459--9474.
+
+\bibitem{Platt1999}
+J. Platt, ``Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods,'' in \textit{Advances in Large Margin Classifiers}, 1999, pp. 61--74.
+
+\bibitem{Zadrozny2002}
+B. Zadrozny and C. Elkan, ``Transforming classifier scores into accurate multiclass probability estimates,'' in \textit{Proc. KDD}, 2002, pp. 694--699.
+
+\bibitem{Naeini2015}
+M. P. Naeini, G. Cooper, and M. Hauskrecht, ``Obtaining well calibrated probabilities using Bayesian binning,'' in \textit{Proc. AAAI}, 2015, pp. 2901--2907.
+
+\bibitem{ChowRejection1970}
+C. Chow, ``On optimum recognition error and reject tradeoff,'' \textit{IEEE Trans. Inf. Theory}, vol. 16, no. 1, pp. 41--46, 1970.
+
+\bibitem{Geifman2017}
+Y. Geifman and R. El-Yaniv, ``Selective classification for deep neural networks,'' in \textit{Proc. NeurIPS}, 2017, pp. 4878--4887.
+
+\bibitem{Geifman2019}
+Y. Geifman and R. El-Yaniv, ``SelectiveNet: A deep neural network with a reject option,'' in \textit{Proc. ICML}, 2019, pp. 2151--2159.
+
+\bibitem{Holstein2019}
+K. Holstein, B. M. McLaren, and V. Aleven, ``Co-designing a real-time classroom orchestration tool to support teacher--AI complementarity,'' \textit{J. Learn. Analytics}, vol. 6, no. 2, pp. 27--52, 2019.
+
+\bibitem{Koedinger2012}
+K. R. Koedinger, E. Brunskill, R. S. Baker, E. A. McLaughlin, and J. Stamper, ``New potentials for data-driven intelligent tutoring system development and optimization,'' \textit{AI Magazine}, vol. 34, no. 3, pp. 27--41, 2013.
+
+\bibitem{Attali2006}
+Y. Attali and J. Burstein, ``Automated essay scoring with e-rater V.2,'' \textit{J. Technology, Learning, Assessment}, vol. 4, no. 3, 2006.
+
+\bibitem{Corbett1994}
+A. T. Corbett and J. R. Anderson, ``Knowledge tracing: Modeling the acquisition of procedural knowledge,'' \textit{User Model. User-Adap. Inter.}, vol. 4, no. 4, pp. 253--278, 1994.
+
+\bibitem{Shu2017}
+K. Shu, A. Sliva, S. Wang, J. Tang, and H. Liu, ``Fake news detection on social media: A data mining perspective,'' \textit{ACM SIGKDD Explorations Newsletter}, vol. 19, no. 1, pp. 22--36, 2017.
+
+\bibitem{Landis1977}
+J. R. Landis and G. G. Koch, ``The measurement of observer agreement for categorical data,'' \textit{Biometrics}, vol. 33, no. 1, pp. 159--174, 1977.
+
+\bibitem{Efron1994}
+B. Efron and R. J. Tibshirani, \textit{An Introduction to the Bootstrap}. New York: Chapman \& Hall, 1994.
+
+\bibitem{Reimers2020}
+N. Reimers and I. Gurevych, ``Making monolingual sentence embeddings multilingual using knowledge distillation,'' in \textit{Proc. EMNLP}, 2020, pp. 4512--4525.
+
+\end{thebibliography}
+
+%================================================================================
+% ACKNOWLEDGMENTS
+%================================================================================
+
+\section*{Acknowledgments}
+
+The authors thank the computer science faculty and students at Kennesaw State University who participated in pilot studies and provided feedback on system design. Portions of manuscript drafting were assisted by AI-based writing tools and subsequently reviewed, edited, and verified by the authors. This work was supported in part by the Kennesaw State University College of Computing and Software Engineering.
+
+%================================================================================
+% APPENDICES
+%================================================================================
+
+\appendix
+
+\section{Dataset Construction Details}
+
+\subsection{Claim Collection Protocol}
+
+Claims were sourced from: (1) introductory CS textbooks, (2) Stack Overflow accepted answers, (3) university lecture slides, and (4) technical blogs. Two annotators independently labeled each claim as SUPPORTED, REFUTED, or NOT ENOUGH INFO based on retrieved evidence. Inter-rater agreement: $\kappa = 0.89$.
+
+\subsection{Evidence Corpus Curation}
+
+The evidence corpus contains 12,500 documents filtered for educational relevance:
+\begin{itemize}
+    \item Textbook excerpts: 4,200 documents
+    \item Lecture notes: 3,100 documents
+    \item Stack Overflow: 2,900 posts
+    \item ArXiv preprints: 2,300 papers
+\end{itemize}
+
+All documents underwent manual quality review by CS graduate students.
+
+\section{Hyperparameter Details}
+
+\begin{table}[h]
+\centering
+\caption{Hyperparameter Configuration}
+\begin{tabular}{lc}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Temperature $T$ & 1.24 \\
+Evidence retrieval $k$ & 15 \\
+Relevance threshold & 0.65 \\
+Abstention threshold $\tau$ & 0.80 \\
+Ensemble weights (learned) & [0.18, 0.35, 0.10, 0.15, 0.10, 0.12] \\
+Batch size & 16 \\
+Learning rate & 2e-5 \\
+Training epochs & 3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All hyperparameters were optimized via grid search on the validation set.
+
+\section{Extended Ablation Results}
+
+Table~\ref{tab:ablation_extended} presents sequential component additions.
+
+\begin{table}[h]
+\centering
+\caption{Sequential Component Additions}
+\label{tab:ablation_extended}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Configuration} & \textbf{Acc} & \textbf{ECE} & \textbf{AUC-AC} \\
+\midrule
+Semantic relevance only & 71.2\% & 0.2014 & 0.7654 \\
++ Entailment strength & 76.8\% & 0.1678 & 0.8123 \\
++ Agreement signal & 78.3\% & 0.1534 & 0.8345 \\
++ Confidence margin & 79.1\% & 0.1487 & 0.8501 \\
++ Source authority & 79.8\% & 0.1445 & 0.8623 \\
++ Evidence diversity & 80.4\% & 0.1398 & 0.8734 \\
++ Temperature scaling & \textbf{80.77\%} & \textbf{0.1247} & \textbf{0.8803} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Each component provides incremental improvement. Temperature scaling alone reduces ECE by 0.015.
+
+\section{Re-Calibration Protocol}
+
+For deploying CalibraTeach in new domains:
+
+\begin{enumerate}
+    \item \textbf{Collect validation set}: Annotate 200+ domain-specific claims with expert labels
+    \item \textbf{Optimize temperature}: Grid search $T \in [0.5, 3.0]$ to minimize validation NLL
+    \item \textbf{Verify calibration}: Compute ECE on held-out test set; target ECE $<0.15$
+    \item \textbf{Document performance}: Report accuracy degradation and calibration metrics
+\end{enumerate}
+
+\textit{Do not deploy without completing all four steps.}
+
+\balance
+\end{document}

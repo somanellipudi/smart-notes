@@ -51,7 +51,9 @@ class AblationRunner:
         sample_size: int = None,
         seed: int = 42,
         verify_threshold: float | None = None,
-        low_conf_threshold: float | None = None
+        low_conf_threshold: float | None = None,
+        device: str = "cpu",
+        batch_size: int = 32
     ):
         """
         Initialize ablation runner.
@@ -61,6 +63,8 @@ class AblationRunner:
             output_dir: Directory for results
             sample_size: Number of examples to test (None = all)
             seed: Random seed
+            device: Device for inference ('cpu' or 'cuda')
+            batch_size: Batch size for NLI inference
         """
         self.dataset_path = dataset_path
         self.output_dir = Path(output_dir)
@@ -73,9 +77,11 @@ class AblationRunner:
         self.seed = seed
         self.verify_threshold = verify_threshold
         self.low_conf_threshold = low_conf_threshold
+        self.device = device
+        self.batch_size = batch_size
         self.results = []
     
-    def run_ablations(self, noise_injection: bool = False) -> pd.DataFrame:
+    def run_ablations(self, noise_injection: bool = False, resume: bool = True) -> pd.DataFrame:
         """
         Run all ablation configurations.
         
@@ -86,18 +92,65 @@ class AblationRunner:
             DataFrame with results
         """
         configs = self.get_ablation_configs()
+        config_order = list(configs.keys())
         
         logger.info(f"Running {len(configs)} ablation configurations...")
         logger.info(f"Dataset: {self.dataset_path}, Sample: {self.sample_size}")
+
+        existing_by_config: Dict[str, Dict[str, Any]] = {}
+        if resume:
+            existing_csv = self.output_dir / "results.csv"
+            if existing_csv.exists():
+                try:
+                    existing_df = pd.read_csv(existing_csv)
+                    if "config_name" in existing_df.columns:
+                        for _, row in existing_df.iterrows():
+                            row_dict = row.to_dict()
+                            cfg_name = row_dict.get("config_name")
+                            if isinstance(cfg_name, str) and cfg_name:
+                                existing_by_config[cfg_name] = row_dict
+                except Exception as e:
+                    logger.warning(f"Could not read existing results.csv for resume: {e}")
+
+            for name in config_order:
+                if name in existing_by_config:
+                    continue
+                metrics_file = self.detailed_dir / f"{name}_metrics.csv"
+                if metrics_file.exists():
+                    try:
+                        metrics_df = pd.read_csv(metrics_file)
+                        if not metrics_df.empty:
+                            row_dict = metrics_df.iloc[0].to_dict()
+                            row_dict["config_name"] = name
+                            if "timestamp" not in row_dict:
+                                row_dict["timestamp"] = datetime.now().isoformat()
+                            existing_by_config[name] = row_dict
+                    except Exception as e:
+                        logger.warning(f"Could not parse existing metrics for {name}: {e}")
+
+            if existing_by_config:
+                logger.info(f"Resume enabled: found {len(existing_by_config)} completed configs")
+
+        completed_configs = set(existing_by_config.keys())
+        if resume:
+            self.results = [existing_by_config[name] for name in config_order if name in existing_by_config]
+        else:
+            self.results = []
         
         for i, (name, config) in enumerate(configs.items(), 1):
+            if name in completed_configs:
+                logger.info(f"\n[{i}/{len(configs)}] Skipping completed config: {name}")
+                continue
+
             logger.info(f"\n[{i}/{len(configs)}] Running: {name}")
             logger.info(f"  Config: {config}")
             
             try:
                 runner = CSBenchmarkRunner(
                     dataset_path=self.dataset_path,
-                    seed=self.seed
+                    seed=self.seed,
+                    device=self.device,
+                    batch_size=self.batch_size
                 )
                 
                 # Determine noise types
@@ -133,6 +186,9 @@ class AblationRunner:
         
         # Create results dataframe
         df = pd.DataFrame(self.results)
+        if not df.empty and "config_name" in df.columns:
+            df["_order"] = df["config_name"].apply(lambda x: config_order.index(x) if x in config_order else 999)
+            df = df.sort_values("_order").drop(columns=["_order"]) 
         
         # Save CSV
         csv_path = self.output_dir / "results.csv"
@@ -388,7 +444,9 @@ def _run_threshold_grid(
     sample_size: int | None,
     seed: int,
     verify_thresholds: List[float],
-    low_conf_thresholds: List[float]
+    low_conf_thresholds: List[float],
+    device: str = "cpu",
+    batch_size: int = 32
 ) -> dict:
     """Run a small grid search over thresholds and return the best config."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -399,6 +457,8 @@ def _run_threshold_grid(
     runner = CSBenchmarkRunner(
         dataset_path=dataset_path,
         seed=seed,
+        device=device,
+        batch_size=batch_size,
         embedding_provider=shared_embedding,
         nli_verifier=shared_nli
     )
@@ -486,6 +546,18 @@ def main():
         help="Random seed for reproducibility"
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device for inference ('cpu' or 'cuda'). Auto-detects if not specified."
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Batch size for NLI inference (larger = faster on GPU)"
+    )
+    parser.add_argument(
         "--noise-injection",
         action="store_true",
         help="Test robustness with noise injection"
@@ -526,6 +598,19 @@ def main():
     
     args = parser.parse_args()
     
+    # Auto-detect device if not specified
+    device = args.device
+    if device is None:
+        try:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Auto-detected device: {device}")
+        except ImportError:
+            device = "cpu"
+            logger.warning("PyTorch not available, using CPU")
+    else:
+        logger.info(f"Using specified device: {device}")
+    
     # Optional grid search
     verify_threshold = args.verify_threshold
     low_conf_threshold = args.low_conf_threshold
@@ -540,7 +625,9 @@ def main():
             sample_size=grid_sample_size,
             seed=args.seed,
             verify_thresholds=verify_thresholds,
-            low_conf_thresholds=low_conf_thresholds
+            low_conf_thresholds=low_conf_thresholds,
+            device=device,
+            batch_size=args.batch_size
         )
         verify_threshold = best["verify_threshold"]
         low_conf_threshold = best["low_conf_threshold"]
@@ -552,18 +639,20 @@ def main():
         sample_size=args.sample_size,
         seed=args.seed,
         verify_threshold=verify_threshold,
-        low_conf_threshold=low_conf_threshold
+        low_conf_threshold=low_conf_threshold,
+        device=device,
+        batch_size=args.batch_size
     )
     
-    df = runner.run_ablations(noise_injection=args.noise_injection)
+    df = runner.run_ablations(noise_injection=args.noise_injection, resume=True)
     
     # Print summary
     print("\n" + "="*80)
     print("ABLATION STUDY COMPLETE")
     print("="*80)
     print(df[["config_name", "accuracy", "F1_verified", "ece", "avg_time_per_claim"]].to_string())
-    print(f"\n✓ Results saved to {runner.output_dir}")
-    print(f"✓ Summary: {runner.output_dir}/ablation_summary.md")
+    print(f"\nOK Results saved to {runner.output_dir}")
+    print(f"OK Summary: {runner.output_dir}/ablation_summary.md")
 
 
 if __name__ == "__main__":

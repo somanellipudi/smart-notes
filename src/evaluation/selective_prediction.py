@@ -218,6 +218,45 @@ def compute_auc_risk_coverage(
     return auc
 
 
+def compute_auc_accuracy_coverage(
+    confidences: np.ndarray,
+    correctness: np.ndarray
+) -> float:
+    """
+    Compute AUC-AC (Area Under Accuracy-Coverage curve).
+    
+    Higher AUC-AC is better (higher accuracy at same coverage).
+    
+    Args:
+        confidences: Confidence scores, shape (n,)
+        correctness: Binary correctness (1=correct, 0=wrong), shape (n,)
+    
+    Returns:
+        AUC-AC value (higher is better)
+    """
+    n = len(confidences)
+    
+    # Sort by confidence (descending)
+    sorted_indices = np.argsort(confidences)[::-1]
+    sorted_correctness = correctness[sorted_indices]
+    
+    coverages = []
+    accuracies = []
+    
+    # Compute accuracy at each coverage level
+    for i in range(1, n + 1):
+        coverage = i / n
+        accuracy = np.mean(sorted_correctness[:i])
+        
+        coverages.append(coverage)
+        accuracies.append(accuracy)
+    
+    # Compute AUC using trapezoid rule
+    auc_ac = np.trapz(accuracies, coverages)
+    
+    return float(auc_ac)
+
+
 def selective_prediction_analysis(
     scores: np.ndarray,
     predictions: np.ndarray,

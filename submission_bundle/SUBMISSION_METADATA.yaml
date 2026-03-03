@@ -1,0 +1,143 @@
+---
+# IEEE Access Submission Metadata
+
+manuscript:
+  title: "CalibraTeach: Calibrated Selective Prediction for Real-Time Educational Fact Verification"
+  
+  abstract_length_words: 245
+  main_text_pages: 15
+  total_pages_with_appendices: 40
+  
+  submission_date: "2026-03-15"
+  journal: "IEEE Access"
+  journal_url: "https://ieeeaccess.ieee.org/"
+  
+  manuscript_id: "TBD"
+  
+authors:
+  - name: "Nidhibahen Patel"
+    ieee_membership: "IEEE Member"
+    current_affiliation: "Software Engineer, Verizon"
+    research_affiliation: "Computer Science Education Technology Lab, Kennesaw State University"
+    email: "npatel67@kennesaw.edu"
+    role: "Co-First Author"
+    contribution: "Ensemble architecture, LLM baseline, experiments, dataset curation"
+    contributed_equally: true
+    
+  - name: "Soma Kiran Kumar Nellipudi"
+    ieee_membership: "Senior IEEE Member"
+    current_affiliation: "Senior Software Engineer, Incomm Payments"
+    research_affiliation: "Computer Science Education Technology Lab, Kennesaw State University"
+    email: "snellipudi@kennesaw.edu"
+    role: "Co-First Author"
+    contribution: "ML optimization, latency engineering, reproducibility, infrastructure"
+    contributed_equally: true
+    
+  - name: "Selena He"
+    affiliation: "Assistant Professor, Computer Science Department, Kennesaw State University"
+    lab_director: "Computer Science Education Technology Lab"
+    email: "she4@kennesaw.edu"
+    role: "Corresponding Author"
+    contribution: "Project conception, methodology, pilot studies, manuscript preparation"
+    corresponding_author: true
+
+research_scope:
+  primary_category: "Learning Systems"
+  secondary_category: "Computational Linguistics"
+  tertiary_category: "Educational Technology"
+  
+  research_areas:
+    - "Machine Learning"
+    - "Natural Language Processing"
+    - "Educational AI"
+    - "Uncertainty Quantification"
+    - "Reproducible Research"
+
+key_contributions:
+  - "Systematic calibration methodology for fact verification (ECE 0.1247)"
+  - "ML optimization layer: 67.68ms latency, 14.78 claims/sec throughput"
+  - "Formal uncertainty quantification framework (AUC-AC 0.8803)"
+  - "Education-first system design with hybrid human-AI workflows"
+  - "Honest limitations disclosure and reproducibility protocols"
+
+evaluation:
+  primary_dataset: "CSClaimBench"
+  dataset_size: 260  # test set
+  extended_dataset: 560  # total
+  transfer_test: 200  # FEVER claims
+  infrastructure_test: 20000  # synthetic claims
+  
+  metrics:
+    accuracy_point_estimate: 0.8077
+    accuracy_ci_95: "[0.7538, 0.8577]"
+    ece_point_estimate: 0.1247
+    ece_ci_95: "[0.0989, 0.1679]"
+    auc_ac_point_estimate: 0.8803
+    auc_ac_ci_95: "[0.8206, 0.9386]"
+    
+    multiseed_accuracy: "0.8169 ± 0.0071"
+    multiseed_ece: "0.1317 ± 0.0088"
+    multiseed_auc_ac: "0.8872 ± 0.0219"
+    
+    transfer_accuracy: 0.743
+    transfer_ece: 0.150
+    
+  confidence_intervals: "2000 bootstrap resamples"
+  multi_seed: "5 deterministic seeds [0,1,2,3,4]"
+  inter_rater_agreement: "κ = 0.89"
+
+reproducibility:
+  code_available: true
+  code_repo: "https://github.com/somanellipudi/smart-notes"
+  code_license: "MIT"
+  
+  dataset_available: true
+  dataset_name: "CSClaimBench"
+  dataset_claims: 1045
+  dataset_license: "CC-BY-4.0"
+  
+  docker_container: true
+  cross_gpu_validation: ["A100", "V100", "RTX 4090"]
+  deterministic: true
+  reproduction_time_minutes: 20
+
+ethics:
+  pilot_study_irb: "TBD"
+  pilot_study_participants: "20 students, 5 instructors"
+  data_anonymized: true
+  data_encrypted: true
+  conflict_of_interest: false
+
+limitations:
+  - "Domain specific (CS education only)"
+  - "Sample size 260 (vs FEVER 19998)"
+  - "English-only evaluation"
+  - "Calibration transfer requires re-scaling"
+  - "Pedagogical benefits are unvalidated hypotheses"
+  - "26% selective abstention (not 100% automated)"
+
+pedagogical_caveat: "Pedagogical benefits (improved learning outcomes) are hypotheses requiring RCT validation; this paper demonstrates technical feasibility, not learning effectiveness."
+
+suggested_reviewers:
+  - "Expert in calibration and uncertainty quantification"
+  - "Expert in fact verification and NLP"
+  - "Expert in educational AI and learning sciences"
+  - "Expert in reproducibility in machine learning"
+
+related_work_count: 65
+figures: 6
+appendix_figures: 12
+main_tables: 8
+appendix_tables: 15
+
+submission_checklist_complete: true
+copyright_transfer_signed: false
+author_signatures_required: false
+
+notes:
+  - "All metrics from latest full-pipeline run (March 2, 2026)"
+  - "Calibration parity protocol applied to all baselines"
+  - "Extended appendices in separate PDF files"
+  - "GitHub repository link included for code and data"
+
+---

@@ -1,9 +1,9 @@
 ﻿# CalibraTeach: Calibrated Selective Prediction for Real-Time Educational Fact Verification
 
-**Authors**: Nidhhi Behen Patel, Soma Kiran Kumar Nellipudi, Selena He  
+**Authors**: Nidhibahen Patel, IEEE Member (Co-First, Software Engineer, Verizon), Soma Kiran Kumar Nellipudi, Senior IEEE Member (Co-First, Senior Software Engineer, Incomm Payments), Selena He (Assistant Professor, Kennesaw State University)  
 **Affiliation**: Computer Science Education Technology Lab, Kennesaw State University, GA, USA  
 **Corresponding author**: Selena He (she4@kennesaw.edu)  
-**Submission Date**: February 2026  
+**Submission Date**: March 2026  
 **IEEE Access / Transactions on Learning Technologies**
 
 ---
