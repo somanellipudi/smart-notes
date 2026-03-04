@@ -48,6 +48,32 @@ Smart Notes is a **research-grade verification system** that combines LLM-genera
      - Contradiction penalty (10%)
      - Graph centrality (5%)
    - **Temperature scaling** for calibration
+
+---
+
+## 📄 IEEE Access Submission
+
+**Paper**: "CalibraTeach: Calibrated Selective Prediction for Real-Time Educational Fact Verification"
+
+### Pre-Submission Checklist
+
+**CRITICAL**: Run Unicode sanitizer before uploading to Overleaf or generating final PDF:
+
+```bash
+cd submission_bundle/CalibraTeach_IEEE_Access_Upload/
+python scripts/sanitize_unicode.py --check     # Check for issues
+python scripts/sanitize_unicode.py --fix       # Auto-fix (creates .bak backups)
+```
+
+**Why this matters**: Invisible Unicode characters can cause PDF copy/paste artifacts ("￾" replacement glyphs) that will be flagged by IEEE reviewers.
+
+**Full submission guide**: See [`submission_bundle/CalibraTeach_IEEE_Access_Upload/SUBMISSION.md`](submission_bundle/CalibraTeach_IEEE_Access_Upload/SUBMISSION.md) for:
+- Figure regeneration instructions
+- Compilation checks
+- Metric preservation verification
+- IEEE Access formatting requirements
+
+---
    - Outputs: confidence + uncertainty estimates
 
 #### **Claim Classification**
