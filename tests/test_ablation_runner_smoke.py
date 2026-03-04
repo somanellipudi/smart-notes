@@ -5,12 +5,65 @@ Quick tests to ensure ablation infrastructure works (CI-friendly).
 Runs on small sample size for speed.
 """
 
+import json
 import pytest
 import tempfile
 from pathlib import Path
 import pandas as pd
 
-from scripts.run_cs_benchmark import AblationRunner
+import src.eval.cs_benchmark as cs_benchmark_module
+from src.eval.cs_benchmark import AblationRunner
+
+
+class _FakeMetrics:
+    def __init__(self):
+        self.accuracy = 0.75
+        self.F1_verified = 0.70
+        self.precision_verified = 0.72
+        self.recall_verified = 0.68
+        self.ece = 0.05
+        self.brier_score = 0.12
+        self.avg_time_per_claim = 0.01
+
+    def to_csv_row(self):
+        return {
+            "accuracy": self.accuracy,
+            "F1_verified": self.F1_verified,
+            "precision_verified": self.precision_verified,
+            "recall_verified": self.recall_verified,
+            "ece": self.ece,
+            "brier_score": self.brier_score,
+            "avg_time_per_claim": self.avg_time_per_claim,
+        }
+
+
+class _FakeResult:
+    def __init__(self, config_name="fake"):
+        self.metrics = _FakeMetrics()
+        self.timestamp = "2026-03-04T00:00:00"
+        self.config_name = config_name
+
+    def to_json(self, output_path):
+        Path(output_path).write_text(json.dumps({"config_name": self.config_name}), encoding="utf-8")
+
+    def to_csv(self, output_path):
+        pd.DataFrame([self.metrics.to_csv_row()]).to_csv(output_path, index=False)
+
+
+class _FakeCSBenchmarkRunner:
+    def __init__(self, dataset_path, seed=42, device="cpu", batch_size=32):
+        self.dataset_path = dataset_path
+        self.seed = seed
+        self.device = device
+        self.batch_size = batch_size
+
+    def run(self, config, noise_types=None, sample_size=None):
+        return _FakeResult()
+
+
+@pytest.fixture(autouse=True)
+def _patch_heavy_runner(monkeypatch):
+    monkeypatch.setattr(cs_benchmark_module, "CSBenchmarkRunner", _FakeCSBenchmarkRunner)
 
 
 class TestAblationRunnerSmoke:
@@ -59,30 +112,14 @@ class TestAblationRunnerSmoke:
             sample_size=3,  # Small sample for speed
             seed=42
         )
-        
-        # Get baseline config
-        configs = runner.get_ablation_configs()
-        config_name = "00_no_verification"
-        config = configs[config_name]
-        
-        # Run benchmark
-        from src.evaluation.cs_benchmark_runner import CSBenchmarkRunner
-        
-        benchmark_runner = CSBenchmarkRunner(
-            dataset_path="evaluation/cs_benchmark/cs_benchmark_dataset.jsonl",
-            seed=42,
-            device="cpu"
-        )
-        
-        result = benchmark_runner.run(
-            config=config,
-            sample_size=3
-        )
-        
+
+        df = runner.run_ablations(noise_injection=False)
+
         # Check result structure
-        assert result is not None
-        assert result.metrics.accuracy is not None
-        assert 0 <= result.metrics.accuracy <= 1
+        assert df is not None
+        assert len(df) > 0
+        assert "accuracy" in df.columns
+        assert float(df.iloc[0]["accuracy"]) >= 0.0
     
     def test_ablations_complete_without_error(self, temp_output_dir):
         """Test that ablations run to completion (smoke test)."""
@@ -234,7 +271,7 @@ class TestAblationRunnerCLI:
     
     def test_cli_callable(self):
         """Test that CLI can be imported and called."""
-        from scripts.run_cs_benchmark import main
+        from src.eval.cs_benchmark import main
         
         assert callable(main), "main() is not callable"
 

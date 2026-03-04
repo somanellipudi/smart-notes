@@ -23,6 +23,7 @@ from src.retrieval.youtube_ingest import (
 class TestTranscriptFetchFallback:
     """Test transcript fetching with fallback scenarios."""
     
+    @pytest.mark.external
     def test_fetch_with_available_package(self):
         """Test that fetch_transcript_text checks for available package."""
         # This should only pass if youtube-transcript-api is installed
@@ -49,6 +50,7 @@ class TestTranscriptFetchFallback:
             assert "Hello" in result.text
             assert "world" in result.text
     
+    @pytest.mark.external
     def test_fetch_without_available_package(self):
         """Test error message when youtube-transcript-api not installed."""
         with patch('src.retrieval.youtube_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', False):
@@ -58,6 +60,7 @@ class TestTranscriptFetchFallback:
             assert result.error is not None
             assert "pip install youtube-transcript-api" in result.error
     
+    @pytest.mark.external
     def test_fetch_invalid_video_id(self):
         """Test error handling for invalid video ID."""
         result = fetch_transcript_text("")
@@ -127,27 +130,32 @@ class TestTranscriptFetchFallback:
 class TestFallbackMessage:
     """Test user-friendly fallback message generation."""
     
+    @pytest.mark.external
     def test_message_for_disabled_captions(self):
         """Get appropriate message for disabled captions."""
         message = get_fallback_message("Captions disabled for this video")
         assert "disabled" in message.lower()
         assert "paste" in message.lower() or "article" in message.lower()
     
+    @pytest.mark.external
     def test_message_for_not_available(self):
         """Get appropriate message for unavailable transcript."""
         message = get_fallback_message("Transcript not available")
         assert "not available" in message.lower() or "paste" in message.lower()
     
+    @pytest.mark.external
     def test_message_for_private_video(self):
         """Get appropriate message for private video."""
         message = get_fallback_message("Video is private")
         assert "private" in message.lower()
     
+    @pytest.mark.external
     def test_message_for_package_missing(self):
         """Get appropriate message for missing package."""
         message = get_fallback_message("youtube-transcript-api not installed")
         assert "pip install" in message.lower()
     
+    @pytest.mark.external
     def test_message_for_unknown_error(self):
         """Get generic fallback message for unknown error."""
         message = get_fallback_message("Some random error occurred")
@@ -155,12 +163,14 @@ class TestFallbackMessage:
         # Should provide helpful guidance
         assert len(message) > 20
     
+    @pytest.mark.external
     def test_message_for_none_error(self):
         """Get generic message when error is None."""
         message = get_fallback_message(None)
         assert "transcript" in message.lower()
         assert len(message) > 20
     
+    @pytest.mark.external
     def test_message_for_empty_error(self):
         """Get generic message when error is empty string."""
         message = get_fallback_message("")
@@ -171,6 +181,7 @@ class TestFallbackMessage:
 class TestTranscriptResultDataclass:
     """Test TranscriptResult dataclass functionality."""
     
+    @pytest.mark.external
     def test_successful_result_to_dict(self):
         """Convert successful TranscriptResult to dict."""
         result = TranscriptResult(
@@ -190,6 +201,7 @@ class TestTranscriptResultDataclass:
         assert result_dict["language"] == "en"
         assert result_dict["metadata"]["char_count"] == 23
     
+    @pytest.mark.external
     def test_failed_result_to_dict(self):
         """Convert failed TranscriptResult to dict."""
         result = TranscriptResult(
@@ -206,6 +218,7 @@ class TestTranscriptResultDataclass:
         assert result_dict["video_id"] == "dQw4w9WgXcQ"
         assert result_dict["text"] == ""
     
+    @pytest.mark.external
     def test_result_with_timestamps(self):
         """TranscriptResult handles timestamp formatting."""
         result = TranscriptResult(
@@ -289,6 +302,7 @@ class TestTranscriptFetchingEdgeCases:
 class TestUserFacingErrorMessages:
     """Test that error messages are user-friendly and actionable."""
     
+    @pytest.mark.external
     def test_error_messages_mention_solutions(self):
         """Error messages should suggest solutions."""
         test_cases = [
@@ -306,6 +320,7 @@ class TestUserFacingErrorMessages:
             found = any(term.lower() in message.lower() for term in expected_terms or ["transcript"])
             assert found, f"Message '{message}' missing expected terms: {expected_terms}"
     
+    @pytest.mark.external
     def test_error_messages_no_technical_jargon(self):
         """Error messages avoid unnecessary technical jargon."""
         with patch('src.retrieval.youtube_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', False):

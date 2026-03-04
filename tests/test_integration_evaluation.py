@@ -18,8 +18,7 @@ import csv
 from pathlib import Path
 import time
 
-from src.evaluation.cs_benchmark_runner import CSBenchmarkRunner
-from scripts.run_cs_benchmark import AblationRunner
+from src.eval.cs_benchmark import AblationRunner
 
 
 class TestBenchmarkPipelineExecution:
@@ -33,13 +32,11 @@ class TestBenchmarkPipelineExecution:
 
     def test_single_config_execution(self, temp_output_dir):
         """Execute benchmark with single configuration."""
-        runner = CSBenchmarkRunner(device="cpu", batch_size=4)
-        
         # Small dataset for quick testing
         dataset_path = Path("evaluation/cs_benchmark/cs_benchmark_easy.jsonl")
         if dataset_path.exists():
             examples = [json.loads(line) for line in open(dataset_path)][:3]
-            
+
             assert len(examples) > 0, "Test dataset empty"
             assert all("gold_label" in ex for ex in examples), "Missing labels"
 
@@ -49,7 +46,9 @@ class TestBenchmarkPipelineExecution:
         configs = ablation_runner.get_ablation_configs()
         
         assert len(configs) > 0, "No ablation configurations"
-        assert all("name" in c and "config" in c for c in configs), "Invalid config structure"
+        assert isinstance(configs, dict), "Ablation configs should be a dict"
+        assert all(isinstance(name, str) for name in configs.keys()), "Invalid config names"
+        assert all(isinstance(cfg, dict) for cfg in configs.values()), "Invalid config structure"
 
     def test_output_file_generation(self, temp_output_dir):
         """Test that output files are created correctly."""
@@ -131,8 +130,6 @@ class TestDataFlowValidation:
 
     def test_reproducibility_across_runs(self):
         """Test reproducibility of results."""
-        from scripts.run_cs_benchmark import AblationRunner
-        
         # If we run with same seed, results should be identical
         seed = 42
         
@@ -180,11 +177,14 @@ class TestErrorHandling:
 
     def test_empty_dataset_handling(self):
         """Test handling of empty datasets."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
             fname = f.name
-        
-        examples = [json.loads(line) for line in open(fname)]
-        assert len(examples) == 0
+
+        try:
+            examples = [json.loads(line) for line in open(fname)]
+            assert len(examples) == 0
+        finally:
+            Path(fname).unlink(missing_ok=True)
 
 
 class TestPerformanceMetrics:
@@ -223,13 +223,11 @@ class TestConfigurationManagement:
 
     def test_config_naming_convention(self):
         """Test configuration names follow convention."""
-        from scripts.run_cs_benchmark import AblationRunner
-        
         ablation = AblationRunner()
         configs = ablation.get_ablation_configs()
         
         # Names should be descriptive
-        names = [c["name"] for c in configs]
+        names = list(configs.keys())
         assert all(isinstance(n, str) for n in names)
         assert all(len(n) > 0 for n in names)
 
@@ -244,15 +242,12 @@ class TestConfigurationManagement:
 
     def test_config_completeness(self):
         """Test that configs have all required keys."""
-        from scripts.run_cs_benchmark import AblationRunner
-        
         ablation = AblationRunner()
         configs = ablation.get_ablation_configs()
         
-        for config in configs:
-            assert "name" in config
-            assert "config" in config
-            assert isinstance(config["config"], dict)
+        for name, config in configs.items():
+            assert isinstance(name, str)
+            assert isinstance(config, dict)
 
 
 class TestReportGeneration:

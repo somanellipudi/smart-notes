@@ -9,16 +9,88 @@ An educational AI system that generates study notes and verifies claims against 
 
 📚 **Documentation**: [Technical Docs](docs/) | [Implementation Summary](IMPLEMENTATION_SUMMARY.md)
 
+
+## Testing & Validation
+
+### Paper-Critical Test Suite (Recommended for Reviewers)
+
+Run the paper-critical test suite that validates reproducibility requirements:
+
+```bash
+# Run paper-critical tests only (recommended)
+python -m pytest -q -m paper
+
+# Or using make (Unix/WSL/Git Bash)
+make test-paper
+
+# Or using PowerShell (Windows)
+.\test-paper.ps1
+```
+
+**Expected Output**: `63 passed, 1134 deselected in ~8s`
+
+### Full Validation
+
+Run comprehensive paper readiness validation:
+
+```bash
+python scripts/validate_paper_ready.py
+```
+
+**Note:** Both `python build_overleaf_bundle.py --validate-only` (root) and `python scripts/build_overleaf_bundle.py --validate-only` (canonical) are accepted entry points.
+
+This validates:
+- Paper-critical test suite (100% pass required)
+- Overleaf bundle integrity
+- Quickstart demo functionality
+- Leakage scan with real retrieval
+- Artifact schema compliance
+
+**Report**: Generated at `artifacts/TEST_STATUS_STEP2_8.md`
+
+### Test Categories
+
+Tests are organized by markers:
+- `@pytest.mark.paper` - Required for paper reproducibility (63 tests)
+- `@pytest.mark.external` - Require network/external resources (119 tests, skipped by default)
+- `@pytest.mark.slow` - Long-running optional tests
+
+### Development Testing
+
+```bash
+# Run all tests except external (default)
+python -m pytest -q
+
+# Run only external tests
+python -m pytest -q -m external
+
+# Run everything (may fail without network)
+python -m pytest -q -m ""
+
+# Run specific test file
+python -m pytest tests/test_leakage_scan_smoke.py -v
+```
+
+### CI/CD Integration
+
+```bash
+# Continuous integration command
+make validate  # Runs full paper validation suite
+```
+
 ---
 
-## What This System Does
+## Development
 
-Smart Notes is a **research-grade verification system** that combines LLM-generated study materials with semantic evidence validation. Built for educators and students who need **traceable, verifiable AI outputs**.
+### Setup for Contributors
 
-### 🎯 Two Operating Modes
+```bash
+# Install dev dependencies
+pip install pytest black flake8 mypy
 
-### 1. Standard Mode (Baseline)
-- Generates structured study notes from multi-modal input (text, images, audio)
+# Run paper-critical tests
+pytest tests/ -m paper
+```
 - Extracts: Topics, Key Concepts, Equations, Worked Examples, FAQs, Common Mistakes, Real-World Connections
 - Uses LLM (OpenAI GPT-4 or local Ollama)
 - Exports to Markdown, JSON

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.paper
 def test_quickstart_smoke_mode_runs():
     """Test that quickstart demo runs in smoke mode without errors."""
     result = subprocess.run(
@@ -28,6 +29,7 @@ def test_quickstart_smoke_mode_runs():
     assert result.returncode == 0, f"Quickstart failed: {result.stderr}"
 
 
+@pytest.mark.paper
 def test_quickstart_output_schema():
     """Test that quickstart output matches required schema."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -72,6 +74,7 @@ def test_quickstart_output_schema():
         Path(temp_output).unlink(missing_ok=True)
 
 
+@pytest.mark.paper
 def test_quickstart_example_fields():
     """Test that each example has required fields."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -117,6 +120,7 @@ def test_quickstart_example_fields():
         Path(temp_output).unlink(missing_ok=True)
 
 
+@pytest.mark.paper
 def test_quickstart_latency_fields():
     """Test that latency breakdown has all required fields."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -157,6 +161,7 @@ def test_quickstart_latency_fields():
         Path(temp_output).unlink(missing_ok=True)
 
 
+@pytest.mark.paper
 def test_quickstart_determinism():
     """Test that smoke mode produces deterministic output."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f1:
@@ -197,6 +202,7 @@ def test_quickstart_determinism():
         Path(temp_output2).unlink(missing_ok=True)
 
 
+@pytest.mark.paper
 def test_quickstart_default_output_location():
     """Test default output location is artifacts/quickstart/output.json."""
     repo_root = Path(__file__).parent.parent
@@ -229,6 +235,7 @@ def test_quickstart_default_output_location():
             default_output.unlink(missing_ok=True)
 
 
+@pytest.mark.paper
 def test_quickstart_help():
     """Test that --help flag works."""
     result = subprocess.run(

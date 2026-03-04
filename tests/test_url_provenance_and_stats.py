@@ -20,6 +20,7 @@ from src.reporting.ingestion_stats import IngestionStatsAggregator
 class TestCitationURLProvenance:
     """Test that citations include URL provenance."""
     
+    @pytest.mark.external
     def test_evidence_span_has_url_fields(self):
         """Test EvidenceSpan includes URL provenance fields."""
         span = EvidenceSpan(
@@ -37,6 +38,7 @@ class TestCitationURLProvenance:
         assert span.timestamp_range == (65.0, 95.0)
         assert span.source_type == "youtube_transcript"
     
+    @pytest.mark.external
     def test_evidence_citation_has_provenance_fields(self):
         """Test EvidenceCitation includes all provenance fields."""
         citation = EvidenceCitation(
@@ -50,6 +52,7 @@ class TestCitationURLProvenance:
         assert citation.origin == "https://example.com/python-intro"
         assert citation.source_type == "url_article"
     
+    @pytest.mark.external
     def test_pdf_citation_has_page_num(self):
         """Test PDF citations include page numbers."""
         citation = EvidenceCitation(
@@ -63,6 +66,7 @@ class TestCitationURLProvenance:
         assert citation.page_num == 42
         assert citation.origin == "textbook.pdf"
     
+    @pytest.mark.external
     def test_video_citation_has_timestamp(self):
         """Test video citations include timestamp range."""
         citation = EvidenceCitation(
@@ -80,6 +84,7 @@ class TestCitationURLProvenance:
 class TestMultiSourceIngestionStats:
     """Test that ingestion statistics track all sources."""
     
+    @pytest.mark.external
     def test_ingestion_report_has_url_fields(self):
         """Test IngestionReport includes URL-specific fields."""
         report = IngestionReport(
@@ -107,6 +112,7 @@ class TestMultiSourceIngestionStats:
         assert report.transcript_chunks_total == 25
         assert report.chunks_total_all_sources == 160
     
+    @pytest.mark.external
     def test_ingestion_context_validates_url_invariants(self):
         """Test that IngestionReportContext validates URL invariants."""
         context = IngestionReportContext(
@@ -119,6 +125,7 @@ class TestMultiSourceIngestionStats:
         assert len(violations) > 0
         assert any("url_fetch_success_count" in v.lower() for v in violations)
     
+    @pytest.mark.external
     def test_stats_aggregator_tracks_multiple_sources(self):
         """Test IngestionStatsAggregator tracks all source types."""
         aggregator = IngestionStatsAggregator()
@@ -168,6 +175,7 @@ class TestMultiSourceIngestionStats:
         assert aggregator.get_total_chunks() == 100  # 30 + 20 + 10 + 40
         assert aggregator.get_total_chars() == 42000  # 15000 + 10000 + 5000 + 12000
     
+    @pytest.mark.external
     def test_stats_aggregator_computes_avg_chunk_size(self):
         """Test average chunk size computation."""
         aggregator = IngestionStatsAggregator()
@@ -178,6 +186,7 @@ class TestMultiSourceIngestionStats:
         avg_size = aggregator.get_avg_chunk_size()
         assert avg_size == 400.0  # 8000 / 20
     
+    @pytest.mark.external
     def test_stats_aggregator_returns_none_for_zero_chunks(self):
         """Test that avg_chunk_size is None when no chunks."""
         aggregator = IngestionStatsAggregator()
@@ -189,6 +198,7 @@ class TestMultiSourceIngestionStats:
 class TestIngestionInvariants:
     """Test ingestion statistics invariants."""
     
+    @pytest.mark.external
     def test_invariant_claims_imply_chunks(self):
         """Test: if total_claims > 0 then chunks_total_all_sources must be > 0."""
         # This would be tested at the pipeline level where claims are generated
@@ -204,6 +214,7 @@ class TestIngestionInvariants:
         aggregator.add_text_source("notes", chunks=5, chars=2000)
         assert aggregator.get_total_chunks() > 0
     
+    @pytest.mark.external
     def test_invariant_evidence_implies_citations(self):
         """Test: if evidence_count > 0, citations must be non-empty."""
         claim = ClaimEntry(
@@ -220,6 +231,7 @@ class TestIngestionInvariants:
         assert claim.evidence_count > 0
         assert claim.citation_origin is not None
     
+    @pytest.mark.external
     def test_chunk_size_none_when_no_chunks(self):
         """Test avg_chunk_size is None when chunks_total_all_sources == 0."""
         report = IngestionReport(
@@ -240,6 +252,7 @@ class TestIngestionInvariants:
 class TestReportURLDisplay:
     """Test that reports show URL information correctly."""
     
+    @pytest.mark.external
     def test_claim_entry_has_url_fields(self):
         """Test ClaimEntry includes URL citation fields."""
         claim = ClaimEntry(
@@ -256,6 +269,7 @@ class TestReportURLDisplay:
         assert claim.citation_origin == "https://docs.python.org/3/tutorial"
         assert claim.citation_source_type == "url_article"
     
+    @pytest.mark.external
     def test_youtube_citation_has_timestamp(self):
         """Test YouTube citations include timestamp."""
         claim = ClaimEntry(
@@ -276,6 +290,7 @@ class TestReportURLDisplay:
 class TestStatsValidation:
     """Test validation of ingestion statistics."""
     
+    @pytest.mark.external
     def test_validate_url_success_rate(self):
         """Test URL success rate validation."""
         aggregator = IngestionStatsAggregator()
@@ -290,6 +305,7 @@ class TestStatsValidation:
         errors = aggregator.validate()
         assert len(errors) == 0
     
+    @pytest.mark.external
     def test_validate_pdf_ocr_pages(self):
         """Test PDF OCR pages validation."""
         aggregator = IngestionStatsAggregator()
@@ -306,6 +322,7 @@ class TestStatsValidation:
         assert len(errors) > 0
         assert any("ocr" in e.lower() for e in errors)
     
+    @pytest.mark.external
     def test_to_ingestion_report_conversion(self):
         """Test conversion to IngestionReport."""
         aggregator = IngestionStatsAggregator()
@@ -326,6 +343,7 @@ class TestStatsValidation:
 class TestSourceTypeHandling:
     """Test handling of different source types."""
     
+    @pytest.mark.external
     def test_evidence_span_source_types(self):
         """Test all supported source types in EvidenceSpan."""
         source_types = [
@@ -348,6 +366,7 @@ class TestSourceTypeHandling:
             )
             assert span.source_type == source_type
     
+    @pytest.mark.external
     def test_evidence_citation_source_types(self):
         """Test all supported source types in EvidenceCitation."""
         source_types = [

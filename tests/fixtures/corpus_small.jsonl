@@ -1,0 +1,20 @@
+{"doc_id": "doc_001", "text": "Machine learning is a subfield of artificial intelligence. Models are trained on large datasets to learn patterns. The quality of training data significantly impacts model performance."}
+{"doc_id": "doc_002", "text": "Deep learning uses neural networks with multiple layers. Backpropagation is the standard algorithm for computing gradients. These gradients are used to update network weights."}
+{"doc_id": "doc_003", "text": "The Transformer architecture was introduced in 2017. It relies on self-attention mechanisms rather than recurrence. This allows for better parallelization during training."}
+{"doc_id": "doc_004", "text": "Convolutional neural networks (CNNs) are designed for grid-like data. They are widely used in computer vision tasks. CNNs learn hierarchical feature representations."}
+{"doc_id": "doc_005", "text": "Reinforcement learning involves an agent interacting with an environment. The agent receives rewards or penalties based on its actions. The goal is to maximize cumulative reward."}
+{"doc_id": "doc_006", "text": "Neural networks consist of layers of interconnected nodes. Each connection has an associated weight. Training adjusts these weights to minimize error."}
+{"doc_id": "doc_007", "text": "Supervised learning requires labeled training examples. The model learns to map inputs to outputs. Classification and regression are common supervised learning tasks."}
+{"doc_id": "doc_008", "text": "Unsupervised learning works with unlabeled data. Clustering and dimensionality reduction are typical applications. The model discovers hidden patterns in the data."}
+{"doc_id": "doc_009", "text": "Attention mechanisms allow models to focus on relevant parts of the input. Self-attention computes attention weights within a single sequence. This is a key component of Transformers."}
+{"doc_id": "doc_010", "text": "Gradient descent is an optimization algorithm used in machine learning. It iteratively adjusts model parameters to minimize a loss function. Learning rate controls the step size."}
+{"doc_id": "doc_011", "text": "Overfitting occurs when a model memorizes training data rather than learning general patterns. Regularization techniques help prevent overfitting. Dropout and L2 penalty are common approaches."}
+{"doc_id": "doc_012", "text": "Transfer learning leverages knowledge from pre-trained models. This is especially useful when training data is limited. Fine-tuning adapts the model to a new task."}
+{"doc_id": "doc_013", "text": "Recurrent neural networks process sequential data. They maintain hidden states that capture temporal dependencies. LSTMs and GRUs are popular RNN variants."}
+{"doc_id": "doc_014", "text": "Batch normalization normalizes layer inputs during training. This accelerates training and improves model stability. It reduces internal covariate shift."}
+{"doc_id": "doc_015", "text": "Image classification assigns labels to images. CNNs are the dominant architecture for this task. Famous datasets include ImageNet and CIFAR-10."}
+{"doc_id": "doc_016", "text": "Natural language processing deals with text and speech. Common tasks include sentiment analysis, translation, and question answering. Transformers revolutionized NLP."}
+{"doc_id": "doc_017", "text": "Generative adversarial networks consist of a generator and discriminator. They are trained in a minimax game. GANs can generate realistic synthetic data."}
+{"doc_id": "doc_018", "text": "Model evaluation uses metrics like accuracy, precision, and recall. Cross-validation provides robust performance estimates. Test sets must be separate from training data."}
+{"doc_id": "doc_019", "text": "Hyperparameter tuning optimizes model configuration. Grid search and random search are common methods. Bayesian optimization is more efficient for expensive evaluations."}
+{"doc_id": "doc_020", "text": "Ensemble methods combine multiple models to improve performance. Bagging and boosting are popular techniques. Random forests are a widely used ensemble approach."}

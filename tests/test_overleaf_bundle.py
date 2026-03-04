@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.paper
 def test_bundle_builder_help():
     """Test that --help flag works."""
     result = subprocess.run(
@@ -28,6 +29,7 @@ def test_bundle_builder_help():
     assert "--paper_dir" in result.stdout
 
 
+@pytest.mark.paper
 def test_validate_only_mode():
     """Test that --validate-only runs without creating ZIP."""
     repo_root = Path(__file__).parent.parent
@@ -45,6 +47,7 @@ def test_validate_only_mode():
     assert "validate-only mode" in result.stdout.lower()
 
 
+@pytest.mark.paper
 def test_bundle_creation():
     """Test that bundle is created successfully with default settings."""
     repo_root = Path(__file__).parent.parent
@@ -70,6 +73,7 @@ def test_bundle_creation():
         assert temp_zip.stat().st_size > 0, "ZIP file is empty"
 
 
+@pytest.mark.paper
 def test_bundle_contents():
     """Test that bundle contains required files and excludes unwanted ones."""
     repo_root = Path(__file__).parent.parent
@@ -116,6 +120,7 @@ def test_bundle_contents():
                 assert len(matching) == 0, f"Bundle contains unwanted files matching '{pattern}': {matching}"
 
 
+@pytest.mark.paper
 def test_bundle_main_tex_valid():
     """Test that main.tex in bundle is valid LaTeX."""
     repo_root = Path(__file__).parent.parent
@@ -153,6 +158,7 @@ def test_bundle_main_tex_valid():
             assert r'\AccuracyValue' in main_tex_content
 
 
+@pytest.mark.paper
 def test_bundle_figures_referenced():
     """Test that all figures referenced in main.tex exist in bundle."""
     repo_root = Path(__file__).parent.parent
@@ -202,6 +208,7 @@ def test_bundle_figures_referenced():
                 assert found, f"Figure reference '{ref}' not found in bundle. Bundle files: {bundle_files}"
 
 
+@pytest.mark.paper
 def test_bundle_deterministic():
     """Test that bundle creation is deterministic (same inputs = same output)."""
     repo_root = Path(__file__).parent.parent
@@ -236,6 +243,7 @@ def test_bundle_deterministic():
             assert files1 == files2, "Bundle file lists differ between runs"
 
 
+@pytest.mark.paper
 def test_missing_paper_dir():
     """Test that script fails gracefully when paper/ directory is missing."""
     repo_root = Path(__file__).parent.parent

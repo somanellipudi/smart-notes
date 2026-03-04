@@ -32,6 +32,7 @@ from src.retrieval.evidence_store import Evidence, EvidenceStore
 class TestYouTubeURLDetection:
     """Test YouTube URL detection and validation."""
     
+    @pytest.mark.external
     def test_detect_youtube_with_watch(self):
         """Detect standard YouTube watch URLs."""
         urls = [
@@ -42,6 +43,7 @@ class TestYouTubeURLDetection:
         for url in urls:
             assert detect_source_type(url) == "youtube", f"Failed for {url}"
     
+    @pytest.mark.external
     def test_detect_youtube_short_urls(self):
         """Detect short youtu.be URLs."""
         urls = [
@@ -52,6 +54,7 @@ class TestYouTubeURLDetection:
         for url in urls:
             assert detect_source_type(url) == "youtube", f"Failed for {url}"
     
+    @pytest.mark.external
     def test_detect_youtube_embed_urls(self):
         """Detect YouTube embed URLs."""
         urls = [
@@ -61,6 +64,7 @@ class TestYouTubeURLDetection:
         for url in urls:
             assert detect_source_type(url) == "youtube", f"Failed for {url}"
     
+    @pytest.mark.external
     def test_detect_non_youtube_urls(self):
         """Ensure non-YouTube URLs are not detected as YouTube."""
         urls = [
@@ -71,6 +75,7 @@ class TestYouTubeURLDetection:
         for url in urls:
             assert detect_source_type(url) != "youtube", f"Incorrectly detected: {url}"
     
+    @pytest.mark.external
     def test_extract_video_id_watch(self):
         """Extract video ID from watch URLs."""
         test_cases = [
@@ -81,6 +86,7 @@ class TestYouTubeURLDetection:
         for url, expected_id in test_cases:
             assert extract_youtube_video_id(url) == expected_id
     
+    @pytest.mark.external
     def test_extract_video_id_short(self):
         """Extract video ID from short URLs."""
         test_cases = [
@@ -91,6 +97,7 @@ class TestYouTubeURLDetection:
         for url, expected_id in test_cases:
             assert extract_youtube_video_id(url) == expected_id
     
+    @pytest.mark.external
     def test_extract_video_id_embed(self):
         """Extract video ID from embed URLs."""
         test_cases = [
@@ -100,6 +107,7 @@ class TestYouTubeURLDetection:
         for url, expected_id in test_cases:
             assert extract_youtube_video_id(url) == expected_id
     
+    @pytest.mark.external
     def test_extract_invalid_video_id(self):
         """Return None for invalid URLs."""
         urls = [
@@ -116,6 +124,7 @@ class TestYouTubeURLDetection:
 class TestYouTubeTranscriptFetching:
     """Test YouTube transcript fetching with mocked API."""
     
+    @pytest.mark.external
     def test_fetch_successful_transcript(self, mock_api):
         """Successfully fetch and format transcript."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -135,6 +144,7 @@ class TestYouTubeTranscriptFetching:
         assert "world" in result.text
         assert len(result.text) > 0
     
+    @pytest.mark.external
     def test_fetch_transcript_with_timestamps(self, mock_api):
         """Fetch transcript with timestamps included."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -154,6 +164,7 @@ class TestYouTubeTranscriptFetching:
         assert "Main content" in result.text
         assert "Conclusion" in result.text
     
+    @pytest.mark.external
     def test_fetch_transcript_without_timestamps(self, mock_api):
         """Fetch transcript without timestamps."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -169,6 +180,7 @@ class TestYouTubeTranscriptFetching:
         assert "Part B" in result.text
         assert "[00:" not in result.text
     
+    @pytest.mark.external
     def test_fetch_transcript_english_preferred(self, mock_api):
         """Prefer English transcripts when available."""
         mock_transcripts = MagicMock()
@@ -184,6 +196,7 @@ class TestYouTubeTranscriptFetching:
         assert "English transcript" in result.text
         mock_transcripts.find_transcript.assert_called_once_with(['en', 'en-US'])
     
+    @pytest.mark.external
     def test_fetch_transcript_language_fallback(self, mock_api):
         """Fall back to available transcript when English unavailable."""
         mock_transcripts = MagicMock()
@@ -205,6 +218,7 @@ class TestYouTubeTranscriptFetching:
         assert result.error is None
         assert "Spanish transcript" in result.text
     
+    @pytest.mark.external
     def test_fetch_transcript_invalid_video_id(self, mock_api):
         """Handle invalid video ID gracefully."""
         url = "https://www.youtube.com/watch?v=invalid"
@@ -215,6 +229,7 @@ class TestYouTubeTranscriptFetching:
         assert result.text == ""
         assert result.source_type == "youtube"
     
+    @pytest.mark.external
     def test_fetch_transcript_api_error(self, mock_api):
         """Handle YouTube API errors gracefully with user-friendly messages."""
         mock_api.list_transcripts.side_effect = Exception("API Error: Video not found")
@@ -228,6 +243,7 @@ class TestYouTubeTranscriptFetching:
         assert result.text == ""
         assert result.source_type == "youtube"
     
+    @pytest.mark.external
     def test_fetch_transcript_metadata(self, mock_api):
         """Verify metadata includes video_id and language."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -251,6 +267,7 @@ class TestYouTubeTranscriptFetching:
 class TestURLIngestionWithYouTube:
     """Test URL ingestion orchestration with YouTube support."""
     
+    @pytest.mark.external
     def test_ingest_single_youtube_url(self, mock_requests, mock_api):
         """Ingest single YouTube URL."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -265,6 +282,7 @@ class TestURLIngestionWithYouTube:
         assert results[0].error is None
         assert "Test transcript" in results[0].text
     
+    @pytest.mark.external
     def test_ingest_mixed_urls(self, mock_requests, mock_api):
         """Ingest mix of YouTube and article URLs."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -288,6 +306,7 @@ class TestURLIngestionWithYouTube:
         assert results[0].source_type == "youtube"
         assert results[1].source_type == "article"
     
+    @pytest.mark.external
     def test_ingest_with_timestamps_enabled(self, mock_requests, mock_api):
         """Ingest YouTube with timestamps enabled globally."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -308,6 +327,7 @@ class TestYouTubeIntegrationWithEvidenceStore:
     
     @patch('src.retrieval.youtube_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
     @patch('src.retrieval.youtube_ingest.YouTubeTranscriptApi')
+    @pytest.mark.external
     def test_youtube_url_in_evidence_builder(self, mock_api):
         """YouTube URLs should be included in evidence store building."""
         mock_api.list_transcripts.return_value.find_transcript.return_value.fetch.return_value = [
@@ -331,6 +351,7 @@ class TestYouTubeIntegrationWithEvidenceStore:
     
     @patch('src.retrieval.youtube_ingest.YOUTUBE_TRANSCRIPT_AVAILABLE', True)
     @patch('src.retrieval.youtube_ingest.YouTubeTranscriptApi')
+    @pytest.mark.external
     def test_youtube_evidence_metadata(self, mock_api):
         """YouTube evidence should have correct source type and ID."""
         long_text = "Video content " * 15

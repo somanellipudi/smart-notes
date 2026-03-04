@@ -1,0 +1,5 @@
+{"claim_id": "claim_001", "text": "Machine learning models require large amounts of training data to achieve good performance.", "domain": "computer_science"}
+{"claim_id": "claim_002", "text": "Deep neural networks use backpropagation to compute gradients during training.", "domain": "computer_science"}
+{"claim_id": "claim_003", "text": "Transformers use self-attention mechanisms to process sequential data efficiently.", "domain": "computer_science"}
+{"claim_id": "claim_004", "text": "Convolutional neural networks are particularly effective for image classification tasks.", "domain": "computer_science"}
+{"claim_id": "claim_005", "text": "Reinforcement learning agents learn by interacting with their environment and receiving rewards.", "domain": "computer_science"}

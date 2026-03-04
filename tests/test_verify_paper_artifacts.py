@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.paper
 def test_verify_help():
     """Test that --help flag works."""
     result = subprocess.run(
@@ -26,6 +27,7 @@ def test_verify_help():
     assert "--report" in result.stdout
 
 
+@pytest.mark.paper
 def test_verify_missing_quickstart():
     """Test that verifier fails gracefully when quickstart output missing."""
     with tempfile.NamedTemporaryFile(suffix='.md', delete=False) as f:
@@ -54,6 +56,7 @@ def test_verify_missing_quickstart():
         Path(temp_report).unlink(missing_ok=True)
 
 
+@pytest.mark.paper
 def test_verify_valid_quickstart():
     """Test that verifier passes with valid quickstart output."""
     # Create valid quickstart output
@@ -139,6 +142,7 @@ def test_verify_valid_quickstart():
         Path(temp_report).unlink(missing_ok=True)
 
 
+@pytest.mark.paper
 def test_verify_invalid_schema():
     """Test that verifier catches schema violations."""
     # Invalid output - missing required fields
@@ -185,6 +189,7 @@ def test_verify_invalid_schema():
         Path(temp_report).unlink(missing_ok=True)
 
 
+@pytest.mark.paper
 def test_verify_creates_directories():
     """Test that verifier creates missing artifact directories."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -243,6 +248,7 @@ def test_verify_creates_directories():
         assert report_path.parent.exists()
 
 
+@pytest.mark.paper
 def test_verify_with_end_to_end():
     """Integration test: run quickstart then verify."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -284,6 +290,7 @@ def test_verify_with_end_to_end():
         assert "PASS" in report_content or "passed" in report_content.lower()
 
 
+@pytest.mark.paper
 def test_verify_default_report_location():
     """Test default verification output location is artifacts/verification/VerificationReport.md."""
     repo_root = Path(__file__).parent.parent

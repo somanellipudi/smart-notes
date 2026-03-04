@@ -25,6 +25,7 @@ from src.retrieval.url_ingest import (
 class TestSourceTypeDetection:
     """Test URL source type detection."""
     
+    @pytest.mark.external
     def test_detect_youtube_url(self):
         """Test YouTube URL detection."""
         youtube_urls = [
@@ -37,6 +38,7 @@ class TestSourceTypeDetection:
         for url in youtube_urls:
             assert detect_source_type(url) == "youtube", f"Failed for {url}"
     
+    @pytest.mark.external
     def test_detect_article_url(self):
         """Test article URL detection."""
         article_urls = [
@@ -48,6 +50,7 @@ class TestSourceTypeDetection:
         for url in article_urls:
             assert detect_source_type(url) == "article", f"Failed for {url}"
     
+    @pytest.mark.external
     def test_detect_unknown_url(self):
         """Test unknown URL scheme detection."""
         assert detect_source_type("ftp://example.com") == "unknown"
@@ -57,26 +60,31 @@ class TestSourceTypeDetection:
 class TestYouTubeVideoIdExtraction:
     """Test YouTube video ID extraction."""
     
+    @pytest.mark.external
     def test_extract_standard_url(self):
         """Test standard youtube.com/watch format."""
         url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         assert extract_youtube_video_id(url) == "dQw4w9WgXcQ"
     
+    @pytest.mark.external
     def test_extract_short_url(self):
         """Test short youtu.be format."""
         url = "https://youtu.be/dQw4w9WgXcQ"
         assert extract_youtube_video_id(url) == "dQw4w9WgXcQ"
     
+    @pytest.mark.external
     def test_extract_embed_url(self):
         """Test embed URL format."""
         url = "https://www.youtube.com/embed/dQw4w9WgXcQ"
         assert extract_youtube_video_id(url) == "dQw4w9WgXcQ"
     
+    @pytest.mark.external
     def test_extract_with_parameters(self):
         """Test URL with additional parameters."""
         url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s"
         assert extract_youtube_video_id(url) == "dQw4w9WgXcQ"
     
+    @pytest.mark.external
     def test_invalid_url(self):
         """Test invalid URL returns None."""
         assert extract_youtube_video_id("https://youtube.com/invalid") is None
@@ -87,6 +95,7 @@ class TestYouTubeVideoIdExtraction:
 class TestYouTubeTranscriptFetching:
     """Test YouTube transcript fetching (mocked)."""
     
+    @pytest.mark.external
     def test_fetch_transcript_success(self, mock_api):
         """Test successful transcript fetch."""
         # Mock API response
@@ -107,6 +116,7 @@ class TestYouTubeTranscriptFetching:
         assert "video transcript" in result.text
         assert len(result.text) > 0
     
+    @pytest.mark.external
     def test_fetch_transcript_api_error(self, mock_api):
         """Test transcript fetch with API error."""
         mock_api.get_transcript.side_effect = Exception("Transcript not available")
@@ -120,6 +130,7 @@ class TestYouTubeTranscriptFetching:
         assert "Failed to fetch transcript" in result.error
         assert result.text == ""
     
+    @pytest.mark.external
     def test_fetch_transcript_invalid_video_id(self, mock_api):
         """Test transcript fetch with invalid video ID."""
         url = "https://www.youtube.com/invalid"
@@ -138,6 +149,7 @@ class TestYouTubeTranscriptFetching:
 class TestArticleFetching:
     """Test web article fetching (mocked)."""
     
+    @pytest.mark.external
     def test_fetch_article_success(self, mock_bs4, mock_doc, mock_requests):
         """Test successful article fetch with readability."""
         # Mock HTTP response
@@ -167,6 +179,7 @@ class TestArticleFetching:
         assert len(result.text) > 0
         assert "physics" in result.text.lower()
     
+    @pytest.mark.external
     def test_fetch_article_too_large(self, mock_bs4, mock_doc, mock_requests):
         """Test article fetch with content too large."""
         mock_response = Mock()
@@ -180,6 +193,7 @@ class TestArticleFetching:
         assert "too large" in result.error.lower()
         assert result.text == ""
     
+    @pytest.mark.external
     def test_fetch_article_timeout(self, mock_bs4, mock_doc, mock_requests):
         """Test article fetch with timeout."""
         import requests as real_requests
@@ -199,6 +213,7 @@ class TestURLIngestion:
     
     @patch('src.retrieval.url_ingest.fetch_youtube_transcript')
     @patch('src.retrieval.url_ingest.fetch_article_content')
+    @pytest.mark.external
     def test_ingest_mixed_urls(self, mock_article, mock_youtube):
         """Test ingesting mix of YouTube and article URLs."""
         # Mock fetchers
@@ -230,6 +245,7 @@ class TestURLIngestion:
         assert results[1].source_type == "article"
         assert all(not r.error for r in results)
     
+    @pytest.mark.external
     def test_ingest_invalid_urls(self):
         """Test ingesting invalid URLs."""
         urls = [
@@ -251,6 +267,7 @@ class TestURLIngestion:
 class TestURLChunking:
     """Test URL source chunking."""
     
+    @pytest.mark.external
     def test_chunk_single_source(self):
         """Test chunking a single URL source."""
         source = UrlSource(
@@ -267,6 +284,7 @@ class TestURLChunking:
         assert all("[Source:" in chunk for chunk in chunks)
         assert all("Test Article" in chunk for chunk in chunks)
     
+    @pytest.mark.external
     def test_chunk_multiple_sources(self):
         """Test chunking multiple URL sources."""
         sources = [
@@ -295,6 +313,7 @@ class TestURLChunking:
         assert len(video_chunks) > 0
         assert len(article_chunks) > 0
     
+    @pytest.mark.external
     def test_chunk_skips_errors(self):
         """Test chunking skips sources with errors."""
         sources = [
@@ -325,6 +344,7 @@ class TestURLChunking:
 class TestURLIngestionSummary:
     """Test URL ingestion summary generation."""
     
+    @pytest.mark.external
     def test_summary_all_successful(self):
         """Test summary with all successful ingestions."""
         sources = [
@@ -353,6 +373,7 @@ class TestURLIngestionSummary:
         assert summary["by_type"]["article"] == 1
         assert summary["total_chars"] > 0
     
+    @pytest.mark.external
     def test_summary_with_failures(self):
         """Test summary with some failed ingestions."""
         sources = [

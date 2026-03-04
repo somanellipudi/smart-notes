@@ -5,6 +5,7 @@ from src.evaluation import runner
 
 import pytest
 
+@pytest.mark.external
 @pytest.mark.timeout(30)
 def test_runner_with_real_models(tmp_path):
     """Ensure the evaluation runner executes the real retriever/NLI path when available.

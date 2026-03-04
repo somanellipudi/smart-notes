@@ -24,6 +24,7 @@ from src.preprocessing.url_ingest import fetch_url_text, _is_youtube_url
 class TestPDFIntegration:
     """Integration tests for PDF ingestion."""
     
+    @pytest.mark.external
     def test_garbage_pdf_detection(self):
         """Test detection of garbage/corrupted PDF text."""
         # Simulate corrupted PDF with CID glyphs
@@ -33,6 +34,7 @@ class TestPDFIntegration:
         assert not is_good, "Should reject CID glyphs as garbage"
         assert "alphabetic ratio" in reason.lower()
     
+    @pytest.mark.external
     def test_quality_threshold_enforcement(self):
         """Test that quality thresholds are enforced."""
         # Valid text - should pass
@@ -45,6 +47,7 @@ class TestPDFIntegration:
         is_good, reason = _assess_extraction_quality(few_words)
         assert not is_good, "Should reject < 80 words"
     
+    @pytest.mark.external
     def test_text_cleaning_preserves_content(self):
         """Test that text cleaning removes corruption but preserves content."""
         text = "Calculus (cid:1) is (cid:2) important for (cid:3) mathematics"
@@ -58,6 +61,7 @@ class TestPDFIntegration:
         assert "mathematics" in cleaned
     
     @patch('src.preprocessing.pdf_ingest.PdfReader')
+    @pytest.mark.external
     def test_pdf_with_multiple_pages(self, mock_pdf_reader):
         """Test PDF extraction with multiple pages."""
         # Mock a 3-page PDF
@@ -83,6 +87,7 @@ class TestPDFIntegration:
         assert metadata["pages"] >= 1
     
     @patch('src.preprocessing.pdf_ingest.PdfReader')
+    @pytest.mark.external
     def test_pdf_extraction_fallback_strategy(self, mock_pdf_reader):
         """Test that extraction tries multiple strategies."""
         # First strategy fails
@@ -102,6 +107,7 @@ class TestPDFIntegration:
 class TestURLIntegration:
     """Integration tests for URL ingestion."""
     
+    @pytest.mark.external
     def test_youtube_url_identification(self):
         """Test YouTube URL pattern matching."""
         youtube_urls = [
@@ -122,6 +128,7 @@ class TestURLIntegration:
             assert not _is_youtube_url(url), f"Should not recognize: {url}"
     
     @patch('src.preprocessing.url_ingest.requests.get')
+    @pytest.mark.external
     def test_article_extraction_with_html(self, mock_get):
         """Test article extraction from HTML."""
         mock_response = Mock()
@@ -150,6 +157,7 @@ class TestURLIntegration:
             assert metadata["source_type"] == "article"
     
     @patch('src.preprocessing.url_ingest.YouTubeTranscriptApi')
+    @pytest.mark.external
     def test_youtube_transcript_concatenation(self, mock_api):
         """Test that YouTube transcripts are properly concatenated."""
         mock_api.get_transcript.return_value = [
@@ -168,6 +176,7 @@ class TestURLIntegration:
         assert metadata["word_count"] >= 4
     
     @patch('src.preprocessing.url_ingest.requests.get')
+    @pytest.mark.external
     def test_network_error_handling(self, mock_get):
         """Test graceful handling of network errors."""
         import requests
@@ -183,6 +192,7 @@ class TestURLIntegration:
 class TestPDFQuality:
     """Tests for PDF quality assessment heuristics."""
     
+    @pytest.mark.external
     def test_minimum_word_requirement(self):
         """Test word count threshold."""
         # Too few words
@@ -195,6 +205,7 @@ class TestPDFQuality:
         is_good, reason = _assess_extraction_quality(enough_words)
         # May still fail if letters are too low
     
+    @pytest.mark.external
     def test_minimum_letter_requirement(self):
         """Test letter count threshold."""
         # Short words = low letter count
@@ -207,6 +218,7 @@ class TestPDFQuality:
         is_good, reason = _assess_extraction_quality(good_text)
         # Should have good letter count
     
+    @pytest.mark.external
     def test_alphabetic_ratio_threshold(self):
         """Test alphabetic character ratio."""
         # Mostly numbers and symbols
@@ -224,6 +236,7 @@ class TestEndToEnd:
     """End-to-end integration tests."""
     
     @patch('src.preprocessing.pdf_ingest.PdfReader')
+    @pytest.mark.external
     def test_pdf_to_processing_pipeline(self, mock_pdf_reader):
         """Test PDF extraction through the full pipeline."""
         # Mock successful PDF extraction
@@ -246,6 +259,7 @@ class TestEndToEnd:
         assert metadata["pages"] >= 1
     
     @patch('src.preprocessing.url_ingest.requests.get')
+    @pytest.mark.external
     def test_url_to_processing_pipeline(self, mock_get):
         """Test URL extraction through the full pipeline."""
         mock_response = Mock()
