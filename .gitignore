@@ -133,3 +133,23 @@ downloads/
 results/
 exports/
 artifacts/
+
+# Build outputs
+dist/
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.bcf
+*.run.xml
+*.gz(busy)
+*.nav
+*.snm
+*.vrb
