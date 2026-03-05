@@ -220,6 +220,89 @@ pytest tests/test_verify_paper_artifacts.py -v
 
 ---
 
+## Paper Consistency Audit
+
+Before final submission, run the **Paper Consistency Audit** to verify that:
+
+1. **Metric macros are consistent**: Values in `paper/metrics_values.tex` match their usage in `main.tex` captions
+2. **Significance test results match**: Macros in `paper/significance_values.tex` exactly match `artifacts/stats/significance_table.csv`
+3. **Required figures exist**: All figures referenced in the paper (`architecture.pdf`, `reliability_diagram_verified.pdf`, `accuracy_coverage_verified.pdf`) are present
+4. **Dataset sizes are clearly documented**: The paper explains the difference between n=260 (expert-annotated test set) and n=1000 (full binary predictions)
+5. **Overleaf bundle integrity**: All required files for compilation are present and properly referenced in `main.tex`
+6. **Unicode artifacts prevented**: Minimal Unicode character sanitization is in place to prevent copy/paste artifacts in PDF
+
+### Running the Audit
+
+**Quick run (check only):**
+```bash
+python scripts/audit_paper_consistency.py
+```
+
+**Verbose diagnostics (shows all checks in detail):**
+```bash
+python scripts/audit_paper_consistency.py --verbose
+```
+
+**Expected output on success:**
+```
+======================================================================
+CALIBRATEACH PAPER CONSISTENCY AUDIT
+======================================================================
+
+[AUDIT 1/6] Macro verification (metrics_values.tex)
+[OK] metrics_values.tex macros verified
+
+[AUDIT 2/6] Significance verification
+[OK] significance_values.tex matches CSV
+
+[AUDIT 3/6] Figure presence check
+[OK] required figures present
+
+[AUDIT 4/6] Dataset size consistency check
+[OK] dataset size explanation present
+
+[AUDIT 5/6] Overleaf bundle integrity check
+[OK] Overleaf bundle integrity verified
+
+[AUDIT 6/6] Unicode sanitation check
+[OK] Unicode sanitation verified
+
+======================================================================
+Result: 6 passed, 0 failed
+======================================================================
+```
+
+**Exit codes:**
+- `0` = All consistency checks passed (ready to submit)
+- `1` = One or more checks failed (fix issues before submission)
+
+### Integration with Validation Pipeline
+
+The audit is automatically run as the **first step** of `python scripts/validate_paper_ready.py`, which also runs paper tests, leakage scans, and Overleaf bundle validation:
+
+```bash
+# Comprehensive validation (includes consistency audit)
+python scripts/validate_paper_ready.py
+
+# Quick validation (skips slow tests but still runs audit)
+python scripts/validate_paper_ready.py --quick
+
+# Compiled bundle PDF hygiene check (runs when pdflatex is available)
+python scripts/compile_and_check_pdf.py
+```
+
+### Common Issues and Solutions
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| "Missing macro definition: \\AccuracyValue" | `metrics_values.tex` not found or incomplete | Run `python scripts/verify_reported_metrics.py` to regenerate |
+| "Mismatch: significance_values.tex vs CSV" | CSV values changed but `.tex` file not regenerated | Run `python scripts/generate_significance_tex.py` |
+| "Missing: figures/accuracy_coverage_verified.pdf" | Figure generation or naming issue | Re-run figure generation scripts in `scripts/` |
+| "No explanation found for n=260 vs n=1000" | Paper text missing dataset size clarification | Verify `paper/main.tex` includes the explanation sentence |
+| "Overleaf bundle: missing required main.tex" | Paper directory misconfigured | Verify `paper/main.tex` exists and is readable |
+
+---
+
 ## File Locations
 
 ### Generated Artifacts
@@ -466,6 +549,158 @@ bash scripts/reproduce_all.sh
   export PYTHONHASHSEED=42
   export CUBLAS_WORKSPACE_CONFIG=:4096:8
   ```
+
+---
+
+## Step 3 — Significance Testing
+
+Paired statistical tests comparing CalibraTeach vs baselines using prediction artifacts.
+
+### Command
+
+```bash
+python scripts/run_significance_tests.py \
+    --preds_dir artifacts/preds \
+    --outdir artifacts/stats \
+    [--n_samples 1000] \
+    [--seed 42]
+```
+
+### What It Does
+
+1. **Loads prediction artifacts** from `artifacts/preds/predictions.json` (or generates synthetic ones if missing)
+2. **Runs McNemar test** - Tests whether the two classifiers significantly differ in their error patterns
+   - Exact binomial test when n01+n10 ≤ 25
+   - Chi-square with continuity correction otherwise
+3. **Runs permutation test** - Tests whether the accuracy difference is significant by randomly shuffling predictions
+   - 10,000 permutations (default)
+   - Deterministic with seed
+4. **Compares all baselines vs CalibraTeach:**
+   - Retrieval-only
+   - Retrieval + NLI
+   - Baseline (no verification)
+
+### Outputs
+
+**JSON: `artifacts/stats/significance_results.json`**
+```json
+[
+  {
+    "baseline": "Baseline (no verification)",
+    "accuracy_baseline": 0.520,
+    "accuracy_calibrateach": 0.812,
+    "accuracy_diff": 0.292,
+    "mcnemar_p": 0.000001,
+    "mcnemar_significant": true,
+    "perm_p": 0.000200,
+    "perm_significant": true,
+    "significant": true,
+    "n_samples": 1000,
+    "seed": 42
+  },
+  ...
+]
+```
+
+**CSV: `artifacts/stats/significance_table.csv`**
+```
+baseline,accuracy_baseline,accuracy_calibrateach,accuracy_diff,mcnemar_p,mcnemar_significant,perm_p,perm_significant,significant,n_samples,seed
+Baseline (no verification),0.520,0.812,0.292,0.000001,True,0.0002,True,True,1000,42
+...
+```
+
+### Interpretation
+
+- **mcnemar_p**: P-value from McNemar test (two-tailed)
+  - p < 0.05: Methods differ significantly in error patterns
+- **perm_p**: P-value from permutation test (two-tailed)
+  - p < 0.05: Accuracy difference is significant
+- **significant**: True if either test is significant at α=0.05
+
+### Example Results
+
+For typical paper results:
+- CalibraTeach (0.812) vs Baseline (0.520) → p < 0.001 (highly significant)
+- CalibraTeach (0.812) vs Retrieval+NLI (0.781) → p ≈ 0.06 (borderline)
+
+### Determinism
+
+- **Results are deterministic** with fixed seed (default: 42)
+- Same input always produces same p-values
+- Permutation test uses seeded random number generator
+
+### Small Dataset Caveat
+
+If n_samples < 100:
+- McNemar test uses exact binomial (conservative)
+- Permutation test has low power
+- Statistical significance harder to achieve (requires large effect size)
+
+---
+
+## Step 4 — Generate LaTeX Macros for Paper Integration
+
+After running significance tests, generate LaTeX macro file for dynamic metric inclusion in the paper.
+
+### Command
+
+```bash
+python scripts/generate_significance_tex.py
+```
+
+### What It Does
+
+1. **Reads** `artifacts/stats/significance_table.csv` from Step 3
+2. **Generates** `paper/significance_values.tex` with LaTeX command definitions
+3. **Formats** p-values and accuracy differences for typeset output
+4. **Overwrites** safely (idempotent operation)
+
+### Output
+
+**File: `paper/significance_values.tex`**
+```tex
+% Auto-generated by scripts/generate_significance_tex.py
+\newcommand{\SigAccDiffRetrievalNLI}{0.031}
+\newcommand{\SigPvalMcNemarRetrievalNLI}{0.0971}
+\newcommand{\SigPvalPermutationRetrievalNLI}{0.0999}
+% ... (more baselines)
+```
+
+### Integration with main.tex
+
+The paper automatically includes these macros:
+
+```tex
+\IfFileExists{significance_values.tex}{
+    \input{significance_values.tex}
+}{
+    % Fallback defaults (no significance tests run)
+}
+```
+
+This ensures:
+- ✅ Paper compiles even if significance tests haven't been run
+- ✅ Metrics stay synchronized (no manual copy-paste errors)
+- ✅ Overleaf deployment-safe (fallback values provided)
+
+### Re-generation Workflow
+
+If you re-run significance tests with different seeds or data:
+
+```bash
+# 1. Run significance tests
+python scripts/run_significance_tests.py \
+    --preds_dir artifacts/preds \
+    --outdir artifacts/stats \
+    --seed 42
+
+# 2. Regenerate LaTeX macros
+python scripts/generate_significance_tex.py
+
+# 3. Recompile paper
+cd paper/
+pdflatex main.tex
+```
 
 ---
 

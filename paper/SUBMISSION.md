@@ -72,6 +72,115 @@ Only `main.pdf` is required for IEEE Access final submission.
 
 ---
 
+## Paper Artifact Build & Manifest Contract
+
+Before final submission or when metrics/figures change, rebuild all paper-facing artifacts deterministically:
+
+### Quick Rebuild (30 seconds)
+
+```bash
+python scripts/rebuild_paper_artifacts.py
+```
+
+This regenerates:
+1. **metrics_values.tex** - From `artifacts/metrics_summary.json` (seed=0)
+2. **significance_values.tex** - From significance tests (seed=42) and CSV
+3. **Verified figures** (PDFs) - Deterministic regeneration
+4. **Manifest** - SHA256 hashes for all artifacts
+
+**Expected output**:
+```
+[OK] rebuilt metrics_values.tex
+[OK] rebuilt significance_values.tex
+[OK] verified figures present/generated
+[OK] wrote manifest: artifacts/manifest/paper_artifacts_manifest.json
+[OK] audit passed
+```
+
+### Integration with Validation Pipeline
+
+Rebuild artifacts as part of full validation:
+
+```bash
+python scripts/validate_paper_ready.py --rebuild-paper-artifacts --quick
+```
+
+This runs rebuild, then proceeds with:
+- Paper consistency audit
+- Metric verification
+- Significance test validation
+- Figure integrity checks
+
+### Seed Policy for Determinism
+
+All artifact regeneration follows strict seed policies to ensure determinism:
+
+| Artifact | Seed | Purpose | Source |
+|----------|------|---------|--------|
+| metrics_values.tex | 0 | Extract from deterministic metrics_summary.json | Built during evaluation |
+| significance_values.tex | 42 | Reproducible significance tests | run_significance_tests.py |
+| Verified figures | Fixed | Deterministic plot generation | Matplotlib with fixed seed |
+
+**Note**: Seeds are not re-tunable; they are fixed policy to match training/evaluation seeds.
+
+### Manifest Contract
+
+The build process writes `artifacts/manifest/paper_artifacts_manifest.json` with:
+
+```json
+{
+  "manifest_version": "1.0",
+  "generated_at_utc": "ISO 8601 timestamp",
+  "git_commit": "Hash of current git commit",
+  "python_version": "Python version used",
+  "platform": "Windows/Linux/macOS version",
+  "seed_policy": {
+    "metrics_seed": 0,
+    "significance_seed": 42
+  },
+  "artifacts": [
+    {
+      "path": "paper/metrics_values.tex",
+      "sha256": "256-bit hex hash",
+      "bytes": file_size,
+      "description": "Brief description"
+    }
+  ]
+}
+```
+
+**Purpose**: The manifest proves artifact immutability (no files changed without rebuild) and enables:
+- Verification that artifacts match expected hashes
+- Detection of accidental modifications
+- Proof of deterministic regeneration
+- Environment/platform audit trail
+
+### Full Build + Validation + Submit Workflow
+
+```bash
+# 1. Rebuild all paper artifacts
+python scripts/rebuild_paper_artifacts.py
+
+# 2. Run comprehensive validation
+python scripts/validate_paper_ready.py --rebuild-paper-artifacts --quick
+
+# 2.5 Verify hygiene on COMPILED PDF bundle (if pdflatex is available)
+python scripts/compile_and_check_pdf.py
+
+# 3. Create Overleaf submission bundle
+python scripts/build_overleaf_bundle.py
+
+# 4. Verify bundle can compile
+python scripts/build_overleaf_bundle.py --validate-only
+
+# 5. Upload bundle to IEEE Access
+# (submission system accepts ZIP or individual files)
+```
+
+Canonical architecture figure path used by the paper: `paper/figures/architecture.pdf` (included as `figures/architecture.pdf` from `paper/main.tex`).
+
+---
+
 **Last Updated**: March 4, 2026  
 **Paper Version**: Camera-ready (post-revision)  
 **IEEE Access Submission ID**: TBD

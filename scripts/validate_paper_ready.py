@@ -8,6 +8,7 @@ the repository is ready for IEEE Access submission.
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -44,6 +45,18 @@ def run_command(cmd: list[str], description: str, cwd: Path) -> tuple[bool, str]
     return success, output
 
 
+def pdflatex_available() -> bool:
+    if shutil.which("pdflatex"):
+        return True
+
+    candidates = [
+        Path.home() / "AppData" / "Local" / "Programs" / "MiKTeX" / "miktex" / "bin" / "x64" / "pdflatex.exe",
+        Path(r"C:\Program Files\MiKTeX\miktex\bin\x64\pdflatex.exe"),
+        Path(r"C:\Program Files (x86)\MiKTeX\miktex\bin\x64\pdflatex.exe"),
+    ]
+    return any(p.exists() for p in candidates)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Validate paper reproducibility requirements"
@@ -59,6 +72,11 @@ def main():
         action="store_true",
         help="Run only quick tests (skip slow validations)",
     )
+    parser.add_argument(
+        "--rebuild-paper-artifacts",
+        action="store_true",
+        help="Rebuild all paper artifacts (metrics, significance, figures, manifest) before validation",
+    )
     
     args = parser.parse_args()
     
@@ -68,6 +86,76 @@ def main():
     
     results = {}
     all_passed = True
+    
+    # OPTIONAL: Rebuild paper artifacts if requested (deterministic regeneration)
+    if args.rebuild_paper_artifacts:
+        success, output = run_command(
+            [sys.executable, "scripts/rebuild_paper_artifacts.py"],
+            "Paper artifact regeneration with manifest contract",
+            repo_root,
+        )
+        results["paper_artifact_rebuild"] = {"success": success, "output": output}
+        all_passed = all_passed and success
+        
+        if not success:
+            print("\n[CRITICAL] Paper artifact rebuild failed. Stopping validation.")
+            generate_report(report_path, results, all_passed)
+            sys.exit(1)
+
+    # 0.a LaTeX artifact hygiene (generated macros must be clean)
+    success, output = run_command(
+        [sys.executable, "scripts/check_tex_artifacts_hygiene.py"],
+        "LaTeX artifact hygiene (metrics/significance macros)",
+        repo_root,
+    )
+    results["tex_artifact_hygiene"] = {"success": success, "output": output}
+    all_passed = all_passed and success
+    if not success:
+        print("\n[CRITICAL] LaTeX artifact hygiene check failed.")
+        generate_report(report_path, results, all_passed)
+        sys.exit(1)
+    
+    # 0. Paper consistency audit (early check, prevents wasted time on mismatches)
+    success, output = run_command(
+        [sys.executable, "scripts/audit_paper_consistency.py"],
+        "Paper consistency audit (checks main.tex, metrics, significance, figures)",
+        repo_root,
+    )
+    results["paper_consistency_audit"] = {"success": success, "output": output}
+    all_passed = all_passed and success
+    
+    # 0.5. PDF text extraction hygiene check (fail-fast on architecture.pdf embedded text)
+    success, output = run_command(
+        [sys.executable, "scripts/check_pdf_text_hygiene.py", "paper/figures/architecture.pdf", "--check-architecture"],
+        "PDF text hygiene check (canonical architecture.pdf must not contain embedded specs)",
+        repo_root,
+    )
+    results["pdf_text_hygiene"] = {"success": success, "output": output}
+    all_passed = all_passed and success
+    
+    if not success:
+        print("\n[CRITICAL] Architecture PDF hygiene check failed. Embedded specs or replacement artifacts detected.")
+        print("This prevents reproducibility and causes reviewer concerns.")
+        generate_report(report_path, results, all_passed)
+        sys.exit(1)
+    
+    # 0.6. Compiled PDF hygiene check (script handles pdflatex-missing case)
+    if pdflatex_available():
+        success, output = run_command(
+            [sys.executable, "scripts/compile_and_check_pdf.py"],
+            "Compiled PDF verification (extract zip, compile with pdflatex, check hygiene)",
+            repo_root,
+        )
+        results["compiled_pdf_check"] = {"success": success, "output": output}
+        all_passed = all_passed and success
+    else:
+        print("[WARN] pdflatex not found; skipping compiled PDF check")
+        results["compiled_pdf_check"] = {"success": True, "output": "pdflatex missing; skipped"}
+    
+    if not success:
+        print("\n[CRITICAL] Compiled PDF hygiene check failed. Check for embedded specs or replacement artifacts.")
+        generate_report(report_path, results, all_passed)
+        sys.exit(1)
     
     # 1. Run paper-critical test suite
     success, output = run_command(

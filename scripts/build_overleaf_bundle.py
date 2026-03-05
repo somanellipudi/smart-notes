@@ -109,12 +109,37 @@ def validate_main_tex(paper_dir: Path) -> Tuple[bool, List[str]]:
 def validate_figures(paper_dir: Path, main_tex_path: Path) -> Tuple[bool, List[str]]:
     """
     Validate all \\includegraphics references point to existing files.
+    Also validates architecture.pdf has no embedded specs (canonical-only, clean).
     
     Returns:
         (is_valid, error_messages)
     """
     errors = []
     content = main_tex_path.read_text(encoding='utf-8')
+
+    # Enforce single architecture includegraphics reference in main.tex with line reporting
+    arch_matches = []
+    pattern = re.compile(r'\\includegraphics(?:\[[^\]]*\])?\{([^}]*(?:^|/)architecture\.pdf)\}')
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        for match in pattern.finditer(line):
+            arch_matches.append((line_number, match.group(1).strip()))
+
+    if len(arch_matches) != 1:
+        errors.append(
+            f"ERROR: Expected exactly 1 architecture includegraphics reference in "
+            f"{main_tex_path}, found {len(arch_matches)}"
+        )
+        for line_number, ref in arch_matches:
+            errors.append(f"  - {main_tex_path}:{line_number}: {ref}")
+        return False, errors
+
+    if arch_matches[0][1] != "figures/architecture.pdf":
+        errors.append(
+            "ERROR: Architecture include path in main.tex must be figures/architecture.pdf "
+            f"(found: {arch_matches[0][1]})"
+        )
+        return False, errors
+
     figure_paths = extract_figure_paths(content)
     
     if not figure_paths:
@@ -136,6 +161,29 @@ def validate_figures(paper_dir: Path, main_tex_path: Path) -> Tuple[bool, List[s
         for fig in missing_figures:
             errors.append(f"  - {fig}")
         return False, errors
+    
+    # Architecture PDF hygiene check (canonical only)
+    print("\n[HYGIENE CHECK] Validating architecture.pdf for embedded specs...")
+    canonical_arch = paper_dir / "figures" / "architecture.pdf"
+    if canonical_arch.exists():
+        import subprocess
+        repo_root = paper_dir.parent
+        scripts_dir = repo_root / "scripts"
+        
+        hygiene_result = subprocess.run(
+            [__import__("sys").executable, str(scripts_dir / "check_pdf_text_hygiene.py"),
+             str(canonical_arch), "--check-architecture"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root)
+        )
+        
+        if hygiene_result.returncode != 0:
+            errors.append("ERROR: Architecture PDF hygiene check failed (embedded specs detected)")
+            errors.append(hygiene_result.stdout)
+            return False, errors
+        
+        print("  [OK] architecture.pdf is clean (no embedded specs)")
     
     return True, errors
 
@@ -326,6 +374,20 @@ def create_overleaf_bundle(paper_dir: Path, output_path: Path) -> bool:
             bad_files = zf.testzip()
             if bad_files:
                 print(f"\n[ERROR] ZIP verification failed: corrupt file {bad_files}")
+                return False
+
+            names = set(zf.namelist())
+            required_arch = "paper/figures/architecture.pdf"
+            if required_arch not in names:
+                print(f"\n[ERROR] ZIP missing canonical architecture file: {required_arch}")
+                return False
+
+            arch_entries = sorted(name for name in names if name.lower().endswith("architecture.pdf"))
+            non_canonical = [name for name in arch_entries if name != required_arch]
+            if non_canonical:
+                print("\n[ERROR] ZIP contains non-canonical architecture.pdf entries:")
+                for entry in non_canonical:
+                    print(f"  - {entry}")
                 return False
         print(f"[OK] ZIP integrity verified")
     except Exception as e:
