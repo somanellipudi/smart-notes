@@ -234,9 +234,9 @@ class SemanticRetriever:
     def retrieve(
         self,
         claim_text: str,
-        top_k: int = 10,
-        rerank_top_n: int = 5,
-        min_similarity: float = 0.3
+        top_k: int = 15,
+        rerank_top_n: int = 15,
+        min_similarity: float = 0.65
     ) -> List[EvidenceSpan]:
         """
         Retrieve top-k evidence spans for a claim.

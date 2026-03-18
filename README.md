@@ -357,6 +357,47 @@ diff <(jq -S . out1/metrics.json) <(jq -S . out2/metrics.json)  # Should show no
 
 See [REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) and [EVALUATION_PROTOCOL.md](docs/EVALUATION_PROTOCOL.md) for full details.
 
+### Reproduce Paper Tables (Camera-Ready Path)
+
+Use this exact sequence to regenerate paper-facing tables/figures with deterministic settings:
+
+```bash
+# 0) Canonical prediction artifact
+python scripts/computation/export_predictions_npz.py
+
+# 1) Advanced calibration metrics (Table XVI checks)
+python scripts/computation/compute_advanced_calibration_metrics.py
+
+# 2) Multi-seed stability (seeds 0..4, paper seed 42)
+python scripts/generate_multiseed_metrics.py --config configs/paper_run.yaml --seeds 0 1 2 3 4 --paper-seed 42
+
+# 3) Regenerate verified figures from metrics + predictions
+python scripts/generate_figures.py --config configs/paper_run.yaml
+
+# 4) Verify paper table consistency against artifacts
+python scripts/verify_paper_tables.py --config configs/paper_run.yaml --metrics-dir artifacts/metrics
+
+# 5) Full deterministic rebuild + manifest + audit
+python scripts/rebuild_paper_artifacts.py --verbose
+```
+
+Deterministic policy used by these scripts:
+- Primary seed: `42`
+- Stability seeds: `0,1,2,3,4`
+- Calibration fit split: validation only
+- Temperature grid: `{0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0}` with NLL objective
+- CI method: 2000-sample stratified bootstrap with BCa intervals
+
+Canonical artifacts produced:
+- `artifacts/preds/CalibraTeach.npz`
+- `artifacts/metrics/paper_run.json`
+- `artifacts/metrics/multiseed_summary.json`
+- `artifacts/calibration_robustness_metrics.json`
+- `paper/metrics_values.tex`
+- `paper/significance_values.tex`
+- `paper/figures/reliability_diagram_verified.pdf`
+- `paper/figures/accuracy_coverage_verified.pdf`
+
 
 ### 📊 What We've Built: Production System Status
 

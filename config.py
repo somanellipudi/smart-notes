@@ -249,7 +249,7 @@ ENABLE_REAL_TIME_STREAMING = os.getenv("ENABLE_REAL_TIME_STREAMING", "false").lo
 ENABLE_VERIFIABLE_MODE = os.getenv("ENABLE_VERIFIABLE_MODE", "true").lower() == "true"
 
 # Claim validation thresholds
-VERIFIABLE_VERIFIED_THRESHOLD = float(os.getenv("VERIFIABLE_VERIFIED_THRESHOLD", "0.5"))
+VERIFIABLE_VERIFIED_THRESHOLD = float(os.getenv("VERIFIABLE_VERIFIED_THRESHOLD", "0.9"))
 VERIFIABLE_REJECTED_THRESHOLD = float(os.getenv("VERIFIABLE_REJECTED_THRESHOLD", "0.2"))
 VERIFIABLE_MIN_EVIDENCE = int(os.getenv("VERIFIABLE_MIN_EVIDENCE", "1"))
 VERIFIABLE_MAX_EVIDENCE_PER_CLAIM = int(os.getenv("VERIFIABLE_MAX_EVIDENCE_PER_CLAIM", "5"))
@@ -257,14 +257,14 @@ VERIFIABLE_MIN_INDEPENDENT_SOURCES = int(os.getenv("VERIFIABLE_MIN_INDEPENDENT_S
 
 # Evidence retrieval settings
 VERIFIABLE_MIN_EVIDENCE_LENGTH = int(os.getenv("VERIFIABLE_MIN_EVIDENCE_LENGTH", "15"))
-VERIFIABLE_RELEVANCE_THRESHOLD = float(os.getenv("VERIFIABLE_RELEVANCE_THRESHOLD", "0.2"))
+VERIFIABLE_RELEVANCE_THRESHOLD = float(os.getenv("VERIFIABLE_RELEVANCE_THRESHOLD", "0.65"))
 
 # Dense retrieval settings (sentence-transformers)
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "intfloat/e5-base-v2")
 EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
 EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
 EMBEDDING_NORMALIZE = os.getenv("EMBEDDING_NORMALIZE", "true").lower() == "true"
-DENSE_RETRIEVAL_TOP_K = int(os.getenv("DENSE_RETRIEVAL_TOP_K", "20"))
+DENSE_RETRIEVAL_TOP_K = int(os.getenv("DENSE_RETRIEVAL_TOP_K", "15"))
 DENSE_RETRIEVAL_MIN_SIMILARITY = float(os.getenv("DENSE_RETRIEVAL_MIN_SIMILARITY", "0.2"))
 
 # Adaptive evidence sufficiency settings
@@ -317,8 +317,11 @@ VERIFY_HIGH_RISK_ONLY = os.getenv("VERIFY_HIGH_RISK_ONLY", "false").lower() == "
 """If True, verify only NUMERIC, COMPLEXITY, DEFINITION, CODE claim types and claims with negations"""
 
 # Batch NLI processing
-NLI_BATCH_SIZE = int(os.getenv("NLI_BATCH_SIZE", "32"))
+NLI_BATCH_SIZE = int(os.getenv("NLI_BATCH_SIZE", "1"))
 """Batch size for NLI inference; larger = faster but more memory"""
+
+INFERENCE_FP16 = os.getenv("INFERENCE_FP16", "true").lower() == "true"
+"""Enable FP16 autocast for inference on CUDA devices"""
 
 # Cache configuration for performance
 EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))

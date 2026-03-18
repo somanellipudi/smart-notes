@@ -286,39 +286,76 @@ class PaperArtifactBuilder:
             "paper/figures/accuracy_coverage_verified.pdf",
         ]
 
-        all_present = True
+        fig_gen_script = self.scripts_dir / "generate_figures.py"
+        if not fig_gen_script.exists():
+            self.errors.append("Missing scripts/generate_figures.py wrapper")
+            print("[ERROR] Missing scripts/generate_figures.py wrapper")
+            return False
+
+        cmd = [
+            sys.executable,
+            str(fig_gen_script),
+            "--config",
+            str(self.repo_root / "configs" / "paper_run.yaml"),
+            "--metrics_file",
+            str(self.repo_root / "artifacts" / "metrics_summary.json"),
+            "--output_dir",
+            str(self.repo_root / "paper" / "figures"),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(self.repo_root), timeout=180)
+        if result.returncode != 0:
+            self.errors.append(f"Figure generation failed: {result.stderr[:300]}")
+            print("[ERROR] Figure generation failed")
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(result.stderr)
+            return False
+
         for fig_rel_path in required_figures:
             fig_path = self.repo_root / fig_rel_path
-            if fig_path.exists():
-                size_kb = fig_path.stat().st_size / 1024
-                self.log(f"OK  {fig_rel_path} ({size_kb:.1f} KB)")
-            else:
-                self.errors.append(f"Missing verified figure: {fig_rel_path}")
-                all_present = False
+            if not fig_path.exists():
+                self.errors.append(f"Missing verified figure after regeneration: {fig_rel_path}")
+                print(f"[ERROR] Missing verified figure: {fig_rel_path}")
+                return False
+            size_kb = fig_path.stat().st_size / 1024
+            self.log(f"OK  {fig_rel_path} ({size_kb:.1f} KB)")
 
-        if not all_present:
-            print(
-                "[WARN] Some verified figures are missing. "
-                "If you need to regenerate, run figure generation scripts manually."
-            )
-            # Don't fail hard - figures might be pre-built
-            # but warn about it
+        print("[OK] verified figures regenerated deterministically")
+        return True
 
-        # Try to find and call figure generation script if exists
-        fig_gen_script = self.scripts_dir / "generate_verified_figures.py"
-        if fig_gen_script.exists():
-            self.log("Found figure generation script, running...")
-            cmd = [sys.executable, str(fig_gen_script)]
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                if result.returncode == 0:
-                    self.log("Figure generation completed")
-                else:
-                    self.log(f"Figure generation had issues: {result.stderr[:100]}")
-            except Exception as e:
-                self.log(f"Could not run figure generation: {e}")
-
-        print("[OK] verified figures present/generated")
+    def rebuild_multiseed_metrics(self) -> bool:
+        """Regenerate multiseed metrics deterministically (seeds 0-4 + paper seed 42)."""
+        print("\n[2.5/4] Rebuilding multi-seed metrics")
+        print("-" * 70)
+        cmd = [
+            sys.executable,
+            str(self.scripts_dir / "generate_multiseed_metrics.py"),
+            "--config",
+            str(self.repo_root / "configs" / "paper_run.yaml"),
+            "--preds-dir",
+            str(self.repo_root / "artifacts" / "preds"),
+            "--metrics-dir",
+            str(self.repo_root / "artifacts" / "metrics"),
+            "--seeds",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "--paper-seed",
+            "42",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(self.repo_root), timeout=240)
+        if result.returncode != 0:
+            self.errors.append(f"Multi-seed regeneration failed: {result.stderr[:300]}")
+            print("[ERROR] Multi-seed regeneration failed")
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(result.stderr)
+            return False
+        print("[OK] multi-seed metrics regenerated")
         return True
 
     def compute_manifest(self) -> Dict:
@@ -525,6 +562,7 @@ class PaperArtifactBuilder:
         results = [
             ("metrics_values.tex", self.rebuild_metrics()),
             ("significance_values.tex", self.rebuild_significance()),
+            ("multiseed metrics", self.rebuild_multiseed_metrics()),
             ("verified figures", self.rebuild_figures()),
             (
                 "tex_hygiene",
@@ -549,6 +587,25 @@ class PaperArtifactBuilder:
 
             # Run audit
             if not self.run_audit():
+                all_passed = False
+
+            verify_tables_cmd = [
+                sys.executable,
+                str(self.scripts_dir / "verify_paper_tables.py"),
+                "--config",
+                str(self.repo_root / "configs" / "paper_run.yaml"),
+                "--metrics-dir",
+                str(self.repo_root / "artifacts" / "metrics"),
+            ]
+            verify_tables = subprocess.run(
+                verify_tables_cmd,
+                capture_output=True,
+                text=True,
+                cwd=str(self.repo_root),
+                timeout=120,
+            )
+            if verify_tables.returncode != 0:
+                self.errors.append(f"verify_paper_tables failed: {verify_tables.stderr[:300]}")
                 all_passed = False
 
         print("\n" + "=" * 70)

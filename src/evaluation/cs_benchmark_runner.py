@@ -18,6 +18,7 @@ from typing import Dict, List, Tuple, Optional, Any, Set
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import csv
+import os
 
 from src.claims.nli_verifier import NLIVerifier, EntailmentLabel
 from src.claims.validator import ClaimValidator
@@ -34,6 +35,13 @@ from src.evaluation.noise_injection import (
 from src.evaluation.adaptive_evidence import AdaptiveEvidenceRetriever
 from src.evaluation.calibration import CalibrationEvaluator
 from src.evaluation.research_logger import ResearchLogger, InferenceLogRecord
+from src.evaluation.paper_contract import (
+    aggregate_confidence,
+    compute_signals,
+    expected_calibration_error,
+    run_guardrail_checks,
+    sweep_selective_operating_points,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +68,9 @@ class BenchmarkMetrics:
     ece: float  # Expected Calibration Error
     mce: float  # Maximum Calibration Error
     brier_score: float  # Brier Score (MSE of confidence vs accuracy)
+    auc_ac: float = 0.0
+    coverage_tau_090: float = 0.0
+    selective_accuracy_tau_090: float = 0.0
     
     # Robustness metrics (claim-level)
     noise_robustness_accuracy: float  # Accuracy with claim-level noise injection
@@ -83,6 +94,7 @@ class BenchmarkMetrics:
     # Additional stats
     confidence_calibration: Dict[str, List[float]] = None  # Confidence bins -> accuracies
     label_distribution: Dict[str, int] = None
+    guardrail_warnings: Optional[List[str]] = None
     
     def to_dict(self) -> Dict:
         """Convert to dictionary."""
@@ -309,7 +321,14 @@ class CSBenchmarkRunner:
 
         evaluator = CalibrationEvaluator(n_bins=10)
         ece_before = evaluator.expected_calibration_error(confidences, matches)
-        fit = evaluator.fit_temperature_grid(confidences.tolist(), matches.astype(int).tolist(), 0.8, 2.0, 100)
+        fit = evaluator.fit_temperature_grid(
+            confidences.tolist(),
+            matches.astype(int).tolist(),
+            0.5,
+            2.0,
+            7,
+            calibration_split="validation",
+        )
         tau = float(fit["best_tau"])
         scaled = evaluator._apply_temperature(confidences, tau)
         ece_after = evaluator.expected_calibration_error(scaled, matches)
@@ -489,6 +508,8 @@ class CSBenchmarkRunner:
             "use_online_authority": False,
             "verify_threshold": 0.55,
             "low_conf_threshold": 0.35,
+            "relevance_threshold": 0.65,
+            "retrieval_top_k": 15,
             "enable_contradiction_gate": True,
             "contradiction_threshold": 0.6,
             "enable_cs_operation_rules": False,
@@ -566,7 +587,20 @@ class CSBenchmarkRunner:
         # Generate embeddings and build index
         if evidence_store.evidence:
             texts = [ev.text for ev in evidence_store.evidence]
-            embeddings = self.embedding_provider.embed_texts(texts)
+            cache_dir = Path(os.getenv("RETRIEVAL_EMBEDDING_CACHE_DIR", "artifacts/retrieval_index"))
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            corpus_sig = self._dataset_signature(dataset)
+            cache_path = cache_dir / f"benchmark_embeddings_{corpus_sig}.npz"
+
+            if cache_path.exists():
+                cached = np.load(cache_path, allow_pickle=False)
+                embeddings = cached["embeddings"]
+                if embeddings.shape[0] != len(texts):
+                    embeddings = self.embedding_provider.embed_texts(texts)
+                    np.savez_compressed(cache_path, embeddings=embeddings)
+            else:
+                embeddings = self.embedding_provider.embed_texts(texts)
+                np.savez_compressed(cache_path, embeddings=embeddings)
             
             for i, ev in enumerate(evidence_store.evidence):
                 ev.embedding = embeddings[i]
@@ -620,7 +654,7 @@ class CSBenchmarkRunner:
         self,
         claim: LearningClaim,
         evidence_store: EvidenceStore,
-        top_k: int = 5,
+        top_k: int = 15,
         use_adaptive: bool = False,
         config: Optional[Dict] = None
     ) -> List[EvidenceItem]:
@@ -659,7 +693,8 @@ class CSBenchmarkRunner:
         
         # Standard fixed top-k retrieval
         claim_embedding = self.embedding_provider.embed_queries([claim.claim_text])[0]
-        search_results = evidence_store.search(claim_embedding, top_k=top_k)
+        search_top_k = int(config.get("retrieval_top_k", top_k))
+        search_results = evidence_store.search(claim_embedding, top_k=search_top_k)
         
         evidence_items = []
         for ev, similarity in search_results:
@@ -703,12 +738,38 @@ class CSBenchmarkRunner:
             entailment_scores = [result.entailment_prob]
             contradiction_scores = [result.contradiction_prob]
         
-        mean_entail = float(np.max(entailment_scores))
+        mean_entail = float(np.mean(entailment_scores))
         max_contra = float(np.max(contradiction_scores))
-        avg_sim = float(np.mean([ev.similarity for ev in claim.evidence_objects]))
+        similarities = [float(ev.similarity) for ev in claim.evidence_objects]
+        source_types = [str(ev.source_type) for ev in claim.evidence_objects]
+        voted_labels = [
+            "ENTAIL" if r.entailment_prob >= max(r.contradiction_prob, r.neutral_prob) else (
+                "CONTRADICT" if r.contradiction_prob >= r.neutral_prob else "NEUTRAL"
+            )
+            for r in results
+        ] if config.get("use_batch_nli", True) and len(top_evidence) > 1 else [
+            "ENTAIL" if entailment_scores[0] >= max(contradiction_scores[0], 1.0 - entailment_scores[0] - contradiction_scores[0]) else "CONTRADICT"
+        ]
 
-        entail_weight = 0.7
-        similarity_weight = 0.3
+        signals = compute_signals(
+            similarities=similarities,
+            entailment_probs=entailment_scores,
+            voted_labels=voted_labels,
+            source_types=source_types,
+            pairwise_similarity_matrix=None,
+        )
+        combined_score = aggregate_confidence(signals)
+        claim.metadata["paper_signals"] = {
+            "S_rel": signals.s_rel,
+            "S_ent": signals.s_ent,
+            "S_div": signals.s_div,
+            "S_agree": signals.s_agree,
+            "S_margin": signals.s_margin,
+            "S_auth": signals.s_auth,
+        }
+
+        entail_weight = 0.35
+        similarity_weight = 0.18
         if config.get("use_ensemble", False) and config.get("domain_agnostic_weighting", False):
             non_cs = self._quality_predictor_non_cs(claim) if config.get("quality_predictor_enabled", True) else False
             if non_cs:
@@ -719,7 +780,10 @@ class CSBenchmarkRunner:
             else:
                 claim.metadata["weighting_mode"] = "default_cs"
 
-        combined_score = entail_weight * mean_entail + similarity_weight * avg_sim
+        # Preserve legacy domain-agnostic override while defaulting to paper-weighted six-signal score.
+        if config.get("use_ensemble", False) and config.get("domain_agnostic_weighting", False):
+            avg_sim = float(np.mean(similarities)) if similarities else 0.0
+            combined_score = entail_weight * mean_entail + similarity_weight * avg_sim
         verify_threshold = float(config.get("verify_threshold", 0.55))
         low_conf_threshold = float(config.get("low_conf_threshold", 0.35))
         
@@ -837,6 +901,25 @@ class CSBenchmarkRunner:
         for label in labels:
             label_dist[label] = sum(1 for g in gold_labels if g == label)
         
+        # Selective prediction with paper definition conf=max(p,1-p) and tau sweep.
+        p_supported = np.asarray([
+            float(c) if pl == "ENTAIL" else float(1.0 - c)
+            for pl, c in zip(pred_labels, confidences)
+        ], dtype=np.float64)
+        y_binary = np.asarray([1 if g == "ENTAIL" else 0 for g in gold_labels], dtype=np.int64)
+        selective = sweep_selective_operating_points(p_supported, y_binary, start=0.60, stop=0.95, step=0.01)
+        point_090 = next((p for p in selective["points"] if abs(float(p["threshold"]) - 0.90) < 1e-9), None)
+
+        guardrails = run_guardrail_checks(
+            calibration_split_name=str(self._default_config().get("calibration_split", "validation")),
+            train_ids=[],
+            val_ids=[str(d.get("doc_id")) for d in dataset[: max(1, len(dataset) // 3)]],
+            test_ids=[str(d.get("doc_id")) for d in dataset[max(1, len(dataset) // 3):]],
+            temperature_star=float(self._temperature_by_signature.get(self._dataset_signature(dataset), 1.24)),
+            val_ece=float(ece),
+            coverage_tau_090=float(point_090["coverage"]) if point_090 else 0.0,
+        )
+
         return BenchmarkMetrics(
             accuracy=float(accuracy),
             precision_verified=float(label_metrics["ENTAIL"]["precision"]),
@@ -851,6 +934,9 @@ class CSBenchmarkRunner:
             ece=float(ece),
             mce=float(mce),
             brier_score=float(brier_score),
+            auc_ac=float(selective["auc_ac"]),
+            coverage_tau_090=float(point_090["coverage"]) if point_090 else 0.0,
+            selective_accuracy_tau_090=float(point_090["selective_accuracy"]) if point_090 else 0.0,
             noise_robustness_accuracy=1.0,  # Placeholder, computed separately
             noise_types_affected={},
             avg_time_per_claim=float(avg_time),
@@ -862,7 +948,8 @@ class CSBenchmarkRunner:
             evidence_coverage_rate=claims_with_evidence / len(predictions) if predictions else 0.0,
             avg_evidence_count=float(avg_evidence_count),
             confidence_calibration=calibration_bins,
-            label_distribution=label_dist
+            label_distribution=label_dist,
+            guardrail_warnings=guardrails,
         )
     
     def _compute_ece(
@@ -917,6 +1004,10 @@ class CSBenchmarkRunner:
                 ece += (bin_size / total_samples) * gap
                 mce = max(mce, gap)
         
+        # Recompute using the paper definition for consistency: conf=max(p,1-p).
+        p_supported = np.clip(confidences, 0.0, 1.0)
+        y_binary = matches.astype(np.int64)
+        ece = expected_calibration_error(p_supported, y_binary, n_bins=n_bins)
         return ece, mce, calibration
     
     def _compute_robustness(

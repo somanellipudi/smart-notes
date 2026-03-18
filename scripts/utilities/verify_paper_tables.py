@@ -175,6 +175,75 @@ class PaperTableVerifier:
                 print(f"  [OK] {metric_key}: {artifact_mean:.4f} +/- {artifact_std:.4f}")
         
         return all_match
+
+    def verify_seed_policy(self) -> bool:
+        """Verify seed policy: primary seed=42 and stability seeds 0-4."""
+        print("\n[CHECK] Seed policy...")
+        ok = True
+        if int(self.paper_seed) != 42:
+            self.errors.append(f"Expected paper seed 42, found {self.paper_seed}")
+            ok = False
+
+        multiseed_path = self.metrics_dir / "multiseed_summary.json"
+        if multiseed_path.exists():
+            summary = json.loads(multiseed_path.read_text())
+            expected = [0, 1, 2, 3, 4]
+            actual = summary.get("seeds", [])
+            if actual != expected:
+                self.errors.append(f"Expected stability seeds {expected}, found {actual}")
+                ok = False
+            else:
+                print("  [OK] Stability seeds match [0,1,2,3,4]")
+        return ok
+
+    def verify_ece_table_xvi(self) -> bool:
+        """Verify ECE values reported in Table XVI from calibration artifact."""
+        print("\n[CHECK] Table XVI ECE values...")
+        path = Path("artifacts/calibration_robustness_metrics.json")
+        if not path.exists():
+            self.warnings.append("Missing artifacts/calibration_robustness_metrics.json")
+            return True
+
+        data = json.loads(path.read_text())
+        metrics = data.get("metrics", {})
+
+        expected = {
+            "ece_equal_width_bins_10": 0.1076,
+            "ece_equal_width_bins_15": 0.1068,
+            "ece_equal_width_bins_20": 0.1065,
+            "ece_adaptive": 0.1109,
+        }
+        tol = 5e-4
+        ok = True
+        for key, target in expected.items():
+            if key not in metrics:
+                self.errors.append(f"Missing metric '{key}' in calibration artifact")
+                ok = False
+                continue
+            actual = float(metrics[key]["value"])
+            diff = abs(actual - target)
+            if diff > tol:
+                self.errors.append(
+                    f"{key} mismatch: expected {target:.4f}, found {actual:.4f} (diff {diff:.4f})"
+                )
+                ok = False
+            else:
+                print(f"  [OK] {key}: {actual:.4f} (target {target:.4f})")
+        return ok
+
+    def verify_analysis_artifact_count(self) -> bool:
+        """Check deterministic analysis file count target used by the paper bundle."""
+        print("\n[CHECK] Analysis artifact count...")
+        analysis_dir = Path("artifacts")
+        if not analysis_dir.exists():
+            self.warnings.append("artifacts directory missing")
+            return True
+        files = [p for p in analysis_dir.rglob("*") if p.is_file() and p.suffix in {".json", ".md", ".txt", ".csv", ".tex"}]
+        if len(files) < 31:
+            self.errors.append(f"Expected at least 31 analysis artifacts, found {len(files)}")
+            return False
+        print(f"  [OK] Found {len(files)} analysis artifacts (>=31)")
+        return True
     
     def verify_per_seed_metrics(self) -> bool:
         """Verify each per-seed metrics file."""
@@ -267,6 +336,9 @@ class PaperTableVerifier:
         checks = [
             ("Paper-run metrics", self.verify_paper_run_metrics()),
             ("Multi-seed summary", self.verify_multiseed_summary()),
+            ("Seed policy", self.verify_seed_policy()),
+            ("Table XVI ECE", self.verify_ece_table_xvi()),
+            ("Analysis artifact count", self.verify_analysis_artifact_count()),
             ("Per-seed metrics", self.verify_per_seed_metrics()),
             ("Cross-references", self.verify_cross_references(manuscript_path)),
             ("Hardcoded stale values", self.check_hardcoded_stale_values(manuscript_path)),

@@ -24,6 +24,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import yaml
+from scipy.stats import norm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -87,6 +88,64 @@ def compute_metrics_from_predictions(y_true: np.ndarray, probs: np.ndarray, seed
         "auc_ac": float(auc_ac),
         "macro_f1": float(macro_f1)
     }
+
+
+def _stratified_indices(y_true: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    classes = np.unique(y_true)
+    sampled: List[np.ndarray] = []
+    for c in classes:
+        idx = np.where(y_true == c)[0]
+        sampled.append(rng.choice(idx, size=len(idx), replace=True))
+    all_idx = np.concatenate(sampled)
+    rng.shuffle(all_idx)
+    return all_idx
+
+
+def _metric_value(metric: str, y_true: np.ndarray, probs: np.ndarray) -> float:
+    return float(compute_metrics_from_predictions(y_true, probs, seed=42)[metric])
+
+
+def stratified_bca_ci(
+    metric: str,
+    y_true: np.ndarray,
+    probs: np.ndarray,
+    n_bootstrap: int = 2000,
+    seed: int = 42,
+) -> Dict[str, float]:
+    rng = np.random.default_rng(seed)
+    n = len(y_true)
+    if n == 0:
+        return {"point": 0.0, "lower": 0.0, "upper": 0.0}
+
+    point = _metric_value(metric, y_true, probs)
+    boots = np.empty(n_bootstrap, dtype=np.float64)
+    for i in range(n_bootstrap):
+        idx = _stratified_indices(y_true, rng)
+        boots[i] = _metric_value(metric, y_true[idx], probs[idx])
+
+    # Bias-correction z0.
+    prop_less = float(np.mean(boots < point))
+    prop_less = min(max(prop_less, 1e-12), 1.0 - 1e-12)
+    z0 = norm.ppf(prop_less)
+
+    # Jackknife acceleration.
+    jack = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        mask = np.ones(n, dtype=bool)
+        mask[i] = False
+        jack[i] = _metric_value(metric, y_true[mask], probs[mask])
+    jack_mean = float(np.mean(jack))
+    num = np.sum((jack_mean - jack) ** 3)
+    den = 6.0 * (np.sum((jack_mean - jack) ** 2) ** 1.5 + 1e-12)
+    a = float(num / den)
+
+    alpha1, alpha2 = 0.025, 0.975
+    z1, z2 = norm.ppf(alpha1), norm.ppf(alpha2)
+    adj1 = norm.cdf(z0 + (z0 + z1) / (1.0 - a * (z0 + z1) + 1e-12))
+    adj2 = norm.cdf(z0 + (z0 + z2) / (1.0 - a * (z0 + z2) + 1e-12))
+    lo = float(np.quantile(boots, np.clip(adj1, 0.0, 1.0)))
+    hi = float(np.quantile(boots, np.clip(adj2, 0.0, 1.0)))
+    return {"point": point, "lower": lo, "upper": hi}
 
 
 def compute_multiseed_summary(
@@ -206,7 +265,10 @@ def main():
     logger.info("\nComputing metrics for each seed...")
     for seed in args.seeds:
         logger.info(f"  Seed {seed}...")
-        metrics = compute_metrics_from_predictions(y_true, probs, seed)
+        # Deterministic stratified resample for stability analysis by seed.
+        rng = np.random.default_rng(seed)
+        idx = _stratified_indices(y_true, rng)
+        metrics = compute_metrics_from_predictions(y_true[idx], probs[idx], seed)
         per_seed_metrics.append(metrics)
         
         # Save per-seed metrics
@@ -219,6 +281,12 @@ def main():
     # In our case, paper_seed=42, but we don't have seed-42-specific predictions
     # So we'll use the same data and note that it's the declared official run
     paper_run_metrics = compute_metrics_from_predictions(y_true, probs, paper_seed)
+    paper_run_metrics["bootstrap_bca_95"] = {
+        "accuracy": stratified_bca_ci("accuracy", y_true, probs, n_bootstrap=2000, seed=42),
+        "ece": stratified_bca_ci("ece", y_true, probs, n_bootstrap=2000, seed=43),
+        "auc_ac": stratified_bca_ci("auc_ac", y_true, probs, n_bootstrap=2000, seed=44),
+        "macro_f1": stratified_bca_ci("macro_f1", y_true, probs, n_bootstrap=2000, seed=45),
+    }
     paper_run_path = args.metrics_dir / "paper_run.json"
     paper_run_path.write_text(json.dumps(paper_run_metrics, indent=2), encoding="utf-8")
     logger.info(f"\n[OK] Wrote {paper_run_path}")

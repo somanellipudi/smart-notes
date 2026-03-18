@@ -22,6 +22,8 @@ from enum import Enum
 from dataclasses import dataclass
 import numpy as np
 
+import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,7 +71,7 @@ class NLIVerifier:
         self,
         model_name: str = "roberta-large-mnli",
         device: str = "cpu",
-        batch_size: int = 32
+        batch_size: Optional[int] = None
     ):
         """
         Initialize NLI verifier.
@@ -81,7 +83,8 @@ class NLIVerifier:
         """
         self.model_name = model_name
         self.device = device
-        self.batch_size = batch_size
+        self.batch_size = int(batch_size if batch_size is not None else getattr(config, "NLI_BATCH_SIZE", 1))
+        self.use_fp16 = bool(getattr(config, "INFERENCE_FP16", True)) and self.device == "cuda"
         
         self.model = None
         self.tokenizer = None
@@ -167,7 +170,11 @@ class NLIVerifier:
             
             # Inference with no gradient computation
             with torch.no_grad():
-                outputs = self.model(**inputs)
+                if self.use_fp16:
+                    with torch.autocast(device_type="cuda", dtype=torch.float16):
+                        outputs = self.model(**inputs)
+                else:
+                    outputs = self.model(**inputs)
                 logits = outputs.logits
                 probs = torch.softmax(logits, dim=1)
             

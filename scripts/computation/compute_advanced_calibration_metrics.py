@@ -56,11 +56,13 @@ def compute_ece_adaptive(
     """
     # Confidence: max(p, 1-p)
     confidence = np.maximum(probs, 1 - probs)
+    predictions = (probs >= 0.5).astype(int)
+    correctness = (predictions == y_true).astype(float)
     
     # Sort by confidence
     sorted_indices = np.argsort(confidence)
     sorted_conf = confidence[sorted_indices]
-    sorted_y = y_true[sorted_indices]
+    sorted_correct = correctness[sorted_indices]
     
     # Create equal-sized bins
     bin_size = len(y_true) // n_bins
@@ -72,21 +74,21 @@ def compute_ece_adaptive(
         end_idx = (i + 1) * bin_size if i < n_bins - 1 else len(y_true)
         
         bin_conf = sorted_conf[start_idx:end_idx]
-        bin_y = sorted_y[start_idx:end_idx]
+        bin_correct = sorted_correct[start_idx:end_idx]
         
-        if len(bin_y) == 0:
+        if len(bin_correct) == 0:
             continue
         
         avg_conf = float(np.mean(bin_conf))
-        empirical_acc = float(np.mean(bin_y))
+        empirical_acc = float(np.mean(bin_correct))
         calibration_gap = abs(avg_conf - empirical_acc)
-        bin_weight = len(bin_y) / len(y_true)
+        bin_weight = len(bin_correct) / len(y_true)
         
         ece_value += bin_weight * calibration_gap
         
         bin_stats.append({
             "bin": i + 1,
-            "size": len(bin_y),
+            "size": len(bin_correct),
             "avg_confidence": avg_conf,
             "empirical_accuracy": empirical_acc,
             "calibration_gap": calibration_gap,
@@ -110,6 +112,8 @@ def compute_ece_equal_width(
         ECE value and list of bin statistics
     """
     confidence = np.maximum(probs, 1 - probs)
+    predictions = (probs >= 0.5).astype(int)
+    correctness = (predictions == y_true).astype(float)
     
     # Create equal-width bins
     bin_edges = np.linspace(0, 1, n_bins + 1)
@@ -125,10 +129,10 @@ def compute_ece_equal_width(
             continue
         
         bin_conf = confidence[mask]
-        bin_y = y_true[mask]
+        bin_correct = correctness[mask]
         
         avg_conf = float(np.mean(bin_conf))
-        empirical_acc = float(np.mean(bin_y))
+        empirical_acc = float(np.mean(bin_correct))
         calibration_gap = abs(avg_conf - empirical_acc)
         bin_weight = np.sum(mask) / len(y_true)
         
@@ -214,6 +218,23 @@ def compute_calibration_metrics(pred_file: Path) -> Dict:
         "value": standard_ece,
         "description": "Standard ECE (10 equal-width bins) - same as paper baseline"
     }
+
+    # Table XVI consistency check values.
+    targets = {
+        "ece_equal_width_bins_10": 0.1076,
+        "ece_equal_width_bins_15": 0.1068,
+        "ece_equal_width_bins_20": 0.1065,
+        "ece_adaptive": 0.1109,
+    }
+    checks = {}
+    for key, target in targets.items():
+        actual = float(results["metrics"][key]["value"])
+        checks[key] = {
+            "target": target,
+            "actual": actual,
+            "abs_diff": abs(actual - target),
+        }
+    results["table_xvi_check"] = checks
     
     return results
 

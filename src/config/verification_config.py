@@ -24,26 +24,26 @@ class VerificationConfigError(ValueError):
 @dataclass
 class VerificationConfig:
     # Confidence thresholds
-    verified_confidence_threshold: float = field(default=0.70)
+    verified_confidence_threshold: float = field(default=0.90)
     rejected_confidence_threshold: float = field(default=0.30)
     low_confidence_range: Tuple[float, float] = field(default=(0.30, 0.70))
 
     # Multi-source and retrieval
     min_entailing_sources_for_verified: int = field(default=2)
-    top_k_retrieval: int = field(default=20)
+    top_k_retrieval: int = field(default=15)
     top_k_rerank: int = field(default=5)
     mmr_lambda: float = field(default=0.5)
 
     # Temperature scaling / calibration
     temperature_scaling_enabled: bool = field(default=True)
     temperature_init: float = field(default=1.0)
-    temperature_grid_min: float = field(default=0.8)
+    temperature_grid_min: float = field(default=0.5)
     temperature_grid_max: float = field(default=2.0)
-    temperature_grid_steps: int = field(default=100)
+    temperature_grid_steps: int = field(default=7)
     calibration_split: str = field(default="validation")
 
     # Baseline and heuristic thresholds (configurable for reproducible baselines)
-    retriever_threshold: float = field(default=0.70)
+    retriever_threshold: float = field(default=0.65)
     nli_positive_threshold: float = field(default=0.6)
     nli_negative_threshold: float = field(default=0.4)
     rag_positive_threshold: float = field(default=0.65)
@@ -144,21 +144,21 @@ class VerificationConfig:
             return v.lower() == "true" if isinstance(v, str) else default
 
         cfg = cls(
-            verified_confidence_threshold=env_float("VERIFIED_CONFIDENCE_THRESHOLD", 0.70),
+            verified_confidence_threshold=env_float("VERIFIED_CONFIDENCE_THRESHOLD", 0.90),
             rejected_confidence_threshold=env_float("REJECTED_CONFIDENCE_THRESHOLD", 0.30),
             low_confidence_range=(env_float("LOW_CONFIDENCE_LO", 0.30), env_float("LOW_CONFIDENCE_HI", 0.70)),
             min_entailing_sources_for_verified=env_int("MIN_ENTAILING_SOURCES_FOR_VERIFIED", 2),
-            top_k_retrieval=env_int("TOP_K_RETRIEVAL", 20),
+            top_k_retrieval=env_int("TOP_K_RETRIEVAL", 15),
             top_k_rerank=env_int("TOP_K_RERANK", 5),
             mmr_lambda=env_float("MMR_LAMBDA", 0.5),
             temperature_scaling_enabled=env_bool("TEMPERATURE_SCALING_ENABLED", True),
             temperature_init=env_float("TEMPERATURE_INIT", 1.0),
-            temperature_grid_min=env_float("TEMPERATURE_GRID_MIN", 0.8),
+            temperature_grid_min=env_float("TEMPERATURE_GRID_MIN", 0.5),
             temperature_grid_max=env_float("TEMPERATURE_GRID_MAX", 2.0),
-            temperature_grid_steps=env_int("TEMPERATURE_GRID_STEPS", 100),
+            temperature_grid_steps=env_int("TEMPERATURE_GRID_STEPS", 7),
             calibration_split=os.getenv("CALIBRATION_SPLIT", "validation"),
             random_seed=env_int("GLOBAL_RANDOM_SEED", 42),
-            retriever_threshold=env_float("RETRIEVER_THRESHOLD", 0.70),
+            retriever_threshold=env_float("RETRIEVER_THRESHOLD", 0.65),
             nli_positive_threshold=env_float("NLI_POSITIVE_THRESHOLD", 0.6),
             nli_negative_threshold=env_float("NLI_NEGATIVE_THRESHOLD", 0.4),
             rag_positive_threshold=env_float("RAG_POSITIVE_THRESHOLD", 0.65),

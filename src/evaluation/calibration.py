@@ -16,6 +16,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+from src.evaluation.paper_contract import fit_temperature_validation_nll
+
 logger = logging.getLogger(__name__)
 
 
@@ -276,40 +278,57 @@ class CalibrationEvaluator:
 
     def fit_temperature_grid(
         self,
-        val_probs: List[float],
+        val_logits_or_probs: List[float],
         val_labels: List[int],
-        grid_min: float = 0.8,
+        grid_min: float = 0.5,
         grid_max: float = 2.0,
-        grid_steps: int = 100
+        grid_steps: int = 7,
+        calibration_split: str = "validation",
     ) -> Dict[str, float]:
         """
-        Fit a temperature parameter on validation probabilities by minimizing ECE.
+        Fit temperature using validation-set NLL over the paper-defined grid.
 
         Args:
-            val_probs: Validation predicted probabilities (or correctness proxies)
+            val_logits_or_probs: Validation logits or probabilities.
             val_labels: Validation binary labels (1=correct, 0=incorrect)
             grid_min: minimum tau
             grid_max: maximum tau
             grid_steps: number of grid points
+            calibration_split: split name used for calibration (must not be test)
 
         Returns:
-            Dict with keys: best_tau, best_ece, ece_grid (list)
+            Dict with keys: best_tau, nll, grid, objective
         """
-        probs = np.array(val_probs)
-        labels = np.array(val_labels)
+        if calibration_split.strip().lower() == "test":
+            raise ValueError("Calibration must use validation split only, not test")
 
-        taus = np.linspace(grid_min, grid_max, grid_steps)
-        ece_values = []
-        for tau in taus:
-            scaled = self._apply_temperature(probs, tau)
-            ece = self.expected_calibration_error(scaled, labels)
-            ece_values.append(float(ece))
+        logits_or_probs = np.asarray(val_logits_or_probs, dtype=np.float64)
+        labels = np.asarray(val_labels, dtype=np.int64)
+        if logits_or_probs.shape != labels.shape:
+            raise ValueError("val_logits_or_probs and val_labels must have same length")
 
-        best_idx = int(np.argmin(ece_values))
-        best_tau = float(taus[best_idx])
-        best_ece = float(ece_values[best_idx])
+        # Accept either probabilities in [0,1] or raw logits.
+        if np.all((logits_or_probs >= 0.0) & (logits_or_probs <= 1.0)):
+            p = np.clip(logits_or_probs, 1e-12, 1.0 - 1e-12)
+            logits = np.log(p / (1.0 - p))
+        else:
+            logits = logits_or_probs
 
-        return {"best_tau": best_tau, "best_ece": best_ece, "taus": taus.tolist(), "ece_grid": ece_values}
+        if grid_steps < 2:
+            grid_steps = 7
+
+        if grid_min == 0.5 and grid_max == 2.0 and grid_steps == 7:
+            grid = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+        else:
+            grid = np.linspace(grid_min, grid_max, grid_steps).tolist()
+
+        result = fit_temperature_validation_nll(logits=logits.tolist(), labels=labels.tolist(), grid=grid)
+        return {
+            "best_tau": float(result["best_tau"]),
+            "grid": result["grid"],
+            "nll": result["nll"],
+            "objective": result["objective"],
+        }
     
     def plot_confidence_by_correctness(
         self,

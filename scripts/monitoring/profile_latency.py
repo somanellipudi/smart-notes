@@ -135,6 +135,24 @@ class PipelineProfiler:
             "estimated_latency_per_claim_ms": float(np.mean(self.timings["total_per_claim"]) * 1000),
         }
         
+        targets_ms = {
+            "retrieval": 38.6,
+            "nli_inference": 16.2,
+            "confidence_aggregation": 3.6,
+            "total_per_claim": 67.68,
+        }
+        regressions = {}
+        for stage, target in targets_ms.items():
+            if stage in summary:
+                mean_ms = float(summary[stage]["mean_ms"])
+                regressions[stage] = {
+                    "target_ms": target,
+                    "mean_ms": mean_ms,
+                    "exceeds_target": bool(mean_ms > target),
+                    "ratio": float(mean_ms / target) if target > 0 else 0.0,
+                }
+        summary["paper_targets"] = regressions
+
         return summary
 
 def main():

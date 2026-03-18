@@ -23,6 +23,61 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def binary_confidence(prob_calibrated: np.ndarray) -> np.ndarray:
+    """Paper definition: conf = max(p_cal, 1 - p_cal)."""
+    p = np.asarray(prob_calibrated, dtype=np.float64)
+    return np.maximum(p, 1.0 - p)
+
+
+def compute_binary_selective_metrics(
+    prob_calibrated: np.ndarray,
+    labels: np.ndarray,
+    threshold: float,
+) -> Dict[str, float]:
+    """Compute coverage and selective accuracy at a threshold."""
+    p = np.asarray(prob_calibrated, dtype=np.float64)
+    y = np.asarray(labels, dtype=np.int64)
+    conf = binary_confidence(p)
+    keep = conf >= float(threshold)
+
+    coverage = float(np.mean(keep)) if len(keep) else 0.0
+    if np.any(keep):
+        pred = (p >= 0.5).astype(np.int64)
+        selective_acc = float(np.mean(pred[keep] == y[keep]))
+    else:
+        selective_acc = 0.0
+
+    return {
+        "threshold": float(threshold),
+        "coverage": coverage,
+        "selective_accuracy": selective_acc,
+        "accepted": int(np.sum(keep)),
+    }
+
+
+def sweep_binary_selective_operating_points(
+    prob_calibrated: np.ndarray,
+    labels: np.ndarray,
+    min_threshold: float = 0.60,
+    max_threshold: float = 0.95,
+    step: float = 0.01,
+) -> Dict[str, Any]:
+    """Sweep tau over [0.60, 0.95] and compute AUC-AC."""
+    thresholds = np.arange(min_threshold, max_threshold + 1e-9, step)
+    points = [
+        compute_binary_selective_metrics(prob_calibrated, labels, float(t))
+        for t in thresholds
+    ]
+    coverage = np.asarray([p["coverage"] for p in points], dtype=np.float64)
+    accuracy = np.asarray([p["selective_accuracy"] for p in points], dtype=np.float64)
+    order = np.argsort(coverage)
+    auc_ac = float(np.trapz(accuracy[order], coverage[order]))
+    return {
+        "points": points,
+        "auc_ac": auc_ac,
+    }
+
+
 @dataclass
 class RiskCoveragePoint:
     """A single point on the risk-coverage curve."""

@@ -19,6 +19,9 @@ import numpy as np
 from src.eval.metrics import compute_accuracy_coverage_curve, compute_auc_ac, compute_ece
 
 
+np.random.seed(42)
+
+
 def _load_summary(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)

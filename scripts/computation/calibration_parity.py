@@ -13,12 +13,17 @@ Saves per-system: temperature.json, metrics.json, calibrated_predictions.json
 """
 
 import argparse
-import json
-from pathlib import Path
-import numpy as np
-from src.evaluation.calibration import CalibrationEvaluator
-from collections import defaultdict
 import glob
+import json
+from collections import defaultdict
+from pathlib import Path
+
+import numpy as np
+
+from src.evaluation.paper_contract import (
+    fit_temperature_validation_nll,
+    temperature_scale_logits,
+)
 
 
 def load_predictions(json_path: Path):
@@ -69,69 +74,114 @@ def softmax(x: np.ndarray) -> np.ndarray:
     return e / e.sum()
 
 
+def _to_logits(probs_or_logits: np.ndarray) -> np.ndarray:
+    arr = np.asarray(probs_or_logits, dtype=np.float64)
+    if np.all((arr >= 0.0) & (arr <= 1.0)):
+        p = np.clip(arr, 1e-12, 1.0 - 1e-12)
+        return np.log(p / (1.0 - p))
+    return arr
+
+
+def _infer_model_and_split(path: str):
+    stem = Path(path).stem.replace("_result", "")
+    low = stem.lower()
+    if low.endswith("_validation"):
+        return stem[: -len("_validation")], "validation"
+    if low.endswith("_val"):
+        return stem[: -len("_val")], "validation"
+    if low.endswith("_test"):
+        return stem[: -len("_test")], "test"
+    # Default fallback keeps file explicit and avoids accidental test fitting.
+    return stem, "unknown"
+
+
+def _ece_from_correctness(confidences: np.ndarray, correctness: np.ndarray, n_bins: int = 10) -> float:
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    ece = 0.0
+    for i in range(n_bins):
+        lo, hi = edges[i], edges[i + 1]
+        if i == n_bins - 1:
+            mask = (confidences >= lo) & (confidences <= hi)
+        else:
+            mask = (confidences >= lo) & (confidences < hi)
+        if not np.any(mask):
+            continue
+        acc = float(np.mean(correctness[mask]))
+        c = float(np.mean(confidences[mask]))
+        ece += float(np.mean(mask)) * abs(acc - c)
+    return float(ece)
+
+
 def run_parity(input_paths, out_dir: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
-    calib = CalibrationEvaluator(n_bins=10)
-
     summary = {}
+
+    grouped = defaultdict(dict)
     for p in input_paths:
-        name = Path(p).stem.replace("_result", "")
-        dest = out_dir / name
-        dest.mkdir(exist_ok=True)
-        rec = load_predictions(Path(p))
+        model, split = _infer_model_and_split(p)
+        grouped[model][split] = p
 
-        # Split validation vs test if available in JSON config; otherwise assume whole file is test and user provided separate val file
-        # For parity runner we expect provided inputs correspond to a run on the validation set and another on test.
-        # Here we assume input file is validation-level run if 'validation' in name
-        is_val = "val" in name or "validation" in name
+    for model_name, splits in grouped.items():
+        model_dir = out_dir / model_name
+        model_dir.mkdir(exist_ok=True)
 
-        # Fit tau on validation splits only
-        if is_val:
-            fit = calib.fit_temperature_grid(rec["probs"].tolist(), rec["labels"].tolist())
-            # Save tau and grid
-            with open(dest / "temperature.json", "w") as f:
-                json.dump(fit, f, indent=2)
-            summary[name] = {"fit": fit}
-        else:
-            # If validation fit exists in sibling folder, load it
-            val_candidate = out_dir / (name + "_val")
-            tau = None
-            # naive attempt: look for any temperature.json in out_dir
-            for tfile in out_dir.rglob("temperature.json"):
-                try:
-                    candidate = json.loads(tfile.read_text())
-                    tau = candidate.get("best_tau")
-                    break
-                except Exception:
-                    continue
+        if "validation" not in splits:
+            raise RuntimeError(
+                f"Missing validation file for model '{model_name}'. "
+                "Calibration parity requires validation-only fitting."
+            )
 
-            if tau is None:
-                # if no tau found, do an internal fit (best-effort)
-                fit = calib.fit_temperature_grid(rec["probs"].tolist(), rec["labels"].tolist())
-                tau = fit.get("best_tau")
-                with open(dest / "temperature_internal_fit.json", "w") as f:
-                    json.dump(fit, f, indent=2)
+        rec_val = load_predictions(Path(splits["validation"]))
+        val_logits = _to_logits(rec_val["probs"])
+        fit = fit_temperature_validation_nll(val_logits.tolist(), rec_val["labels"].tolist())
 
-            # Apply tau and compute calibrated metrics
-            scaled = calib._apply_temperature(rec["probs"], tau)
-            metrics = calib.evaluate(scaled.tolist(), rec["labels"].tolist(), return_bins=True)
-            # save calibrated predictions
+        with open(model_dir / "temperature.json", "w", encoding="utf-8") as f:
+            json.dump(fit, f, indent=2)
+
+        summary[model_name] = {
+            "temperature": fit,
+            "validation_file": splits["validation"],
+        }
+
+        # Always emit calibrated validation predictions for traceability.
+        val_scaled = temperature_scale_logits(val_logits, float(fit["best_tau"]))
+        val_calibrated = []
+        for i, raw in enumerate(rec_val["raw"]):
+            cp = dict(raw)
+            cp["calibrated_confidence"] = float(val_scaled[i])
+            val_calibrated.append(cp)
+        with open(model_dir / "calibrated_validation_predictions.json", "w", encoding="utf-8") as f:
+            json.dump(val_calibrated, f, indent=2)
+
+        if "test" in splits:
+            rec_test = load_predictions(Path(splits["test"]))
+            test_logits = _to_logits(rec_test["probs"])
+            test_scaled = temperature_scale_logits(test_logits, float(fit["best_tau"]))
+            test_metrics = {
+                "ece": _ece_from_correctness(np.asarray(test_scaled, dtype=np.float64), rec_test["labels"]),
+                "accuracy": float(np.mean((np.asarray(test_scaled) >= 0.5).astype(int) == rec_test["labels"])),
+                "n_samples": int(len(rec_test["labels"])),
+            }
+
             calibrated_preds = []
-            for i, raw in enumerate(rec["raw"]):
+            for i, raw in enumerate(rec_test["raw"]):
                 cp = dict(raw)
-                cp["calibrated_confidence"] = float(scaled[i])
+                cp["calibrated_confidence"] = float(test_scaled[i])
                 calibrated_preds.append(cp)
 
-            with open(dest / "calibrated_predictions.json", "w") as f:
+            with open(model_dir / "calibrated_predictions.json", "w", encoding="utf-8") as f:
                 json.dump(calibrated_preds, f, indent=2)
 
-            with open(dest / "metrics.json", "w") as f:
-                json.dump(metrics, f, indent=2)
+            with open(model_dir / "metrics.json", "w", encoding="utf-8") as f:
+                json.dump(test_metrics, f, indent=2)
 
-            summary[name] = {"tau_used": tau, "metrics": metrics}
+            summary[model_name]["test_file"] = splits["test"]
+            summary[model_name]["metrics"] = test_metrics
+        else:
+            summary[model_name]["warning"] = "No paired test file found; only validation calibration exported."
 
     # Save summary
-    with open(out_dir / "summary.json", "w") as f:
+    with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     print(f"Calibration parity outputs saved to: {out_dir}")
